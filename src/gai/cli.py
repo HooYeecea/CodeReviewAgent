@@ -20,15 +20,20 @@ from gai.git_ops import (
     push as git_push,
     short_status,
 )
+from gai.help_i18n import H
 from gai.llm.client import LLMError
 from gai.report import export_report, render_report, run_report
 from gai.review import render_review, run_review
 
 app = typer.Typer(
     name="gai",
-    help="Local Git commit & code review agent.",
+    help=H(
+        "Local Git commit & code review agent.",
+        "本地 Git 提交与代码审查 Agent。",
+    ),
     no_args_is_help=True,
     add_completion=False,
+    context_settings={"help_option_names": ["-h", "--help"]},
 )
 console = Console()
 err_console = Console(stderr=True)
@@ -46,30 +51,56 @@ def main(
         False,
         "--version",
         "-V",
-        help="Show version and exit.",
+        help=H("Show version and exit.", "显示版本并退出。"),
         callback=_version_callback,
         is_eager=True,
-    ),
-) -> None:
-    """gai — AI-assisted local git commit & code review."""
-
-
-@app.command("review")
-def review_cmd(
-    as_json: bool = typer.Option(
-        False,
-        "--json",
-        help="Print structured JSON (for editors / VS Code integration).",
-    ),
-    message_only: bool = typer.Option(
-        False,
-        "--message-only",
-        help="Ask the model mainly for a commit message.",
     ),
     cn: bool = typer.Option(
         False,
         "--cn",
-        help="Output review findings and summary in Simplified Chinese.",
+        help=H(
+            "Show help in Simplified Chinese (use with -h/--help). "
+            "Also enables Chinese output on subcommands that support it.",
+            "与 -h/--help 联用时显示中文帮助；在支持的子命令中同时启用中文输出。",
+        ),
+        is_eager=True,
+    ),
+) -> None:
+    """gai — AI-assisted local git commit & code review."""
+    _ = cn  # consumed for help language via argv; subcommands read their own --cn
+
+
+@app.command(
+    "review",
+    help=H(
+        "Review staged changes without committing.",
+        "审查已暂存变更（不提交）。",
+    ),
+)
+def review_cmd(
+    as_json: bool = typer.Option(
+        False,
+        "--json",
+        help=H(
+            "Print structured JSON (for editors / VS Code integration).",
+            "输出结构化 JSON（供编辑器 / 插件复用）。",
+        ),
+    ),
+    message_only: bool = typer.Option(
+        False,
+        "--message-only",
+        help=H(
+            "Ask the model mainly for a commit message.",
+            "主要让模型生成提交信息。",
+        ),
+    ),
+    cn: bool = typer.Option(
+        False,
+        "--cn",
+        help=H(
+            "Output review findings and summary in Simplified Chinese.",
+            "审查结论与摘要使用简体中文；与 -h 联用时显示中文帮助。",
+        ),
     ),
 ) -> None:
     """Review staged changes without committing."""
@@ -100,45 +131,69 @@ def review_cmd(
         raise typer.Exit(code=1) from exc
 
 
-@app.command("commit")
+@app.command(
+    "commit",
+    help=H(
+        "Review staged changes, suggest a commit message, then confirm and commit.",
+        "审查已暂存变更，建议提交信息，确认后提交。",
+    ),
+)
 def commit_cmd(
     message: Optional[str] = typer.Option(
         None,
         "--message",
         "-m",
-        help="Use this commit message and skip AI message generation.",
+        help=H(
+            "Use this commit message and skip AI message generation.",
+            "使用指定提交信息，跳过 AI 生成 Message。",
+        ),
     ),
     yes: bool = typer.Option(
         False,
         "--yes",
         "-y",
-        help="Skip interactive confirmation.",
+        help=H("Skip interactive confirmation.", "跳过交互确认。"),
     ),
     no_review: bool = typer.Option(
         False,
         "--no-review",
-        help="Skip code review; only generate (or use) the commit message.",
+        help=H(
+            "Skip code review; only generate (or use) the commit message.",
+            "跳过代码审查，只生成（或使用）提交信息。",
+        ),
     ),
     no_ai: bool = typer.Option(
         False,
         "--no-ai",
-        help="Skip all AI calls. Requires --message.",
+        help=H(
+            "Skip all AI calls. Requires --message.",
+            "完全跳过 AI，必须同时提供 --message / -m。",
+        ),
     ),
     cn: bool = typer.Option(
         False,
         "--cn",
-        help="Output review findings and summary in Simplified Chinese.",
+        help=H(
+            "Output review findings and summary in Simplified Chinese.",
+            "审查与确认文案使用简体中文；与 -h 联用时显示中文帮助。",
+        ),
     ),
     do_push: bool = typer.Option(
         False,
         "--push",
-        help="After a successful commit, push to the configured remote.",
+        help=H(
+            "After a successful commit, push to the configured remote.",
+            "提交成功后推送到已配置的远程仓库。",
+        ),
     ),
     remote: Optional[str] = typer.Option(
         None,
         "--remote",
         "-r",
-        help="Remote name for --push (default: origin if present).",
+        help=H(
+            "Remote name for --push (default: origin if present).",
+            "配合 --push 指定远程名（默认优先 origin）。",
+        ),
     ),
 ) -> None:
     """Review staged changes, suggest a commit message, then confirm and commit."""
@@ -337,30 +392,45 @@ def _do_push(
     console.print(f"[green]{done}[/green]")
 
 
-@app.command("push")
+@app.command(
+    "push",
+    help=H(
+        "Push the current branch to a configured remote (remote must already exist).",
+        "将当前分支推送到已配置的远程仓库（需已存在 remote）。",
+    ),
+)
 def push_cmd(
     remote: Optional[str] = typer.Option(
         None,
         "--remote",
         "-r",
-        help="Remote name (default: origin if present).",
+        help=H(
+            "Remote name (default: origin if present).",
+            "远程名（默认优先 origin）。",
+        ),
     ),
     yes: bool = typer.Option(
         False,
         "--yes",
         "-y",
-        help="Skip interactive confirmation.",
+        help=H("Skip interactive confirmation.", "跳过交互确认。"),
     ),
     set_upstream: bool = typer.Option(
         False,
         "--set-upstream",
         "-u",
-        help="Force git push -u even if upstream already exists.",
+        help=H(
+            "Force git push -u even if upstream already exists.",
+            "强制 git push -u（即使已有上游）。",
+        ),
     ),
     cn: bool = typer.Option(
         False,
         "--cn",
-        help="Use Simplified Chinese prompts.",
+        help=H(
+            "Use Simplified Chinese prompts.",
+            "使用简体中文提示；与 -h 联用时显示中文帮助。",
+        ),
     ),
 ) -> None:
     """Push the current branch to a configured remote (remote must already exist)."""
@@ -381,66 +451,98 @@ def push_cmd(
         raise typer.Exit(code=130) from None
 
 
-@app.command("report")
+@app.command(
+    "report",
+    help=H(
+        "Summarize git commits into a paste-ready work report.",
+        "根据提交记录生成可粘贴的工作总结。",
+    ),
+)
 def report_cmd(
     since: str = typer.Option(
         "7d",
         "--since",
         "-s",
-        help="Start of range: 7d / 2w / 2026-09-01 / alltime (default: 7d).",
+        help=H(
+            "Start of range: 7d / 2w / 2026-09-01 / alltime (default: 7d).",
+            "起始范围：7d / 2w / 2026-09-01 / alltime（默认 7d）。",
+        ),
     ),
     until: Optional[str] = typer.Option(
         None,
         "--until",
         "-u",
-        help="End of range (YYYY-MM-DD or git-compatible date).",
+        help=H(
+            "End of range (YYYY-MM-DD or git-compatible date).",
+            "结束范围（YYYY-MM-DD 或 git 可识别日期）。",
+        ),
     ),
     author: Optional[str] = typer.Option(
         None,
         "--author",
         "-a",
-        help="Filter by author. Use 'me' for current git user.",
+        help=H(
+            "Filter by author. Use 'me' for current git user.",
+            "按作者过滤；me 表示当前 git 用户。",
+        ),
     ),
     max_count: int = typer.Option(
         100,
         "--max-count",
         "-n",
-        help="Max commits to include (alltime default becomes 500 if left at 100).",
+        help=H(
+            "Max commits to include (alltime default becomes 500 if left at 100).",
+            "最多纳入提交数（alltime 且仍为 100 时自动升为 500）。",
+        ),
     ),
     no_stat: bool = typer.Option(
         False,
         "--no-stat",
-        help="Do not include git shortstat in the prompt.",
+        help=H(
+            "Do not include git shortstat in the prompt.",
+            "不把 shortstat 送给模型。",
+        ),
     ),
     alltime: bool = typer.Option(
         False,
         "--alltime",
-        help="Summarize the full history (no --since filter). Same as --since alltime.",
+        help=H(
+            "Summarize the full history (no --since filter). Same as --since alltime.",
+            "总结全部历史（不加 since 过滤），等价于 --since alltime。",
+        ),
     ),
     per: bool = typer.Option(
         False,
         "--per",
-        help="In team mode, also list concrete work per contributor.",
+        help=H(
+            "In team mode, also list concrete work per contributor.",
+            "团队模式下按人列出具体完成内容。",
+        ),
     ),
     out: Optional[str] = typer.Option(
         None,
         "--out",
         "-o",
-        help=(
+        help=H(
             "Export Markdown. Bare -o → current dir + gai-report-YYYY-MM-DD.md; "
-            "missing dirs are created; invalid format falls back to cwd."
+            "missing dirs are created; invalid format falls back to cwd.",
+            "导出 Markdown。只写 -o → 当前目录 + gai-report-日期.md；"
+            "缺目录自动创建；路径格式非法则回退当前目录。",
         ),
         flag_value=".",
     ),
     as_json: bool = typer.Option(
         False,
         "--json",
-        help="Print structured JSON.",
+        help=H("Print structured JSON.", "输出结构化 JSON。"),
     ),
     cn: bool = typer.Option(
         False,
         "--cn",
-        help="Write the work report in Simplified Chinese.",
+        help=H(
+            "Write the work report in Simplified Chinese.",
+            "用简体中文写总结；与 -h 联用时显示中文帮助。",
+        ),
     ),
 ) -> None:
     """Summarize git commits into a paste-ready work report."""
@@ -507,28 +609,64 @@ def report_cmd(
         raise typer.Exit(code=1) from exc
 
 
-@app.command("config")
+@app.command(
+    "config",
+    help=H(
+        "View or update ~/.gai/config.toml.",
+        "查看或更新 ~/.gai/config.toml。",
+    ),
+)
 def config_cmd(
     show: bool = typer.Option(
         False,
         "--show",
-        help="Show current effective settings (secrets masked).",
+        help=H(
+            "Show current effective settings (secrets masked).",
+            "显示当前生效配置（密钥已掩码）。",
+        ),
     ),
-    api_key: Optional[str] = typer.Option(None, "--api-key", help="Set API key."),
+    api_key: Optional[str] = typer.Option(
+        None,
+        "--api-key",
+        help=H("Set API key.", "设置 API Key。"),
+    ),
     base_url: Optional[str] = typer.Option(
         None,
         "--base-url",
-        help="Set OpenAI-compatible API base URL.",
+        help=H(
+            "Set OpenAI-compatible API base URL.",
+            "设置 OpenAI 兼容 API Base URL。",
+        ),
     ),
-    model: Optional[str] = typer.Option(None, "--model", help="Set model name."),
-    timeout: Optional[float] = typer.Option(None, "--timeout", help="HTTP timeout seconds."),
+    model: Optional[str] = typer.Option(
+        None,
+        "--model",
+        help=H("Set model name.", "设置模型名。"),
+    ),
+    timeout: Optional[float] = typer.Option(
+        None,
+        "--timeout",
+        help=H("HTTP timeout seconds.", "HTTP 超时秒数。"),
+    ),
     max_diff_chars: Optional[int] = typer.Option(
         None,
         "--max-diff-chars",
-        help="Max staged-diff characters sent to the model.",
+        help=H(
+            "Max staged-diff characters sent to the model.",
+            "送入模型的文本最大字符数。",
+        ),
+    ),
+    cn: bool = typer.Option(
+        False,
+        "--cn",
+        help=H(
+            "Show help in Simplified Chinese (use with -h/--help).",
+            "与 -h/--help 联用时显示中文帮助。",
+        ),
     ),
 ) -> None:
     """View or update ~/.gai/config.toml."""
+    _ = cn
     updates = {
         "api_key": api_key,
         "base_url": base_url,

@@ -13,7 +13,10 @@ python -m pip install -e ".[dev]"
 
 ```bash
 gai --help
+gai -h                 # 与 --help 相同
+gai -h --cn            # 中文帮助
 gai --version
+gai commit -h --cn     # 子命令中文帮助
 ```
 
 安装后会在当前 Python 的 `Scripts` 目录生成 `gai` 启动器。只要该目录在 PATH 中，即可在任意 git 仓库目录使用（无需每个项目再装一次）。
