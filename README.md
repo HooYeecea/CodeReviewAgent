@@ -17,7 +17,16 @@ gai -h                 # 与 --help 相同
 gai -h --cn            # 中文帮助
 gai --version
 gai commit -h --cn     # 子命令中文帮助
+gai report -h --cn
+gai push -h --cn
+gai config -h --cn
 ```
+
+帮助说明：
+
+- 所有命令支持 `-h` / `--help`
+- 与 `--cn` 联用时，帮助文案为简体中文（如 `gai -h --cn`、`gai commit -h --cn`）
+- 子命令上的 `--cn` 仍同时控制实际输出语言（审查 / 报告 / 推送提示等）
 
 安装后会在当前 Python 的 `Scripts` 目录生成 `gai` 启动器。只要该目录在 PATH 中，即可在任意 git 仓库目录使用（无需每个项目再装一次）。
 
