@@ -1,6 +1,6 @@
 # gai — Local Git Commit & Code Review Agent
 
-本地 CLI：对 **staged** 变更做 AI Code Review，生成 Conventional Commits 提交信息，确认后再执行 `git commit`。
+本地 CLI：对 **staged** 变更做 AI Code Review、生成 Conventional Commits 提交信息，并可根据提交记录生成**工作总结**（写周报/日报用）。
 
 ## 安装
 
@@ -32,7 +32,7 @@ gai --version
 | `GAI_BASE_URL` 或 `OPENAI_BASE_URL` | API Base URL | `https://api.openai.com/v1` |
 | `GAI_MODEL` | 模型名 | `gpt-4o-mini` |
 | `GAI_TIMEOUT` | 请求超时（秒） | `60` |
-| `GAI_MAX_DIFF_CHARS` | 送入模型的 diff 最大字符数 | `80000` |
+| `GAI_MAX_DIFF_CHARS` | 送入模型的文本最大字符数 | `80000` |
 
 Windows：在「系统属性 → 环境变量 → 用户变量」中新建上述变量。修改后需**重新打开**终端 / IDE 才会生效。
 
@@ -55,22 +55,28 @@ gai config --show
 
 ## 日常用法
 
-必须在 **git 仓库**目录下使用，且只审查已暂存内容：
+必须在 **git 仓库**目录下使用。
+
+### 提交前审查
+
+只审查 **已暂存** 内容：
 
 ```bash
-git add .                 # 先暂存
+git add .
 gai review                # 只审查，不提交
 gai commit                # 审查 → 建议 Message → 确认 → 提交
-gai review --cn           # 中文审查结果
-gai commit --cn           # 中文审查 + 中文交互文案
+gai review --cn
+gai commit --cn
 ```
 
-`gai commit` 流程：
+### 根据提交记录写工作总结
 
-1. 打印 Review（严重度 / 位置 / 问题 / 建议）
-2. 展示建议的 Commit Message
-3. 询问是否采纳并提交（`--cn` 时为中文提示）
-4. 确认后执行 `git commit -m "..."`
+```bash
+gai report --cn                    # 默认最近 7 天，中文周报风格
+gai report --since 14d --cn        # 最近 14 天
+gai report --since 2026-09-01 --until 2026-09-23 --cn
+gai report --author me --cn        # 只看当前 git 用户的提交
+```
 
 ## 命令参考
 
@@ -80,9 +86,9 @@ gai commit --cn           # 中文审查 + 中文交互文案
 
 | 参数 | 说明 |
 |------|------|
-| `--json` | 输出结构化 JSON（供编辑器 / 插件复用） |
+| `--json` | 输出结构化 JSON |
 | `--message-only` | 主要生成 commit message |
-| `--cn` | 审查结论与摘要用简体中文；终端表头等界面文案同步中文 |
+| `--cn` | 审查结论与摘要用简体中文 |
 
 ### `gai commit`
 
@@ -96,15 +102,32 @@ gai commit --cn           # 中文审查 + 中文交互文案
 | `--no-ai` | 完全不调 AI，必须同时带 `-m` |
 | `--cn` | 中文审查结果 + 中文确认文案 |
 
-示例：
-
 ```bash
 gai commit -y
 gai commit --no-review
 gai commit -m "fix: handle nil ptr"
 gai commit --no-ai -m "chore: release"
 gai commit --cn
-gai review --json --cn
+```
+
+### `gai report`
+
+根据 `git log` 生成可粘贴的工作总结（阶段摘要 / 重点 / 分类 / Markdown 正文）。
+
+| 参数 | 说明 |
+|------|------|
+| `-s` / `--since` | 起始范围，默认 `7d`；也支持 `2w`、`2026-09-01` |
+| `-u` / `--until` | 结束范围（可选） |
+| `-a` / `--author` | 作者过滤；`me` 表示当前 `git` 用户 |
+| `-n` / `--max-count` | 最多纳入的提交数，默认 `100` |
+| `--no-stat` | 不把 shortstat 送给模型 |
+| `--json` | 输出结构化 JSON |
+| `--cn` | 用简体中文写总结（适合直接贴进周报） |
+
+```bash
+gai report --cn
+gai report --since 7d --author me --cn
+gai report --since 2026-09-01 --until 2026-09-23 --json
 ```
 
 ### `gai config`
@@ -118,15 +141,15 @@ gai review --json --cn
 | `--base-url` | 设置 API Base URL |
 | `--model` | 设置模型名 |
 | `--timeout` | HTTP 超时秒数 |
-| `--max-diff-chars` | diff 截断上限 |
+| `--max-diff-chars` | 送入模型的文本截断上限 |
 
 ## 设计要点
 
-- **只看 staged diff**（`git diff --cached`），与真正提交内容一致；未 `git add` 会提示先暂存。
+- **审查/提交**：只看 staged diff（`git diff --cached`）；未 `git add` 会提示先暂存。
+- **工作总结**：读 `git log`（默认排除 merge），结合 subject + shortstat 归纳，不编造 log 里没有的工作。
 - **不拦截原生 `git commit`**：可用 `--no-ai -m` 或直接 `git commit` 兜底。
-- Core（`review.py` / `git_ops.py` / `llm/`）不依赖终端交互；CLI 只负责展示与确认。
-- 默认忽略锁文件与常见二进制扩展名，避免浪费 token；超大 diff 会截断并提示。
-- `--cn` 时：`issue` / `suggestion` / `summary` 为中文；`severity` 与 Conventional Commits 的 type 仍为英文，subject 可用中文。
+- Core（`review.py` / `report.py` / `git_ops.py` / `llm/`）不依赖终端交互；CLI 只负责展示与确认。
+- 默认忽略锁文件与常见二进制扩展名；超大输入会截断并提示。
 
 ## 项目结构
 
@@ -135,10 +158,11 @@ CodeReviewAgent/
   pyproject.toml
   README.md
   src/gai/
-    cli.py           # typer 入口：review / commit / config
+    cli.py           # typer 入口：review / commit / report / config
     git_ops.py       # git subprocess 封装
     config.py        # 环境变量与 ~/.gai/config.toml
     review.py        # 审查引擎与终端渲染
+    report.py        # 提交记录 → 工作总结
     llm/
       client.py      # OpenAI 兼容客户端
       prompts.py     # Prompt 模板
@@ -151,7 +175,3 @@ CodeReviewAgent/
 python -m pip install -e ".[dev]"
 python -m pytest
 ```
-
-## 后续
-
-第二阶段可用 `gai review --json` 对接 VS Code / Cursor 插件，复用同一审查引擎。

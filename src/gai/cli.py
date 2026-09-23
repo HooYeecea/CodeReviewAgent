@@ -14,6 +14,7 @@ from gai import __version__
 from gai.config import CONFIG_FILE, load_settings, save_settings, settings_summary
 from gai.git_ops import GitError, commit as git_commit, has_staged_changes, short_status
 from gai.llm.client import LLMError
+from gai.report import render_report, run_report
 from gai.review import render_review, run_review
 
 app = typer.Typer(
@@ -231,6 +232,71 @@ def _do_commit(message: str, *, chinese: bool = False) -> None:
     git_commit(message)
     label = "已提交：" if chinese else "Committed:"
     console.print(f"[green]{label}[/green] {message}")
+
+
+@app.command("report")
+def report_cmd(
+    since: str = typer.Option(
+        "7d",
+        "--since",
+        "-s",
+        help="Start of range: 7d / 2w / 2026-09-01 (default: 7d).",
+    ),
+    until: Optional[str] = typer.Option(
+        None,
+        "--until",
+        "-u",
+        help="End of range (YYYY-MM-DD or git-compatible date).",
+    ),
+    author: Optional[str] = typer.Option(
+        None,
+        "--author",
+        "-a",
+        help="Filter by author. Use 'me' for current git user.",
+    ),
+    max_count: int = typer.Option(
+        100,
+        "--max-count",
+        "-n",
+        help="Max commits to include.",
+    ),
+    no_stat: bool = typer.Option(
+        False,
+        "--no-stat",
+        help="Do not include git shortstat in the prompt.",
+    ),
+    as_json: bool = typer.Option(
+        False,
+        "--json",
+        help="Print structured JSON.",
+    ),
+    cn: bool = typer.Option(
+        False,
+        "--cn",
+        help="Write the work report in Simplified Chinese.",
+    ),
+) -> None:
+    """Summarize git commits into a paste-ready work report."""
+    try:
+        status_text = "正在根据提交记录生成工作总结..." if cn else "Summarizing commits..."
+        with console.status(f"[bold]{status_text}[/bold]"):
+            result = run_report(
+                since=since,
+                until=until,
+                author=author,
+                max_count=max_count,
+                include_stat=not no_stat,
+                chinese=cn,
+            )
+
+        if as_json:
+            console.print_json(data=result.to_dict())
+            return
+
+        render_report(result, console, chinese=cn)
+    except (GitError, LLMError, RuntimeError) as exc:
+        err_console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
 
 
 @app.command("config")

@@ -169,3 +169,173 @@ def short_status(cwd: Path | None = None) -> str:
     if result.returncode != 0:
         raise GitError(result.stderr.strip() or "git status failed")
     return result.stdout.strip()
+
+
+@dataclass(frozen=True)
+class CommitInfo:
+    hash: str
+    author_name: str
+    author_email: str
+    date: str
+    subject: str
+    body: str = ""
+    shortstat: str = ""
+
+    def to_dict(self) -> dict:
+        return {
+            "hash": self.hash,
+            "author_name": self.author_name,
+            "author_email": self.author_email,
+            "date": self.date,
+            "subject": self.subject,
+            "body": self.body,
+            "shortstat": self.shortstat,
+        }
+
+
+_RELATIVE_SINCE = re.compile(r"^(\d+)\s*([dwmy])$", re.IGNORECASE)
+_COMMIT_MARKER = "===GAI_COMMIT==="
+
+
+def resolve_since(value: str | None) -> str | None:
+    """Normalize --since: '7d'/'1w'/'2026-09-01' → git --since argument."""
+    if value is None:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+
+    rel = _RELATIVE_SINCE.match(text)
+    if not rel:
+        return text
+
+    amount = int(rel.group(1))
+    unit = rel.group(2).lower()
+    unit_map = {
+        "d": "days",
+        "w": "weeks",
+        "m": "months",
+        "y": "years",
+    }
+    return f"{amount} {unit_map[unit]} ago"
+
+
+def current_author_filter(cwd: Path | None = None) -> str:
+    """Build --author filter for the current git user (email preferred)."""
+    ensure_repo(cwd)
+    email = run_git("config", "user.email", cwd=cwd)
+    name = run_git("config", "user.name", cwd=cwd)
+    if email.returncode == 0 and email.stdout.strip():
+        return email.stdout.strip()
+    if name.returncode == 0 and name.stdout.strip():
+        return name.stdout.strip()
+    raise GitError(
+        "Cannot resolve current user. Set git user.email/user.name "
+        "or pass --author explicitly."
+    )
+
+
+def get_commits(
+    cwd: Path | None = None,
+    *,
+    since: str | None = None,
+    until: str | None = None,
+    author: str | None = None,
+    max_count: int = 100,
+    include_stat: bool = True,
+    include_merges: bool = False,
+) -> list[CommitInfo]:
+    """Fetch commit history for work-report summarization."""
+    ensure_repo(cwd)
+    if max_count <= 0:
+        raise GitError("max_count must be positive")
+
+    pretty = (
+        f"{_COMMIT_MARKER}%n"
+        "%H%n"
+        "%an%n"
+        "%ae%n"
+        "%ad%n"
+        "%s"
+    )
+    args = [
+        "log",
+        f"--pretty=format:{pretty}",
+        "--date=short",
+        f"-n{max_count}",
+    ]
+    if not include_merges:
+        args.append("--no-merges")
+    if include_stat:
+        args.append("--shortstat")
+    if since:
+        args.append(f"--since={since}")
+    if until:
+        args.append(f"--until={until}")
+    if author:
+        args.append(f"--author={author}")
+
+    result = run_git(*args, cwd=cwd)
+    if result.returncode != 0:
+        raise GitError(result.stderr.strip() or "git log failed")
+
+    return _parse_commit_log(result.stdout)
+
+
+def _parse_commit_log(raw: str) -> list[CommitInfo]:
+    if not raw.strip():
+        return []
+
+    commits: list[CommitInfo] = []
+    chunks = raw.split(_COMMIT_MARKER)
+    for chunk in chunks:
+        block = chunk.strip()
+        if not block:
+            continue
+        nonempty = [ln.strip() for ln in block.splitlines() if ln.strip()]
+        if len(nonempty) < 5:
+            continue
+
+        commit_hash = nonempty[0]
+        author_name = nonempty[1]
+        author_email = nonempty[2]
+        date = nonempty[3]
+        subject = nonempty[4]
+        shortstat = ""
+        for ln in nonempty[5:]:
+            if "file changed" in ln or "files changed" in ln:
+                shortstat = ln
+                break
+
+        commits.append(
+            CommitInfo(
+                hash=commit_hash,
+                author_name=author_name,
+                author_email=author_email,
+                date=date,
+                subject=subject,
+                shortstat=shortstat,
+            )
+        )
+    return commits
+
+
+def format_commits_for_prompt(
+    commits: list[CommitInfo],
+    *,
+    max_chars: int | None = None,
+) -> tuple[str, bool]:
+    """Render commits into a compact text block for the LLM."""
+    lines: list[str] = []
+    for c in commits:
+        short = c.hash[:8] if c.hash else ""
+        lines.append(f"- [{c.date}] {short} {c.author_name}: {c.subject}")
+        if c.shortstat:
+            lines.append(f"  stat: {c.shortstat}")
+
+    text = "\n".join(lines)
+    truncated = False
+    if max_chars is not None and len(text) > max_chars:
+        text = text[:max_chars] + "\n\n... [commit list truncated by gai] ...\n"
+        truncated = True
+    return text, truncated

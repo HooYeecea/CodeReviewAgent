@@ -40,7 +40,7 @@ DEFAULT_IGNORE_PATTERNS = (
 
 @dataclass
 class Settings:
-    api_key: str = ""
+    api_key: str = "" #接收大模型的密钥
     base_url: str = DEFAULT_BASE_URL
     model: str = DEFAULT_MODEL
     timeout: float = DEFAULT_TIMEOUT
@@ -69,7 +69,7 @@ def load_settings() -> Settings:
 
     settings = Settings(
         api_key=str(
-            os.environ.get("GAI_API_KEY")
+            os.environ.get("GAI_API_KEY") # 获取操作系统中配置的api key
             or os.environ.get("OPENAI_API_KEY")
             or llm.get("api_key")
             or ""
