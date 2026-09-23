@@ -45,7 +45,9 @@ Your job:
 2. Summarize what was accomplished in a form suitable for a weekly/daily work report.
 3. Group related commits; ignore noise like trivial merge or empty chore when possible.
 4. Do NOT invent work that is not supported by the commits.
-5. Respond with ONLY valid JSON matching the schema. No markdown fences, no commentary.
+5. When this is a team report (no single-author filter), include participant narratives.
+6. When per-author detail is requested, fill `per_author` with concrete work per person.
+7. Respond with ONLY valid JSON matching the schema. No markdown fences, no commentary.
 
 JSON schema:
 {
@@ -57,11 +59,33 @@ JSON schema:
       "items": ["bullet point grounded in commits"]
     }
   ],
+  "participants": [
+    {
+      "name": "Author Name",
+      "email": "a@example.com",
+      "commit_count": 5,
+      "summary": "one-line contribution summary"
+    }
+  ],
+  "per_author": [
+    {
+      "name": "Author Name",
+      "email": "a@example.com",
+      "highlights": ["what they shipped"],
+      "items": ["more detailed bullets"]
+    }
+  ],
+  "contributor_count": 3,
   "report_markdown": "a paste-ready work report in Markdown (sections + bullets)",
   "commit_count": 12
 }
 
-"commit_count" should match the number of commits you were given (or note if list was truncated).
+Rules for participants / per_author:
+- `participants` is required for team reports; use empty array for single-author reports.
+- `per_author` must be filled only when per-author detail is requested; otherwise use [].
+- Prefer grounding names/emails in the commit list. commit_count should match the list.
+- `report_markdown` should already include participant overview (and per-author sections when requested).
+- `commit_count` / `contributor_count` should match the provided commits when possible.
 Keep bullets concrete and outcome-oriented, not a raw dump of commit subjects.
 """
 
@@ -114,16 +138,36 @@ def build_report_user_prompt(
     until: str | None = None,
     author: str | None = None,
     commit_count: int = 0,
+    contributor_count: int = 0,
+    participants_text: str = "",
     truncated: bool = False,
     chinese: bool = False,
+    team_mode: bool = False,
+    per_author: bool = False,
 ) -> str:
     meta: list[str] = [f"Commit count provided: {commit_count}"]
+    if contributor_count:
+        meta.append(f"Contributor count: {contributor_count}")
     if since:
         meta.append(f"Since: {since}")
     if until:
         meta.append(f"Until: {until}")
     if author:
         meta.append(f"Author filter: {author}")
+        meta.append("MODE: single-author report. Leave participants/per_author empty arrays.")
+    elif team_mode:
+        meta.append("MODE: team report. Fill participants with every contributor.")
+        if per_author:
+            meta.append(
+                "PER-AUTHOR: required. Fill per_author with concrete work for each person."
+            )
+        else:
+            meta.append(
+                "PER-AUTHOR: not requested. Set per_author to []. "
+                "Still include a short summary per participant."
+            )
+    if participants_text:
+        meta.append("Local participant stats (trust commit counts):\n" + participants_text)
     if truncated:
         meta.append(
             "NOTE: The commit list was truncated due to size; "
@@ -132,7 +176,8 @@ def build_report_user_prompt(
     if chinese:
         meta.append(
             "LANGUAGE: Write period_summary, highlights, category names, "
-            "category items, and report_markdown in Simplified Chinese. "
+            "category items, participant summaries, per_author text, "
+            "and report_markdown in Simplified Chinese. "
             "report_markdown should be ready to paste into a Chinese work report."
         )
 

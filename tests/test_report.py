@@ -1,4 +1,6 @@
-"""Tests for report parsing and since-date helpers."""
+"""Tests for report parsing, participants, and output path helpers."""
+
+from pathlib import Path
 
 from gai.git_ops import (
     CommitInfo,
@@ -7,7 +9,12 @@ from gai.git_ops import (
     resolve_since,
     _parse_commit_log,
 )
-from gai.report import parse_report_response
+from gai.report import (
+    build_export_markdown,
+    collect_participant_stats,
+    parse_report_response,
+    resolve_report_output_path,
+)
 
 
 def test_resolve_since_relative():
@@ -72,6 +79,21 @@ def test_format_commits_for_prompt_truncates():
     assert "truncated" in text
 
 
+def test_collect_participant_stats():
+    commits = [
+        CommitInfo("h1", "Alice", "a@e.com", "2026-09-01", "feat: a"),
+        CommitInfo("h2", "Alice", "a@e.com", "2026-09-02", "fix: b"),
+        CommitInfo("h3", "Bob", "b@e.com", "2026-09-03", "chore: c"),
+    ]
+    stats = collect_participant_stats(commits)
+    assert len(stats) == 2
+    assert stats[0].name == "Alice"
+    assert stats[0].commit_count == 2
+    assert stats[0].share == 66.7
+    assert stats[1].name == "Bob"
+    assert stats[1].commit_count == 1
+
+
 def test_parse_report_response_ok():
     raw = """
     {
@@ -80,6 +102,13 @@ def test_parse_report_response_ok():
       "categories": [
         {"name": "Features", "items": ["Work report from git log"]}
       ],
+      "participants": [
+        {"name": "Alice", "email": "a@e.com", "commit_count": 2, "summary": "built report"}
+      ],
+      "per_author": [
+        {"name": "Alice", "email": "a@e.com", "highlights": ["report"], "items": ["CLI"]}
+      ],
+      "contributor_count": 1,
       "report_markdown": "## Done\\n- report",
       "commit_count": 3
     }
@@ -90,6 +119,8 @@ def test_parse_report_response_ok():
     assert result.highlights == ["Added gai report"]
     assert result.categories[0].name == "Features"
     assert result.commit_count == 3
+    assert result.participants[0].summary == "built report"
+    assert result.per_author[0].highlights == ["report"]
 
 
 def test_parse_report_response_fallback():
@@ -97,3 +128,46 @@ def test_parse_report_response_fallback():
     result = parse_report_response(raw)
     assert result.parsed_ok is False
     assert "paragraph" in result.report_markdown
+
+
+def test_resolve_report_output_path_filename(tmp_path: Path):
+    target, warning = resolve_report_output_path("week.md", cwd=tmp_path)
+    assert warning is None
+    assert target == (tmp_path / "week.md").resolve()
+
+
+def test_resolve_report_output_path_missing_parent_fallback(tmp_path: Path):
+    bad = tmp_path / "nope" / "nested" / "week.md"
+    target, warning = resolve_report_output_path(str(bad), cwd=tmp_path)
+    assert warning is not None
+    assert "not found" in warning.lower() or "Directory" in warning
+    assert target == (tmp_path / "week.md").resolve()
+
+
+def test_resolve_report_output_path_directory(tmp_path: Path):
+    reports = tmp_path / "reports"
+    reports.mkdir()
+    target, warning = resolve_report_output_path(str(reports), cwd=tmp_path)
+    assert warning is None
+    assert target.parent == reports.resolve()
+    assert target.name.startswith("gai-report-")
+    assert target.suffix == ".md"
+
+
+def test_build_export_markdown_includes_participants():
+    from gai.report import ParticipantStat, ReportResult
+
+    result = ReportResult(
+        period_summary="did stuff",
+        team_mode=True,
+        contributor_count=1,
+        commit_count=2,
+        participants=[
+            ParticipantStat("Alice", "a@e.com", 2, 100.0, "built feature"),
+        ],
+        report_markdown="## body",
+    )
+    md = build_export_markdown(result, chinese=True)
+    assert "参与者" in md
+    assert "Alice" in md
+    assert "built feature" in md

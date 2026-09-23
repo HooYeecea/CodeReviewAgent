@@ -21,7 +21,7 @@ from gai.git_ops import (
     short_status,
 )
 from gai.llm.client import LLMError
-from gai.report import render_report, run_report
+from gai.report import export_report, render_report, run_report
 from gai.review import render_review, run_review
 
 app = typer.Typer(
@@ -417,6 +417,17 @@ def report_cmd(
         "--alltime",
         help="Summarize the full history (no --since filter). Same as --since alltime.",
     ),
+    per: bool = typer.Option(
+        False,
+        "--per",
+        help="In team mode, also list concrete work per contributor.",
+    ),
+    out: Optional[str] = typer.Option(
+        None,
+        "--out",
+        "-o",
+        help="Write Markdown report to a file/dir (default: current directory).",
+    ),
     as_json: bool = typer.Option(
         False,
         "--json",
@@ -443,6 +454,14 @@ def report_cmd(
                 err_console.print(f"[yellow]{tip}[/yellow]")
             since_arg = "alltime"
 
+        if per and author:
+            tip = (
+                "--per 在指定 --author 时无效（单人报告已是个人明细）。"
+                if cn
+                else "--per is ignored when --author is set (single-author report)."
+            )
+            err_console.print(f"[dim]{tip}[/dim]")
+
         status_text = "正在根据提交记录生成工作总结..." if cn else "Summarizing commits..."
         with console.status(f"[bold]{status_text}[/bold]"):
             result = run_report(
@@ -458,14 +477,30 @@ def report_cmd(
                     "all_time",
                     "all",
                 },
+                per_author=per,
             )
 
         if as_json:
             console.print_json(data=result.to_dict())
-            return
+        else:
+            render_report(result, console, chinese=cn)
 
-        render_report(result, console, chinese=cn)
-    except (GitError, LLMError, RuntimeError) as exc:
+        if out:
+            path, warning = export_report(result, out, chinese=cn)
+            if warning:
+                tip = (
+                    f"警告：{warning}"
+                    if cn
+                    else f"Warning: {warning}"
+                )
+                err_console.print(f"[yellow]{tip}[/yellow]")
+            saved = (
+                f"已写入报告：{path}"
+                if cn
+                else f"Wrote report: {path}"
+            )
+            console.print(f"[green]{saved}[/green]")
+    except (GitError, LLMError, RuntimeError, ValueError, OSError) as exc:
         err_console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(code=1) from exc
 

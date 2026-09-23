@@ -75,19 +75,25 @@ gai push -y --cn
 ### 根据提交记录写工作总结
 
 ```bash
-gai report --cn                              # 默认最近 7 天（仓库内全部作者）
-gai report --since 14d --cn                  # 最近 14 天
-gai report --author me --cn                  # 只看自己的提交（当前 git 用户）
+gai report --cn                              # 默认最近 7 天（团队总览，含参与者）
+gai report --cn --per                        # 团队总览 + 按人明细
+gai report --since 14d --cn
+gai report --author me --cn                  # 只看自己的提交
 gai report --since 2026-09-01 --until 2026-09-23 --author me --cn
-# ↑ 自己在某个精确时段的工作报告（写周报常用）
-gai report --alltime --cn                    # 全部历史（简写）
-gai report --alltime --author me --cn        # 自己的全部历史
-gai report --since alltime --author me --cn  # 与上一行等价
+gai report --alltime --cn
+gai report --alltime --author me --cn
+gai report --since alltime --author me --cn
+gai report --cn --per -o 周报.md             # 导出到当前目录
+gai report --cn -o .\reports\                # 目录不存在则回退当前目录并提示
 ```
 
 `--author me` 会按本仓库 `git config user.email`（否则 `user.name`）过滤。也可写具体名字/邮箱，例如 `--author "张三"`。
 
-`--since` 支持相对时间 `7d` / `2w` / `1m`、绝对日期 `2026-09-01`，以及 `alltime`（全部历史）。`--alltime` 与 `--since alltime` 等价；若同时写了具体 `--since`，以 `--alltime` 为准。
+未指定 `--author` 时为**团队报告**：会列出参与人数、每人提交数与占比；加 `--per` 再按人展开具体工作。
+
+`--since` 支持相对时间 `7d` / `2w` / `1m`、绝对日期 `2026-09-01`，以及 `alltime`。`--alltime` 与 `--since alltime` 等价。
+
+`-o` / `--out` 导出 Markdown：文件名默认写到当前目录；也可指定完整路径或目录（目录下自动生成 `gai-report-YYYY-MM-DD.md`）。父目录不存在时会警告并回退到当前目录。
 
 ## 命令参考
 
@@ -157,17 +163,22 @@ gai push -r origin -u --cn
 | `-a` / `--author` | 作者过滤；`me` 表示当前 `git` 用户 |
 | `-n` / `--max-count` | 最多纳入的提交数，默认 `100`（`--alltime` 时自动升为 `500`） |
 | `--alltime` | 全部历史（等价于 `--since alltime`） |
+| `--per` | 团队模式下按人列出具体完成内容 |
+| `-o` / `--out` | 导出 Markdown 到文件或目录（默认当前目录；路径无效则回退） |
 | `--no-stat` | 不把 shortstat 送给模型 |
 | `--json` | 输出结构化 JSON |
 | `--cn` | 用简体中文写总结（适合直接贴进周报） |
 
 ```bash
 gai report --cn
+gai report --cn --per
 gai report --since 7d --author me --cn
 gai report --since 2026-09-01 --until 2026-09-23 --author me --cn
 gai report --alltime --cn
 gai report --alltime --author me --cn
 gai report --since alltime --author me --cn
+gai report --cn --per -o 周报.md
+gai report --cn -o D:\reports\week.md
 gai report --since 2026-09-01 --until 2026-09-23 --json
 ```
 
