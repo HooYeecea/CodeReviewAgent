@@ -74,7 +74,8 @@ gai config --show
 只审查 **已暂存** 内容：
 
 ```bash
-git add .
+gai add                   # 包装 git add .（也可用 git add .）
+gai add src/              # git add src/
 gai review                # 只审查，不提交
 gai commit                # 审查 → 建议 Message → 确认 → 提交
 gai review --cn
@@ -82,7 +83,12 @@ gai commit --cn
 gai commit --cn --push          # 提交成功后推送到已配置的 remote
 gai push --cn                   # 仅推送当前分支
 gai push -y --cn
+gai add --cn -t                 # 暂存并打印底层 git 链路
+gai commit --cn --trace         # 提交过程打印 git 命令链路
+gai config --show --trace --cn  # 未跑 git 时提示「本次未涉及 git 操作」
 ```
+
+需要看清底层执行了哪些 git 时，加 `--trace` / `-t`。若本次没有跑过 git，会提示「本次未涉及 git 操作」（支持 `--cn`）。
 
 ### 根据提交记录写工作总结
 
@@ -117,6 +123,23 @@ gai report --author me --cn -o 我的周报.md   # 单人报告也可导出
 
 ## 命令参考
 
+### `gai add`
+
+暂存文件（包装 `git add`）。未给路径时默认 `git add .`。
+
+| 参数 | 说明 |
+|------|------|
+| `PATHS...` | 要暂存的路径；省略则为 `.` |
+| `--cn` | 中文提示 |
+| `-t` / `--trace` | 打印底层 git 命令链路 |
+
+```bash
+gai add
+gai add .
+gai add src/ README.md
+gai add --cn -t
+```
+
 ### `gai review`
 
 只审查，不提交。
@@ -126,6 +149,7 @@ gai report --author me --cn -o 我的周报.md   # 单人报告也可导出
 | `--json` | 输出结构化 JSON |
 | `--message-only` | 主要生成 commit message |
 | `--cn` | 审查结论与摘要用简体中文 |
+| `-t` / `--trace` | 打印底层 git 命令链路 |
 
 ### `gai commit`
 
@@ -140,6 +164,7 @@ gai report --author me --cn -o 我的周报.md   # 单人报告也可导出
 | `--cn` | 中文审查结果 + 中文确认文案 |
 | `--push` | 提交成功后推送到已配置的远程仓库 |
 | `-r` / `--remote` | 配合 `--push` 指定远程名（默认优先 `origin`） |
+| `-t` / `--trace` | 打印底层 git 命令链路 |
 
 ```bash
 gai commit -y
@@ -161,6 +186,7 @@ gai commit -y --push -r origin
 | `-y` / `--yes` | 跳过确认 |
 | `-u` / `--set-upstream` | 强制 `git push -u` |
 | `--cn` | 中文提示文案 |
+| `-t` / `--trace` | 打印底层 git 命令链路 |
 
 若当前分支没有 upstream，会自动使用 `git push -u <remote> <branch>` 建立跟踪。
 
@@ -188,6 +214,7 @@ gai push -r origin -u --cn
 | `--no-stat` | 不把 shortstat 送给模型 |
 | `--json` | 输出结构化 JSON |
 | `--cn` | 用简体中文写总结（适合直接贴进周报） |
+| `-t` / `--trace` | 打印底层 git 命令链路（如 git log） |
 
 ```bash
 gai report --cn
@@ -215,14 +242,18 @@ gai report --since 2026-09-01 --until 2026-09-23 --json
 | `--base-url` | 设置 API Base URL |
 | `--model` | 设置模型名 |
 | `--timeout` | HTTP 超时秒数 |
-| `--max-diff-chars` | 送入模型的文本截断上限 |
+| `--max-diff-chars` | 送入模型的文本最大字符数 |
+| `--cn` | 与 `-h` 联用显示中文帮助 |
+| `-t` / `--trace` | 若未执行 git，提示「本次未涉及 git 操作」 |
 
 ## 设计要点
 
-- **审查/提交**：只看 staged diff（`git diff --cached`）；未 `git add` 会提示先暂存。
+- **暂存**：可用 `gai add`（默认 `.`）保持指令前缀一致；也仍可用原生 `git add`。
+- **审查/提交**：只看 staged diff（`git diff --cached`）；未暂存会提示先 `gai add`。
 - **推送**：要求已配置 remote；无 remote / 无权限时给出明确错误，可用原生 `git push` 兜底。
 - **工作总结**：读 `git log`（默认排除 merge），结合 subject + shortstat 归纳；报告会标明指令对应的具体起止日期。
 - **导出**：`-o` 支持裸参数默认命名；缺目录自动创建；非法路径回退当前目录；成功后打印完整路径。
+- **`--trace` / `-t`**：打印本次实际执行的 git 命令；若未执行任何 git，提示未涉及 git 操作（支持 `--cn`）。
 - **不拦截原生 git**：可用 `--no-ai -m` 或直接 `git commit` / `git push` 兜底。
 - Core（`review.py` / `report.py` / `git_ops.py` / `llm/`）不依赖终端交互；CLI 只负责展示与确认。
 - 默认忽略锁文件与常见二进制扩展名；超大输入会截断并提示。
@@ -234,7 +265,7 @@ CodeReviewAgent/
   pyproject.toml
   README.md
   src/gai/
-    cli.py           # typer 入口：review / commit / push / report / config
+    cli.py           # typer 入口：add / review / commit / push / report / config
     git_ops.py       # git subprocess 封装
     config.py        # 环境变量与 ~/.gai/config.toml
     review.py        # 审查引擎与终端渲染

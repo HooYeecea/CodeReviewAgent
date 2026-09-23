@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import fnmatch
 import re
+import shlex
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,7 +21,38 @@ class GitResult:
     returncode: int
 
 
+_TRACE_ENABLED = False
+_TRACE_LOG: list[str] = []
+
+
+def set_tracing(enabled: bool) -> None:
+    """Enable/disable git command tracing for the current invocation."""
+    global _TRACE_ENABLED, _TRACE_LOG
+    _TRACE_ENABLED = bool(enabled)
+    _TRACE_LOG = []
+
+
+def get_traced_commands() -> list[str]:
+    return list(_TRACE_LOG)
+
+
+def clear_trace() -> None:
+    global _TRACE_LOG
+    _TRACE_LOG = []
+
+
+def _record_trace(*args: str) -> None:
+    if not _TRACE_ENABLED:
+        return
+    try:
+        joined = shlex.join(args)
+    except Exception:
+        joined = " ".join(args)
+    _TRACE_LOG.append(f"git {joined}")
+
+
 def run_git(*args: str, cwd: Path | None = None) -> GitResult:
+    _record_trace(*args)
     try:
         completed = subprocess.run(
             ["git", *args],
@@ -161,6 +193,17 @@ def commit(message: str, cwd: Path | None = None) -> None:
     result = run_git("commit", "-m", message, cwd=cwd)
     if result.returncode != 0:
         raise GitError(result.stderr.strip() or result.stdout.strip() or "git commit failed")
+
+
+def add(paths: list[str] | tuple[str, ...] | None = None, cwd: Path | None = None) -> None:
+    """Stage files via `git add`. Defaults to `.` when paths is empty."""
+    ensure_repo(cwd)
+    targets = [p for p in (paths or []) if str(p).strip()]
+    if not targets:
+        targets = ["."]
+    result = run_git("add", "--", *targets, cwd=cwd)
+    if result.returncode != 0:
+        raise GitError(result.stderr.strip() or result.stdout.strip() or "git add failed")
 
 
 def short_status(cwd: Path | None = None) -> str:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
-from typing import Optional
+from typing import List, Optional
 
 import typer
 from rich.console import Console
@@ -14,10 +14,13 @@ from gai import __version__
 from gai.config import CONFIG_FILE, load_settings, save_settings, settings_summary
 from gai.git_ops import (
     GitError,
+    add as git_add,
     commit as git_commit,
+    get_traced_commands,
     has_staged_changes,
     plan_push,
     push as git_push,
+    set_tracing,
     short_status,
 )
 from gai.help_i18n import H
@@ -38,11 +41,39 @@ app = typer.Typer(
 console = Console()
 err_console = Console(stderr=True)
 
+_TRACE_OPT_HELP = H(
+    "Print the underlying git command chain executed by this invocation.",
+    "打印本次实际执行过的底层 git 命令链路。",
+)
+
 
 def _version_callback(value: bool) -> None:
     if value:
         console.print(f"gai {__version__}")
         raise typer.Exit()
+
+
+def _start_trace(trace: bool) -> None:
+    set_tracing(trace)
+
+
+def _print_trace(*, trace: bool, chinese: bool = False) -> None:
+    if not trace:
+        return
+    cmds = get_traced_commands()
+    if not cmds:
+        msg = (
+            "本次未涉及 git 操作。"
+            if chinese
+            else "No git commands were executed in this invocation."
+        )
+        console.print(f"[dim]{msg}[/dim]")
+        return
+    title = "Git 命令链路：" if chinese else "Git command trace:"
+    console.print()
+    console.print(f"[bold]{title}[/bold]")
+    for cmd in cmds:
+        console.print(f"  [cyan]→[/cyan] {cmd}")
 
 
 @app.callback()
@@ -68,6 +99,57 @@ def main(
 ) -> None:
     """gai — AI-assisted local git commit & code review."""
     _ = cn  # consumed for help language via argv; subcommands read their own --cn
+
+
+@app.command(
+    "add",
+    help=H(
+        "Stage files (wrapper around git add). Defaults to '.' when no path is given.",
+        "暂存文件（包装 git add）。未指定路径时默认 git add .",
+    ),
+)
+def add_cmd(
+    paths: Optional[List[str]] = typer.Argument(
+        None,
+        help=H(
+            "Paths to stage. Omit to run git add .",
+            "要暂存的路径；省略则执行 git add .",
+        ),
+    ),
+    cn: bool = typer.Option(
+        False,
+        "--cn",
+        help=H(
+            "Use Simplified Chinese messages.",
+            "使用简体中文提示；与 -h 联用时显示中文帮助。",
+        ),
+    ),
+    trace: bool = typer.Option(
+        False,
+        "--trace",
+        "-t",
+        help=_TRACE_OPT_HELP,
+    ),
+) -> None:
+    """Stage files via git add."""
+    _start_trace(trace)
+    try:
+        targets = list(paths) if paths else ["."]
+        git_add(targets)
+        msg = (
+            f"已暂存：{' '.join(targets)}"
+            if cn
+            else f"Staged: {' '.join(targets)}"
+        )
+        console.print(f"[green]{msg}[/green]")
+        status = short_status()
+        if status:
+            console.print("[dim]" + status + "[/dim]")
+    except (GitError, RuntimeError) as exc:
+        err_console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+    finally:
+        _print_trace(trace=trace, chinese=cn)
 
 
 @app.command(
@@ -102,11 +184,23 @@ def review_cmd(
             "审查结论与摘要使用简体中文；与 -h 联用时显示中文帮助。",
         ),
     ),
+    trace: bool = typer.Option(
+        False,
+        "--trace",
+        "-t",
+        help=_TRACE_OPT_HELP,
+    ),
 ) -> None:
     """Review staged changes without committing."""
+    _start_trace(trace)
     try:
         if not has_staged_changes():
-            err_console.print("[red]No staged changes. Run `git add` first.[/red]")
+            tip = (
+                "没有已暂存变更。请先运行 `gai add` / `gai add .`。"
+                if cn
+                else "No staged changes. Run `gai add` / `gai add .` first."
+            )
+            err_console.print(f"[red]{tip}[/red]")
             raise typer.Exit(code=1)
 
         status_text = "正在调用大模型审查..." if cn else "Calling LLM for code review..."
@@ -119,16 +213,19 @@ def review_cmd(
 
         if as_json:
             console.print_json(data=result.to_dict())
-            return
-
-        render_review(result, console, chinese=cn)
-        if result.commit_message:
-            console.print()
-            label = "建议的提交信息：" if cn else "Suggested commit message:"
-            console.print(f"[bold]{label}[/bold] {result.commit_message}")
+        else:
+            render_review(result, console, chinese=cn)
+            if result.commit_message:
+                console.print()
+                label = "建议的提交信息：" if cn else "Suggested commit message:"
+                console.print(f"[bold]{label}[/bold] {result.commit_message}")
     except (GitError, LLMError, RuntimeError) as exc:
         err_console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(code=1) from exc
+    except typer.Exit:
+        raise
+    finally:
+        _print_trace(trace=trace, chinese=cn)
 
 
 @app.command(
@@ -195,11 +292,23 @@ def commit_cmd(
             "配合 --push 指定远程名（默认优先 origin）。",
         ),
     ),
+    trace: bool = typer.Option(
+        False,
+        "--trace",
+        "-t",
+        help=_TRACE_OPT_HELP,
+    ),
 ) -> None:
     """Review staged changes, suggest a commit message, then confirm and commit."""
+    _start_trace(trace)
     try:
         if not has_staged_changes():
-            err_console.print("[red]No staged changes. Run `git add` first.[/red]")
+            tip = (
+                "没有已暂存变更。请先运行 `gai add` / `gai add .`。"
+                if cn
+                else "No staged changes. Run `gai add` / `gai add .` first."
+            )
+            err_console.print(f"[red]{tip}[/red]")
             status = short_status()
             if status:
                 err_console.print("[dim]Working tree:[/dim]")
@@ -319,6 +428,8 @@ def commit_cmd(
     except KeyboardInterrupt:
         console.print("\n已取消。" if cn else "\nAborted.")
         raise typer.Exit(code=130) from None
+    finally:
+        _print_trace(trace=trace, chinese=cn)
 
 
 def _confirm_and_commit(
@@ -432,8 +543,15 @@ def push_cmd(
             "使用简体中文提示；与 -h 联用时显示中文帮助。",
         ),
     ),
+    trace: bool = typer.Option(
+        False,
+        "--trace",
+        "-t",
+        help=_TRACE_OPT_HELP,
+    ),
 ) -> None:
     """Push the current branch to a configured remote (remote must already exist)."""
+    _start_trace(trace)
     try:
         _do_push(
             remote=remote,
@@ -449,6 +567,8 @@ def push_cmd(
     except KeyboardInterrupt:
         console.print("\n已取消。" if cn else "\nAborted.")
         raise typer.Exit(code=130) from None
+    finally:
+        _print_trace(trace=trace, chinese=cn)
 
 
 @app.command(
@@ -544,8 +664,15 @@ def report_cmd(
             "用简体中文写总结；与 -h 联用时显示中文帮助。",
         ),
     ),
+    trace: bool = typer.Option(
+        False,
+        "--trace",
+        "-t",
+        help=_TRACE_OPT_HELP,
+    ),
 ) -> None:
     """Summarize git commits into a paste-ready work report."""
+    _start_trace(trace)
     try:
         # --alltime wins over a concrete --since (except alltime token itself).
         since_arg = since
@@ -607,6 +734,8 @@ def report_cmd(
     except (GitError, LLMError, RuntimeError, ValueError, OSError) as exc:
         err_console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(code=1) from exc
+    finally:
+        _print_trace(trace=trace, chinese=cn)
 
 
 @app.command(
@@ -664,35 +793,45 @@ def config_cmd(
             "与 -h/--help 联用时显示中文帮助。",
         ),
     ),
+    trace: bool = typer.Option(
+        False,
+        "--trace",
+        "-t",
+        help=_TRACE_OPT_HELP,
+    ),
 ) -> None:
     """View or update ~/.gai/config.toml."""
     _ = cn
-    updates = {
-        "api_key": api_key,
-        "base_url": base_url,
-        "model": model,
-        "timeout": timeout,
-        "max_diff_chars": max_diff_chars,
-    }
-    if any(v is not None for v in updates.values()):
-        path = save_settings(
-            api_key=api_key,
-            base_url=base_url,
-            model=model,
-            timeout=timeout,
-            max_diff_chars=max_diff_chars,
-        )
-        console.print(f"[green]Saved[/green] {path}")
-
-    if show or all(v is None for v in updates.values()):
-        settings = load_settings()
-        summary = settings_summary(settings)
-        console.print(json.dumps(summary, indent=2, ensure_ascii=False))
-        if not CONFIG_FILE.is_file() and not settings.api_key:
-            console.print(
-                "\n[dim]Tip: set key via env GAI_API_KEY / OPENAI_API_KEY "
-                "or `gai config --api-key <key>`.[/dim]"
+    _start_trace(trace)
+    try:
+        updates = {
+            "api_key": api_key,
+            "base_url": base_url,
+            "model": model,
+            "timeout": timeout,
+            "max_diff_chars": max_diff_chars,
+        }
+        if any(v is not None for v in updates.values()):
+            path = save_settings(
+                api_key=api_key,
+                base_url=base_url,
+                model=model,
+                timeout=timeout,
+                max_diff_chars=max_diff_chars,
             )
+            console.print(f"[green]Saved[/green] {path}")
+
+        if show or all(v is None for v in updates.values()):
+            settings = load_settings()
+            summary = settings_summary(settings)
+            console.print(json.dumps(summary, indent=2, ensure_ascii=False))
+            if not CONFIG_FILE.is_file() and not settings.api_key:
+                console.print(
+                    "\n[dim]Tip: set key via env GAI_API_KEY / OPENAI_API_KEY "
+                    "or `gai config --api-key <key>`.[/dim]"
+                )
+    finally:
+        _print_trace(trace=trace, chinese=cn)
 
 
 if __name__ == "__main__":
