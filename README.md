@@ -72,11 +72,16 @@ gai commit --cn
 ### 根据提交记录写工作总结
 
 ```bash
-gai report --cn                    # 默认最近 7 天，中文周报风格
-gai report --since 14d --cn        # 最近 14 天
-gai report --since 2026-09-01 --until 2026-09-23 --cn
-gai report --author me --cn        # 只看当前 git 用户的提交
+gai report --cn                              # 默认最近 7 天（仓库内全部作者）
+gai report --since 14d --cn                  # 最近 14 天
+gai report --author me --cn                  # 只看自己的提交（当前 git 用户）
+gai report --since 2026-09-01 --until 2026-09-23 --author me --cn
+# ↑ 自己在某个精确时段的工作报告（写周报常用）
 ```
+
+`--author me` 会按本仓库 `git config user.email`（否则 `user.name`）过滤。也可写具体名字/邮箱，例如 `--author "张三"`。
+
+`--since` 支持相对时间 `7d` / `2w` / `1m`，或绝对日期 `2026-09-01`。
 
 ## 命令参考
 
@@ -127,6 +132,7 @@ gai commit --cn
 ```bash
 gai report --cn
 gai report --since 7d --author me --cn
+gai report --since 2026-09-01 --until 2026-09-23 --author me --cn
 gai report --since 2026-09-01 --until 2026-09-23 --json
 ```
 
