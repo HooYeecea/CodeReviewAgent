@@ -12,7 +12,14 @@ from rich.prompt import Confirm, Prompt
 
 from gai import __version__
 from gai.config import CONFIG_FILE, load_settings, save_settings, settings_summary
-from gai.git_ops import GitError, commit as git_commit, has_staged_changes, short_status
+from gai.git_ops import (
+    GitError,
+    commit as git_commit,
+    has_staged_changes,
+    plan_push,
+    push as git_push,
+    short_status,
+)
 from gai.llm.client import LLMError
 from gai.report import render_report, run_report
 from gai.review import render_review, run_review
@@ -122,6 +129,17 @@ def commit_cmd(
         "--cn",
         help="Output review findings and summary in Simplified Chinese.",
     ),
+    do_push: bool = typer.Option(
+        False,
+        "--push",
+        help="After a successful commit, push to the configured remote.",
+    ),
+    remote: Optional[str] = typer.Option(
+        None,
+        "--remote",
+        "-r",
+        help="Remote name for --push (default: origin if present).",
+    ),
 ) -> None:
     """Review staged changes, suggest a commit message, then confirm and commit."""
     try:
@@ -138,7 +156,13 @@ def commit_cmd(
                 err_console.print("[red]--no-ai requires --message / -m.[/red]")
                 raise typer.Exit(code=1)
             final_message = message.strip()
-            _confirm_and_commit(final_message, yes=yes, chinese=cn)
+            _confirm_and_commit(
+                final_message,
+                yes=yes,
+                chinese=cn,
+                do_push=do_push,
+                remote=remote,
+            )
             return
 
         commit_message = (message or "").strip()
@@ -184,18 +208,36 @@ def commit_cmd(
                 tip = "提交信息为空，已取消。" if cn else "Empty commit message; aborted."
                 err_console.print(f"[red]{tip}[/red]")
                 raise typer.Exit(code=1)
-            _confirm_and_commit(commit_message, yes=False, chinese=cn)
+            _confirm_and_commit(
+                commit_message,
+                yes=False,
+                chinese=cn,
+                do_push=do_push,
+                remote=remote,
+            )
             return
 
         label = "建议的提交信息：" if cn else "Suggested commit message:"
         console.print(f"[bold]{label}[/bold] {commit_message}")
         if yes:
-            _do_commit(commit_message, chinese=cn)
+            _do_commit(
+                commit_message,
+                chinese=cn,
+                do_push=do_push,
+                remote=remote,
+                yes=yes,
+            )
             return
 
         ask = "采纳该信息并提交？" if cn else "Adopt this message and commit?"
         if Confirm.ask(ask, default=True):
-            _do_commit(commit_message, chinese=cn)
+            _do_commit(
+                commit_message,
+                chinese=cn,
+                do_push=do_push,
+                remote=remote,
+                yes=yes,
+            )
             return
 
         edit_ask = (
@@ -207,7 +249,13 @@ def commit_cmd(
         if not edited:
             console.print("已取消。" if cn else "Aborted.")
             raise typer.Exit(code=0)
-        _do_commit(edited, chinese=cn)
+        _do_commit(
+            edited,
+            chinese=cn,
+            do_push=do_push,
+            remote=remote,
+            yes=yes,
+        )
     except (GitError, LLMError, RuntimeError) as exc:
         err_console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(code=1) from exc
@@ -218,20 +266,119 @@ def commit_cmd(
         raise typer.Exit(code=130) from None
 
 
-def _confirm_and_commit(message: str, *, yes: bool, chinese: bool = False) -> None:
+def _confirm_and_commit(
+    message: str,
+    *,
+    yes: bool,
+    chinese: bool = False,
+    do_push: bool = False,
+    remote: str | None = None,
+) -> None:
     label = "提交信息：" if chinese else "Commit message:"
     console.print(f"[bold]{label}[/bold] {message}")
     ask = "使用该信息提交？" if chinese else "Commit with this message?"
     if not yes and not Confirm.ask(ask, default=True):
         console.print("已取消。" if chinese else "Aborted.")
         raise typer.Exit(code=0)
-    _do_commit(message, chinese=chinese)
+    _do_commit(
+        message,
+        chinese=chinese,
+        do_push=do_push,
+        remote=remote,
+        yes=yes,
+    )
 
 
-def _do_commit(message: str, *, chinese: bool = False) -> None:
+def _do_commit(
+    message: str,
+    *,
+    chinese: bool = False,
+    do_push: bool = False,
+    remote: str | None = None,
+    yes: bool = False,
+) -> None:
     git_commit(message)
     label = "已提交：" if chinese else "Committed:"
     console.print(f"[green]{label}[/green] {message}")
+    if do_push:
+        _do_push(remote=remote, yes=yes, chinese=chinese)
+
+
+def _do_push(
+    *,
+    remote: str | None = None,
+    yes: bool = False,
+    chinese: bool = False,
+    set_upstream: bool | None = None,
+) -> None:
+    plan = plan_push(remote=remote, set_upstream=set_upstream)
+    console.print(f"[bold]{'将执行' if chinese else 'Will run'}:[/bold] {plan.describe()}")
+    if plan.set_upstream:
+        tip = (
+            f"分支 {plan.branch} 尚无上游，将设置跟踪 {plan.remote}/{plan.branch}。"
+            if chinese
+            else f"Branch '{plan.branch}' has no upstream; will set {plan.remote}/{plan.branch}."
+        )
+        console.print(f"[dim]{tip}[/dim]")
+
+    ask = "确认推送到远程？" if chinese else "Push to remote?"
+    if not yes and not Confirm.ask(ask, default=True):
+        console.print("已取消推送。" if chinese else "Push aborted.")
+        raise typer.Exit(code=0)
+
+    status = "正在推送..." if chinese else "Pushing..."
+    with console.status(f"[bold]{status}[/bold]"):
+        git_push(remote=remote, set_upstream=set_upstream)
+    done = (
+        f"已推送：{plan.remote}/{plan.branch}"
+        if chinese
+        else f"Pushed: {plan.remote}/{plan.branch}"
+    )
+    console.print(f"[green]{done}[/green]")
+
+
+@app.command("push")
+def push_cmd(
+    remote: Optional[str] = typer.Option(
+        None,
+        "--remote",
+        "-r",
+        help="Remote name (default: origin if present).",
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Skip interactive confirmation.",
+    ),
+    set_upstream: bool = typer.Option(
+        False,
+        "--set-upstream",
+        "-u",
+        help="Force git push -u even if upstream already exists.",
+    ),
+    cn: bool = typer.Option(
+        False,
+        "--cn",
+        help="Use Simplified Chinese prompts.",
+    ),
+) -> None:
+    """Push the current branch to a configured remote (remote must already exist)."""
+    try:
+        _do_push(
+            remote=remote,
+            yes=yes,
+            chinese=cn,
+            set_upstream=True if set_upstream else None,
+        )
+    except (GitError, RuntimeError) as exc:
+        err_console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+    except typer.Exit:
+        raise
+    except KeyboardInterrupt:
+        console.print("\n已取消。" if cn else "\nAborted.")
+        raise typer.Exit(code=130) from None
 
 
 @app.command("report")

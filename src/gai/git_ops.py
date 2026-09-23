@@ -171,6 +171,122 @@ def short_status(cwd: Path | None = None) -> str:
     return result.stdout.strip()
 
 
+def list_remotes(cwd: Path | None = None) -> list[str]:
+    ensure_repo(cwd)
+    result = run_git("remote", cwd=cwd)
+    if result.returncode != 0:
+        raise GitError(result.stderr.strip() or "failed to list remotes")
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def get_current_branch(cwd: Path | None = None) -> str:
+    ensure_repo(cwd)
+    result = run_git("rev-parse", "--abbrev-ref", "HEAD", cwd=cwd)
+    if result.returncode != 0:
+        raise GitError(result.stderr.strip() or "failed to get current branch")
+    branch = result.stdout.strip()
+    if not branch or branch == "HEAD":
+        raise GitError("detached HEAD; checkout a branch before pushing")
+    return branch
+
+
+def get_upstream_ref(cwd: Path | None = None) -> str | None:
+    """Return upstream like 'origin/main', or None if unset."""
+    ensure_repo(cwd)
+    result = run_git(
+        "rev-parse",
+        "--abbrev-ref",
+        "--symbolic-full-name",
+        "@{u}",
+        cwd=cwd,
+    )
+    if result.returncode != 0:
+        return None
+    ref = result.stdout.strip()
+    return ref or None
+
+
+def choose_remote(remotes: list[str], preferred: str | None = None) -> str:
+    """Pick remote name. Prefer explicit, then origin, then sole remote."""
+    if not remotes:
+        raise GitError(
+            "No git remote configured. Add one first, e.g. "
+            "`git remote add origin <url>`."
+        )
+    if preferred:
+        name = preferred.strip()
+        if name not in remotes:
+            raise GitError(
+                f"Remote '{name}' not found. Available: {', '.join(remotes)}"
+            )
+        return name
+    if "origin" in remotes:
+        return "origin"
+    if len(remotes) == 1:
+        return remotes[0]
+    raise GitError(
+        "Multiple remotes found and none named 'origin'. "
+        f"Pass --remote explicitly. Available: {', '.join(remotes)}"
+    )
+
+
+@dataclass(frozen=True)
+class PushPlan:
+    remote: str
+    branch: str
+    upstream: str | None
+    set_upstream: bool
+    args: tuple[str, ...]
+
+    def describe(self) -> str:
+        return " ".join(["git", "push", *self.args])
+
+
+def plan_push(
+    cwd: Path | None = None,
+    *,
+    remote: str | None = None,
+    set_upstream: bool | None = None,
+) -> PushPlan:
+    """Build the git push argv after validating remotes / branch."""
+    remotes = list_remotes(cwd)
+    remote_name = choose_remote(remotes, preferred=remote)
+    branch = get_current_branch(cwd)
+    upstream = get_upstream_ref(cwd)
+
+    need_upstream = upstream is None
+    if set_upstream is True:
+        need_upstream = True
+    elif set_upstream is False and upstream is None:
+        raise GitError(
+            f"Branch '{branch}' has no upstream. "
+            "Re-run with --set-upstream (or omit --no-set-upstream)."
+        )
+
+    if need_upstream:
+        args = ("-u", remote_name, branch)
+    else:
+        args = (remote_name, branch)
+
+    return PushPlan(
+        remote=remote_name,
+        branch=branch,
+        upstream=upstream,
+        set_upstream=need_upstream,
+        args=args,
+    )
+
+
+def push(cwd: Path | None = None, *, remote: str | None = None, set_upstream: bool | None = None) -> PushPlan:
+    """Push current branch to remote. Returns the plan that was executed."""
+    plan = plan_push(cwd, remote=remote, set_upstream=set_upstream)
+    result = run_git("push", *plan.args, cwd=cwd)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "git push failed").strip()
+        raise GitError(detail)
+    return plan
+
+
 @dataclass(frozen=True)
 class CommitInfo:
     hash: str

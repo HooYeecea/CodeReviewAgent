@@ -67,6 +67,9 @@ gai review                # 只审查，不提交
 gai commit                # 审查 → 建议 Message → 确认 → 提交
 gai review --cn
 gai commit --cn
+gai commit --cn --push          # 提交成功后推送到已配置的 remote
+gai push --cn                   # 仅推送当前分支
+gai push -y --cn
 ```
 
 ### 根据提交记录写工作总结
@@ -106,6 +109,8 @@ gai report --since 2026-09-01 --until 2026-09-23 --author me --cn
 | `--no-review` | 跳过审查展示，只生成 Message |
 | `--no-ai` | 完全不调 AI，必须同时带 `-m` |
 | `--cn` | 中文审查结果 + 中文确认文案 |
+| `--push` | 提交成功后推送到已配置的远程仓库 |
+| `-r` / `--remote` | 配合 `--push` 指定远程名（默认优先 `origin`） |
 
 ```bash
 gai commit -y
@@ -113,7 +118,30 @@ gai commit --no-review
 gai commit -m "fix: handle nil ptr"
 gai commit --no-ai -m "chore: release"
 gai commit --cn
+gai commit --cn --push
+gai commit -y --push -r origin
 ```
+
+### `gai push`
+
+将当前分支推送到**已配置**的远程仓库（不会帮你 `git remote add`）。
+
+| 参数 | 说明 |
+|------|------|
+| `-r` / `--remote` | 远程名；默认用 `origin`，否则唯一 remote |
+| `-y` / `--yes` | 跳过确认 |
+| `-u` / `--set-upstream` | 强制 `git push -u` |
+| `--cn` | 中文提示文案 |
+
+若当前分支没有 upstream，会自动使用 `git push -u <remote> <branch>` 建立跟踪。
+
+```bash
+gai push --cn
+gai push -y
+gai push -r origin -u --cn
+```
+
+前提：仓库已配置 remote（例如 `git remote -v` 能看到 `origin`），并且本机具备推送权限（SSH / HTTPS 凭证）。
 
 ### `gai report`
 
@@ -152,8 +180,9 @@ gai report --since 2026-09-01 --until 2026-09-23 --json
 ## 设计要点
 
 - **审查/提交**：只看 staged diff（`git diff --cached`）；未 `git add` 会提示先暂存。
+- **推送**：要求已配置 remote；无 remote / 无权限时给出明确错误，可用原生 `git push` 兜底。
 - **工作总结**：读 `git log`（默认排除 merge），结合 subject + shortstat 归纳，不编造 log 里没有的工作。
-- **不拦截原生 `git commit`**：可用 `--no-ai -m` 或直接 `git commit` 兜底。
+- **不拦截原生 git**：可用 `--no-ai -m` 或直接 `git commit` / `git push` 兜底。
 - Core（`review.py` / `report.py` / `git_ops.py` / `llm/`）不依赖终端交互；CLI 只负责展示与确认。
 - 默认忽略锁文件与常见二进制扩展名；超大输入会截断并提示。
 
@@ -164,7 +193,7 @@ CodeReviewAgent/
   pyproject.toml
   README.md
   src/gai/
-    cli.py           # typer 入口：review / commit / report / config
+    cli.py           # typer 入口：review / commit / push / report / config
     git_ops.py       # git subprocess 封装
     config.py        # 环境变量与 ~/.gai/config.toml
     review.py        # 审查引擎与终端渲染

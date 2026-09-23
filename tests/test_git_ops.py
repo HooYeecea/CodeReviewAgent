@@ -1,6 +1,8 @@
-"""Tests for git diff ignore filtering (no real git required)."""
+"""Tests for git diff ignore filtering and remote selection."""
 
-from gai.git_ops import filter_diff_by_ignore
+import pytest
+
+from gai.git_ops import GitError, choose_remote, filter_diff_by_ignore
 
 
 SAMPLE_DIFF = """\
@@ -41,3 +43,24 @@ def test_filter_noop_without_patterns():
 
 def test_filter_empty_diff():
     assert filter_diff_by_ignore("", ("*.png",)) == ""
+
+
+def test_choose_remote_prefers_origin():
+    assert choose_remote(["upstream", "origin"]) == "origin"
+
+
+def test_choose_remote_single():
+    assert choose_remote(["company"]) == "company"
+
+
+def test_choose_remote_explicit():
+    assert choose_remote(["origin", "backup"], preferred="backup") == "backup"
+
+
+def test_choose_remote_missing_raises():
+    with pytest.raises(GitError, match="No git remote"):
+        choose_remote([])
+    with pytest.raises(GitError, match="not found"):
+        choose_remote(["origin"], preferred="nope")
+    with pytest.raises(GitError, match="Multiple remotes"):
+        choose_remote(["a", "b"])
