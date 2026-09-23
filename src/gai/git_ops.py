@@ -311,14 +311,26 @@ class CommitInfo:
 
 _RELATIVE_SINCE = re.compile(r"^(\d+)\s*([dwmy])$", re.IGNORECASE)
 _COMMIT_MARKER = "===GAI_COMMIT==="
+_ALLTIME_TOKENS = frozenset({"alltime", "all-time", "all_time", "all"})
+
+
+def is_alltime_token(value: str | None) -> bool:
+    if value is None:
+        return False
+    return value.strip().lower() in _ALLTIME_TOKENS
 
 
 def resolve_since(value: str | None) -> str | None:
-    """Normalize --since: '7d'/'1w'/'2026-09-01' → git --since argument."""
+    """Normalize --since: '7d'/'1w'/'2026-09-01'/'alltime' → git --since argument.
+
+    Returns None for empty values or alltime tokens (no --since filter).
+    """
     if value is None:
         return None
     text = value.strip()
     if not text:
+        return None
+    if is_alltime_token(text):
         return None
 
     rel = _RELATIVE_SINCE.match(text)

@@ -387,7 +387,7 @@ def report_cmd(
         "7d",
         "--since",
         "-s",
-        help="Start of range: 7d / 2w / 2026-09-01 (default: 7d).",
+        help="Start of range: 7d / 2w / 2026-09-01 / alltime (default: 7d).",
     ),
     until: Optional[str] = typer.Option(
         None,
@@ -405,12 +405,17 @@ def report_cmd(
         100,
         "--max-count",
         "-n",
-        help="Max commits to include.",
+        help="Max commits to include (alltime default becomes 500 if left at 100).",
     ),
     no_stat: bool = typer.Option(
         False,
         "--no-stat",
         help="Do not include git shortstat in the prompt.",
+    ),
+    alltime: bool = typer.Option(
+        False,
+        "--alltime",
+        help="Summarize the full history (no --since filter). Same as --since alltime.",
     ),
     as_json: bool = typer.Option(
         False,
@@ -425,15 +430,34 @@ def report_cmd(
 ) -> None:
     """Summarize git commits into a paste-ready work report."""
     try:
+        # --alltime wins over a concrete --since (except alltime token itself).
+        since_arg = since
+        if alltime:
+            concrete = since.strip().lower()
+            if concrete not in {"7d", "alltime", "all-time", "all_time", "all"}:
+                tip = (
+                    f"--alltime 与 --since {since} 冲突，已按全部历史处理。"
+                    if cn
+                    else f"--alltime overrides --since {since}; using full history."
+                )
+                err_console.print(f"[yellow]{tip}[/yellow]")
+            since_arg = "alltime"
+
         status_text = "正在根据提交记录生成工作总结..." if cn else "Summarizing commits..."
         with console.status(f"[bold]{status_text}[/bold]"):
             result = run_report(
-                since=since,
+                since=since_arg,
                 until=until,
                 author=author,
                 max_count=max_count,
                 include_stat=not no_stat,
                 chinese=cn,
+                alltime=alltime or since_arg.strip().lower() in {
+                    "alltime",
+                    "all-time",
+                    "all_time",
+                    "all",
+                },
             )
 
         if as_json:

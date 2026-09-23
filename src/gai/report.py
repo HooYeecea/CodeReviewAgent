@@ -18,6 +18,7 @@ from gai.git_ops import (
     ensure_repo,
     format_commits_for_prompt,
     get_commits,
+    is_alltime_token,
     resolve_since,
 )
 from gai.llm.client import LLMClient, LLMError
@@ -27,6 +28,7 @@ _JSON_FENCE = re.compile(r"```(?:json)?\s*([\s\S]*?)\s*```", re.IGNORECASE)
 
 DEFAULT_SINCE = "7d"
 DEFAULT_MAX_COMMITS = 100
+ALLTIME_DEFAULT_MAX_COMMITS = 500
 
 
 @dataclass
@@ -141,12 +143,22 @@ def run_report(
     max_count: int = DEFAULT_MAX_COMMITS,
     include_stat: bool = True,
     chinese: bool = False,
+    alltime: bool = False,
 ) -> ReportResult:
     """Load commit history and ask the LLM for a work-report summary."""
     settings = settings or load_settings()
     ensure_repo()
 
-    since_resolved = resolve_since(since) if since else None
+    alltime_mode = bool(alltime) or is_alltime_token(since)
+    if alltime_mode:
+        since_resolved = None
+        since_label: str | None = "alltime"
+        if max_count == DEFAULT_MAX_COMMITS:
+            max_count = ALLTIME_DEFAULT_MAX_COMMITS
+    else:
+        since_resolved = resolve_since(since) if since else None
+        since_label = since_resolved
+
     until_resolved = until.strip() if until and until.strip() else None
 
     author_filter = author
@@ -165,7 +177,7 @@ def run_report(
     if not commits:
         raise RuntimeError(
             "No commits found in the selected range. "
-            "Try a wider --since or drop --author."
+            "Try a wider --since / --alltime or drop --author."
         )
 
     commits_text, truncated = format_commits_for_prompt(
@@ -176,7 +188,7 @@ def run_report(
     client = LLMClient(settings)
     user_prompt = build_report_user_prompt(
         commits_text=commits_text,
-        since=since_resolved,
+        since=since_label,
         until=until_resolved,
         author=author_filter,
         commit_count=len(commits),
@@ -191,7 +203,7 @@ def run_report(
 
     result = parse_report_response(raw)
     result.commits = commits
-    result.since = since_resolved
+    result.since = since_label
     result.until = until_resolved
     result.author = author_filter
     result.truncated = truncated

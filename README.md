@@ -80,11 +80,14 @@ gai report --since 14d --cn                  # 最近 14 天
 gai report --author me --cn                  # 只看自己的提交（当前 git 用户）
 gai report --since 2026-09-01 --until 2026-09-23 --author me --cn
 # ↑ 自己在某个精确时段的工作报告（写周报常用）
+gai report --alltime --cn                    # 全部历史（简写）
+gai report --alltime --author me --cn        # 自己的全部历史
+gai report --since alltime --author me --cn  # 与上一行等价
 ```
 
 `--author me` 会按本仓库 `git config user.email`（否则 `user.name`）过滤。也可写具体名字/邮箱，例如 `--author "张三"`。
 
-`--since` 支持相对时间 `7d` / `2w` / `1m`，或绝对日期 `2026-09-01`。
+`--since` 支持相对时间 `7d` / `2w` / `1m`、绝对日期 `2026-09-01`，以及 `alltime`（全部历史）。`--alltime` 与 `--since alltime` 等价；若同时写了具体 `--since`，以 `--alltime` 为准。
 
 ## 命令参考
 
@@ -149,10 +152,11 @@ gai push -r origin -u --cn
 
 | 参数 | 说明 |
 |------|------|
-| `-s` / `--since` | 起始范围，默认 `7d`；也支持 `2w`、`2026-09-01` |
+| `-s` / `--since` | 起始范围，默认 `7d`；也支持 `2w`、`2026-09-01`、`alltime` |
 | `-u` / `--until` | 结束范围（可选） |
 | `-a` / `--author` | 作者过滤；`me` 表示当前 `git` 用户 |
-| `-n` / `--max-count` | 最多纳入的提交数，默认 `100` |
+| `-n` / `--max-count` | 最多纳入的提交数，默认 `100`（`--alltime` 时自动升为 `500`） |
+| `--alltime` | 全部历史（等价于 `--since alltime`） |
 | `--no-stat` | 不把 shortstat 送给模型 |
 | `--json` | 输出结构化 JSON |
 | `--cn` | 用简体中文写总结（适合直接贴进周报） |
@@ -161,6 +165,9 @@ gai push -r origin -u --cn
 gai report --cn
 gai report --since 7d --author me --cn
 gai report --since 2026-09-01 --until 2026-09-23 --author me --cn
+gai report --alltime --cn
+gai report --alltime --author me --cn
+gai report --since alltime --author me --cn
 gai report --since 2026-09-01 --until 2026-09-23 --json
 ```
 

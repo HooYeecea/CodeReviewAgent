@@ -1,7 +1,12 @@
 """Tests for report parsing and since-date helpers."""
 
-from gai.git_ops import format_commits_for_prompt, resolve_since, _parse_commit_log
-from gai.git_ops import CommitInfo
+from gai.git_ops import (
+    CommitInfo,
+    format_commits_for_prompt,
+    is_alltime_token,
+    resolve_since,
+    _parse_commit_log,
+)
 from gai.report import parse_report_response
 
 
@@ -17,6 +22,14 @@ def test_resolve_since_absolute_passthrough():
     assert resolve_since("3 days ago") == "3 days ago"
     assert resolve_since(None) is None
     assert resolve_since("  ") is None
+
+
+def test_resolve_since_alltime():
+    assert resolve_since("alltime") is None
+    assert resolve_since("all-time") is None
+    assert resolve_since("ALL") is None
+    assert is_alltime_token("alltime") is True
+    assert is_alltime_token("7d") is False
 
 
 def test_parse_commit_log_with_stat():
