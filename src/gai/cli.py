@@ -58,6 +58,11 @@ def review_cmd(
         "--message-only",
         help="Ask the model mainly for a commit message.",
     ),
+    cn: bool = typer.Option(
+        False,
+        "--cn",
+        help="Output review findings and summary in Simplified Chinese.",
+    ),
 ) -> None:
     """Review staged changes without committing."""
     try:
@@ -65,17 +70,23 @@ def review_cmd(
             err_console.print("[red]No staged changes. Run `git add` first.[/red]")
             raise typer.Exit(code=1)
 
-        with console.status("[bold]Calling LLM for code review...[/bold]"):
-            result = run_review(message_only=message_only, review_only=not message_only)
+        status_text = "正在调用大模型审查..." if cn else "Calling LLM for code review..."
+        with console.status(f"[bold]{status_text}[/bold]"):
+            result = run_review(
+                message_only=message_only,
+                review_only=not message_only,
+                chinese=cn,
+            )
 
         if as_json:
             console.print_json(data=result.to_dict())
             return
 
-        render_review(result, console)
+        render_review(result, console, chinese=cn)
         if result.commit_message:
             console.print()
-            console.print(f"[bold]Suggested commit message:[/bold] {result.commit_message}")
+            label = "建议的提交信息：" if cn else "Suggested commit message:"
+            console.print(f"[bold]{label}[/bold] {result.commit_message}")
     except (GitError, LLMError, RuntimeError) as exc:
         err_console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(code=1) from exc
@@ -105,6 +116,11 @@ def commit_cmd(
         "--no-ai",
         help="Skip all AI calls. Requires --message.",
     ),
+    cn: bool = typer.Option(
+        False,
+        "--cn",
+        help="Output review findings and summary in Simplified Chinese.",
+    ),
 ) -> None:
     """Review staged changes, suggest a commit message, then confirm and commit."""
     try:
@@ -121,7 +137,7 @@ def commit_cmd(
                 err_console.print("[red]--no-ai requires --message / -m.[/red]")
                 raise typer.Exit(code=1)
             final_message = message.strip()
-            _confirm_and_commit(final_message, yes=yes)
+            _confirm_and_commit(final_message, yes=yes, chinese=cn)
             return
 
         commit_message = (message or "").strip()
@@ -129,75 +145,92 @@ def commit_cmd(
 
         need_ai = (not commit_message) or (not no_review)
         if need_ai:
-            with console.status("[bold]Calling LLM...[/bold]"):
+            status_text = "正在调用大模型..." if cn else "Calling LLM..."
+            with console.status(f"[bold]{status_text}[/bold]"):
                 result = run_review(
                     message_only=no_review and not commit_message,
                     review_only=not no_review and bool(commit_message),
+                    chinese=cn,
                 )
 
             if not no_review and result is not None:
-                render_review(result, console)
+                render_review(result, console, chinese=cn)
                 console.print()
 
             if not commit_message and result is not None:
                 if result.commit_message:
                     commit_message = result.commit_message
                 elif not result.parsed_ok:
-                    err_console.print(
-                        "[yellow]Could not parse a commit message from the model.[/yellow]"
+                    tip = (
+                        "无法从模型输出中解析提交信息。"
+                        if cn
+                        else "Could not parse a commit message from the model."
                     )
+                    err_console.print(f"[yellow]{tip}[/yellow]")
 
         if not commit_message:
             if yes:
-                err_console.print(
-                    "[red]No commit message available and --yes was set.[/red]"
+                tip = (
+                    "没有可用的提交信息，且已指定 --yes。"
+                    if cn
+                    else "No commit message available and --yes was set."
                 )
+                err_console.print(f"[red]{tip}[/red]")
                 raise typer.Exit(code=1)
-            commit_message = Prompt.ask("Enter commit message").strip()
+            prompt = "请输入提交信息" if cn else "Enter commit message"
+            commit_message = Prompt.ask(prompt).strip()
             if not commit_message:
-                err_console.print("[red]Empty commit message; aborted.[/red]")
+                tip = "提交信息为空，已取消。" if cn else "Empty commit message; aborted."
+                err_console.print(f"[red]{tip}[/red]")
                 raise typer.Exit(code=1)
-            _confirm_and_commit(commit_message, yes=False)
+            _confirm_and_commit(commit_message, yes=False, chinese=cn)
             return
 
-        console.print(f"[bold]Suggested commit message:[/bold] {commit_message}")
+        label = "建议的提交信息：" if cn else "Suggested commit message:"
+        console.print(f"[bold]{label}[/bold] {commit_message}")
         if yes:
-            _do_commit(commit_message)
+            _do_commit(commit_message, chinese=cn)
             return
 
-        if Confirm.ask("Adopt this message and commit?", default=True):
-            _do_commit(commit_message)
+        ask = "采纳该信息并提交？" if cn else "Adopt this message and commit?"
+        if Confirm.ask(ask, default=True):
+            _do_commit(commit_message, chinese=cn)
             return
 
-        edited = Prompt.ask(
-            "Edit message (leave empty to abort)",
-            default="",
-        ).strip()
+        edit_ask = (
+            "编辑提交信息（留空则取消）"
+            if cn
+            else "Edit message (leave empty to abort)"
+        )
+        edited = Prompt.ask(edit_ask, default="").strip()
         if not edited:
-            console.print("Aborted.")
+            console.print("已取消。" if cn else "Aborted.")
             raise typer.Exit(code=0)
-        _do_commit(edited)
+        _do_commit(edited, chinese=cn)
     except (GitError, LLMError, RuntimeError) as exc:
         err_console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(code=1) from exc
     except typer.Exit:
         raise
     except KeyboardInterrupt:
-        console.print("\nAborted.")
+        console.print("\n已取消。" if cn else "\nAborted.")
         raise typer.Exit(code=130) from None
 
 
-def _confirm_and_commit(message: str, *, yes: bool) -> None:
-    console.print(f"[bold]Commit message:[/bold] {message}")
-    if not yes and not Confirm.ask("Commit with this message?", default=True):
-        console.print("Aborted.")
+def _confirm_and_commit(message: str, *, yes: bool, chinese: bool = False) -> None:
+    label = "提交信息：" if chinese else "Commit message:"
+    console.print(f"[bold]{label}[/bold] {message}")
+    ask = "使用该信息提交？" if chinese else "Commit with this message?"
+    if not yes and not Confirm.ask(ask, default=True):
+        console.print("已取消。" if chinese else "Aborted.")
         raise typer.Exit(code=0)
-    _do_commit(message)
+    _do_commit(message, chinese=chinese)
 
 
-def _do_commit(message: str) -> None:
+def _do_commit(message: str, *, chinese: bool = False) -> None:
     git_commit(message)
-    console.print(f"[green]Committed:[/green] {message}")
+    label = "已提交：" if chinese else "Committed:"
+    console.print(f"[green]{label}[/green] {message}")
 
 
 @app.command("config")

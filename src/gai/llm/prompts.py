@@ -43,6 +43,7 @@ def build_user_prompt(
     truncated: bool = False,
     review_only: bool = False,
     message_only: bool = False,
+    chinese: bool = False,
 ) -> str:
     mode_notes: list[str] = []
     if truncated:
@@ -57,6 +58,13 @@ def build_user_prompt(
     if message_only:
         mode_notes.append(
             "Focus on generating the commit_message. review may be an empty array."
+        )
+    if chinese:
+        mode_notes.append(
+            "LANGUAGE: Write `issue`, `suggestion`, and `summary` in Simplified Chinese. "
+            "Keep `severity` enum values in English (critical/warning/info). "
+            "Keep Conventional Commits `type`/`scope` in English; "
+            "the commit subject after the colon may be Simplified Chinese."
         )
 
     notes = "\n".join(mode_notes)

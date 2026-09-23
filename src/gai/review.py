@@ -156,6 +156,7 @@ def run_review(
     settings: Settings | None = None,
     message_only: bool = False,
     review_only: bool = False,
+    chinese: bool = False,
 ) -> ReviewResult:
     """Load staged diff and ask the LLM for review + commit message."""
     settings = settings or load_settings()
@@ -179,6 +180,7 @@ def run_review(
         truncated=truncated,
         review_only=review_only,
         message_only=message_only,
+        chinese=chinese,
     )
 
     try:
@@ -191,36 +193,58 @@ def run_review(
     return result
 
 
-def render_review(result: ReviewResult, console: Console | None = None) -> None:
+def render_review(
+    result: ReviewResult,
+    console: Console | None = None,
+    *,
+    chinese: bool = False,
+) -> None:
     console = console or Console()
 
     if result.truncated_diff:
-        console.print(
-            "[yellow]Warning:[/yellow] Diff was truncated before sending to the model."
-        )
+        if chinese:
+            console.print(
+                "[yellow]警告：[/yellow] Diff 因过长被截断后才发送给模型。"
+            )
+        else:
+            console.print(
+                "[yellow]Warning:[/yellow] Diff was truncated before sending to the model."
+            )
 
     if result.summary:
-        console.print(Panel(result.summary, title="Summary", border_style="blue"))
+        title = "摘要" if chinese else "Summary"
+        console.print(Panel(result.summary, title=title, border_style="blue"))
 
     if not result.parsed_ok:
+        title = "原始模型输出（解析失败）" if chinese else "Raw model output (parse failed)"
+        empty = "（空）" if chinese else "(empty)"
         console.print(
             Panel(
-                result.raw_text or "(empty)",
-                title="Raw model output (parse failed)",
+                result.raw_text or empty,
+                title=title,
                 border_style="red",
             )
         )
         return
 
     if not result.review:
-        console.print("[green]No issues found by the reviewer.[/green]")
+        if chinese:
+            console.print("[green]审查未发现明显问题。[/green]")
+        else:
+            console.print("[green]No issues found by the reviewer.[/green]")
         return
 
-    table = Table(title="Code Review", show_lines=True)
-    table.add_column("Sev", style="bold", width=10)
-    table.add_column("Location", overflow="fold")
-    table.add_column("Issue", overflow="fold")
-    table.add_column("Suggestion", overflow="fold")
+    table = Table(title="代码审查" if chinese else "Code Review", show_lines=True)
+    if chinese:
+        table.add_column("严重度", style="bold", width=10)
+        table.add_column("位置", overflow="fold")
+        table.add_column("问题", overflow="fold")
+        table.add_column("建议", overflow="fold")
+    else:
+        table.add_column("Sev", style="bold", width=10)
+        table.add_column("Location", overflow="fold")
+        table.add_column("Issue", overflow="fold")
+        table.add_column("Suggestion", overflow="fold")
 
     order = {"critical": 0, "warning": 1, "info": 2}
     for item in sorted(result.review, key=lambda x: order.get(x.severity, 9)):
@@ -231,6 +255,9 @@ def render_review(result: ReviewResult, console: Console | None = None) -> None:
         table.add_row(sev, loc, item.issue, item.suggestion or "-")
 
     console.print(table)
-    console.print(
-        "[dim]Line numbers are advisory (derived from the diff), not static analysis.[/dim]"
-    )
+    if chinese:
+        console.print("[dim]行号仅供参考（来自 diff），并非静态分析结果。[/dim]")
+    else:
+        console.print(
+            "[dim]Line numbers are advisory (derived from the diff), not static analysis.[/dim]"
+        )

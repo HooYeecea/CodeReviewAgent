@@ -67,6 +67,8 @@ gai commit --no-review                 # 只生成 Message，不做审查展示
 gai commit -m "fix: handle nil ptr"   # 使用你指定的 Message（仍可做审查）
 gai commit --no-ai -m "chore: release" # 完全跳过 AI，必须带 -m
 gai review --json                      # 机器可读输出（供后续 VS Code 插件复用）
+gai review --cn                        # 审查结果用简体中文
+gai commit --cn                        # 中文审查 + 确认流程文案
 ```
 
 ## 设计要点
