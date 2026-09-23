@@ -77,23 +77,31 @@ gai push -y --cn
 ```bash
 gai report --cn                              # 默认最近 7 天（团队总览，含参与者）
 gai report --cn --per                        # 团队总览 + 按人明细
-gai report --since 14d --cn
+gai report --since 14d --cn                  # 报告会写明「哪天至今天」
 gai report --author me --cn                  # 只看自己的提交
 gai report --since 2026-09-01 --until 2026-09-23 --author me --cn
 gai report --alltime --cn
 gai report --alltime --author me --cn
 gai report --since alltime --author me --cn
-gai report --cn --per -o 周报.md             # 导出到当前目录
-gai report --cn -o .\reports\                # 目录不存在则回退当前目录并提示
+gai report --cn -o                           # 导出：当前目录 + gai-report-日期.md
+gai report --cn --per -o 周报.md             # 导出到当前目录指定文件名
+gai report --cn -o .\reports\                # 目录不存在则自动创建
+gai report --author me --cn -o 我的周报.md   # 单人报告也可导出
 ```
 
 `--author me` 会按本仓库 `git config user.email`（否则 `user.name`）过滤。也可写具体名字/邮箱，例如 `--author "张三"`。
 
 未指定 `--author` 时为**团队报告**：会列出参与人数、每人提交数与占比；加 `--per` 再按人展开具体工作。
 
-`--since` 支持相对时间 `7d` / `2w` / `1m`、绝对日期 `2026-09-01`，以及 `alltime`。`--alltime` 与 `--since alltime` 等价。
+`--since` 支持相对时间 `7d` / `2w` / `1m`、绝对日期 `2026-09-01`，以及 `alltime`。`--alltime` 与 `--since alltime` 等价。报告结果会把指令时间落成具体日历区间，例如 `--since 7d` → `2026-09-16 至今天（2026-09-23）`。
 
-`-o` / `--out` 导出 Markdown：文件名默认写到当前目录；也可指定完整路径或目录（目录下自动生成 `gai-report-YYYY-MM-DD.md`）。父目录不存在时会警告并回退到当前目录。
+`-o` / `--out` 导出 Markdown（**单人 / 团队报告都可导出**）：
+
+- 只写 `-o`：当前目录 + `gai-report-YYYY-MM-DD.md`
+- `-o 周报.md`：当前目录指定文件名
+- `-o D:\reports\week.md` 或 `-o .\reports\`：指定路径；**目录不存在则自动创建**
+- 路径格式非法：提示错误并回退到当前目录默认文件名
+- 导出成功后打印**最终完整路径**
 
 ## 命令参考
 
@@ -164,7 +172,7 @@ gai push -r origin -u --cn
 | `-n` / `--max-count` | 最多纳入的提交数，默认 `100`（`--alltime` 时自动升为 `500`） |
 | `--alltime` | 全部历史（等价于 `--since alltime`） |
 | `--per` | 团队模式下按人列出具体完成内容 |
-| `-o` / `--out` | 导出 Markdown 到文件或目录（默认当前目录；路径无效则回退） |
+| `-o` / `--out` | 导出 Markdown；裸 `-o`=当前目录默认文件名；缺目录则创建；非法路径回退 |
 | `--no-stat` | 不把 shortstat 送给模型 |
 | `--json` | 输出结构化 JSON |
 | `--cn` | 用简体中文写总结（适合直接贴进周报） |
@@ -177,8 +185,10 @@ gai report --since 2026-09-01 --until 2026-09-23 --author me --cn
 gai report --alltime --cn
 gai report --alltime --author me --cn
 gai report --since alltime --author me --cn
+gai report --cn -o
 gai report --cn --per -o 周报.md
 gai report --cn -o D:\reports\week.md
+gai report --author me --cn -o 我的周报.md
 gai report --since 2026-09-01 --until 2026-09-23 --json
 ```
 
@@ -199,7 +209,8 @@ gai report --since 2026-09-01 --until 2026-09-23 --json
 
 - **审查/提交**：只看 staged diff（`git diff --cached`）；未 `git add` 会提示先暂存。
 - **推送**：要求已配置 remote；无 remote / 无权限时给出明确错误，可用原生 `git push` 兜底。
-- **工作总结**：读 `git log`（默认排除 merge），结合 subject + shortstat 归纳，不编造 log 里没有的工作。
+- **工作总结**：读 `git log`（默认排除 merge），结合 subject + shortstat 归纳；报告会标明指令对应的具体起止日期。
+- **导出**：`-o` 支持裸参数默认命名；缺目录自动创建；非法路径回退当前目录；成功后打印完整路径。
 - **不拦截原生 git**：可用 `--no-ai -m` 或直接 `git commit` / `git push` 兜底。
 - Core（`review.py` / `report.py` / `git_ops.py` / `llm/`）不依赖终端交互；CLI 只负责展示与确认。
 - 默认忽略锁文件与常见二进制扩展名；超大输入会截断并提示。

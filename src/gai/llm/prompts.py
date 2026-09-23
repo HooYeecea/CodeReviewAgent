@@ -144,12 +144,15 @@ def build_report_user_prompt(
     chinese: bool = False,
     team_mode: bool = False,
     per_author: bool = False,
+    period_label: str | None = None,
 ) -> str:
     meta: list[str] = [f"Commit count provided: {commit_count}"]
     if contributor_count:
         meta.append(f"Contributor count: {contributor_count}")
+    if period_label:
+        meta.append(f"Report period (must mention in report_markdown): {period_label}")
     if since:
-        meta.append(f"Since: {since}")
+        meta.append(f"Since query: {since}")
     if until:
         meta.append(f"Until: {until}")
     if author:
@@ -178,7 +181,8 @@ def build_report_user_prompt(
             "LANGUAGE: Write period_summary, highlights, category names, "
             "category items, participant summaries, per_author text, "
             "and report_markdown in Simplified Chinese. "
-            "report_markdown should be ready to paste into a Chinese work report."
+            "report_markdown should be ready to paste into a Chinese work report "
+            "and must state the concrete period dates."
         )
 
     header = "\n".join(meta)

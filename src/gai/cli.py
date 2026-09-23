@@ -426,7 +426,11 @@ def report_cmd(
         None,
         "--out",
         "-o",
-        help="Write Markdown report to a file/dir (default: current directory).",
+        help=(
+            "Export Markdown. Bare -o → current dir + gai-report-YYYY-MM-DD.md; "
+            "missing dirs are created; invalid format falls back to cwd."
+        ),
+        flag_value=".",
     ),
     as_json: bool = typer.Option(
         False,
@@ -485,15 +489,13 @@ def report_cmd(
         else:
             render_report(result, console, chinese=cn)
 
-        if out:
+        if out is not None:
             path, warning = export_report(result, out, chinese=cn)
             if warning:
-                tip = (
-                    f"警告：{warning}"
-                    if cn
-                    else f"Warning: {warning}"
-                )
-                err_console.print(f"[yellow]{tip}[/yellow]")
+                tip = f"提示：{warning}" if cn else f"Note: {warning}"
+                # invalid format → yellow warning; created dir → dim tip
+                style = "yellow" if "Invalid" in warning or "Falling back" in warning or "回退" in warning else "dim"
+                err_console.print(f"[{style}]{tip}[/{style}]")
             saved = (
                 f"已写入报告：{path}"
                 if cn

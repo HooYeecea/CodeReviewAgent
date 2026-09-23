@@ -6,7 +6,7 @@ import json
 import re
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -91,6 +91,10 @@ class ReportResult:
     commits: list[CommitInfo] = field(default_factory=list)
     since: str | None = None
     until: str | None = None
+    since_query: str | None = None
+    period_start: str | None = None
+    period_end: str | None = None
+    period_label: str | None = None
     author: str | None = None
     team_mode: bool = False
     per_author_requested: bool = False
@@ -110,6 +114,10 @@ class ReportResult:
             "commit_count": self.commit_count,
             "since": self.since,
             "until": self.until,
+            "since_query": self.since_query,
+            "period_start": self.period_start,
+            "period_end": self.period_end,
+            "period_label": self.period_label,
             "author": self.author,
             "team_mode": self.team_mode,
             "per_author_requested": self.per_author_requested,
@@ -154,6 +162,91 @@ def format_participants_for_prompt(stats: list[ParticipantStat]) -> str:
             f"- {p.name} <{email}>: {p.commit_count} commits ({p.share}%)"
         )
     return "\n".join(lines)
+
+
+_RELATIVE_PERIOD = re.compile(r"^(\d+)\s*([dwmy])$", re.IGNORECASE)
+_ISO_DATE = re.compile(r"^(\d{4}-\d{2}-\d{2})")
+
+
+def _parse_calendar_date(value: str | None, *, fallback: date) -> date:
+    if not value or not value.strip():
+        return fallback
+    text = value.strip()
+    m = _ISO_DATE.match(text)
+    if m:
+        try:
+            return date.fromisoformat(m.group(1))
+        except ValueError:
+            return fallback
+    return fallback
+
+
+def resolve_since_to_calendar_date(value: str | None, today: date) -> date | None:
+    """Map --since token to a concrete start date. None means alltime/unbounded."""
+    if value is None or not str(value).strip() or is_alltime_token(value):
+        return None
+    text = str(value).strip()
+    rel = _RELATIVE_PERIOD.match(text)
+    if rel:
+        amount = int(rel.group(1))
+        unit = rel.group(2).lower()
+        if unit == "d":
+            delta = timedelta(days=amount)
+        elif unit == "w":
+            delta = timedelta(weeks=amount)
+        elif unit == "m":
+            delta = timedelta(days=30 * amount)
+        else:
+            delta = timedelta(days=365 * amount)
+        return today - delta
+    return _parse_calendar_date(text, fallback=today)
+
+
+def compute_period_bounds(
+    *,
+    since_query: str | None,
+    until_query: str | None,
+    alltime: bool,
+    commits: list[CommitInfo],
+    today: date | None = None,
+    chinese: bool = False,
+) -> tuple[str, str, str]:
+    """Return (period_start, period_end, period_label) for the CLI query."""
+    today = today or date.today()
+    end = _parse_calendar_date(until_query, fallback=today) if until_query else today
+    end_s = end.isoformat()
+    today_s = today.isoformat()
+
+    if alltime or is_alltime_token(since_query):
+        commit_dates = [c.date for c in commits if c.date and _ISO_DATE.match(c.date)]
+        if commit_dates:
+            start_s = min(commit_dates)
+        else:
+            start_s = today_s
+    else:
+        start = resolve_since_to_calendar_date(since_query, today)
+        start_s = start.isoformat() if start else today_s
+
+    if chinese:
+        if end_s == today_s and not until_query:
+            label = f"{start_s} 至今天（{end_s}）"
+        else:
+            label = f"{start_s} 至 {end_s}"
+        if since_query and not (alltime or is_alltime_token(since_query)):
+            label = f"{label}（对应 --since {since_query}）"
+        elif alltime or is_alltime_token(since_query):
+            label = f"{label}（对应 --alltime）"
+    else:
+        if end_s == today_s and not until_query:
+            label = f"{start_s} to today ({end_s})"
+        else:
+            label = f"{start_s} to {end_s}"
+        if since_query and not (alltime or is_alltime_token(since_query)):
+            label = f"{label} (from --since {since_query})"
+        elif alltime or is_alltime_token(since_query):
+            label = f"{label} (from --alltime)"
+
+    return start_s, end_s, label
 
 
 def _extract_json_blob(text: str) -> str | None:
@@ -345,6 +438,7 @@ def run_report(
     ensure_repo()
 
     alltime_mode = bool(alltime) or is_alltime_token(since)
+    since_query = "alltime" if alltime_mode else (since.strip() if since else None)
     if alltime_mode:
         since_resolved = None
         since_label: str | None = "alltime"
@@ -379,6 +473,14 @@ def run_report(
             "Try a wider --since / --alltime or drop --author."
         )
 
+    period_start, period_end, period_label = compute_period_bounds(
+        since_query=since_query,
+        until_query=until_resolved,
+        alltime=alltime_mode,
+        commits=commits,
+        chinese=chinese,
+    )
+
     local_participants = collect_participant_stats(commits) if team_mode else []
     commits_text, truncated = format_commits_for_prompt(
         commits,
@@ -398,6 +500,7 @@ def run_report(
         chinese=chinese,
         team_mode=team_mode,
         per_author=per_author_mode,
+        period_label=period_label,
     )
 
     try:
@@ -409,6 +512,10 @@ def run_report(
     result.commits = commits
     result.since = since_label
     result.until = until_resolved
+    result.since_query = since_query
+    result.period_start = period_start
+    result.period_end = period_end
+    result.period_label = period_label
     result.author = author_filter
     result.team_mode = team_mode
     result.per_author_requested = per_author_mode
@@ -440,8 +547,11 @@ def build_export_markdown(result: ReportResult, *, chinese: bool = False) -> str
     lines.append("")
 
     meta: list[str] = []
-    if result.since:
-        meta.append(f"- since: `{result.since}`")
+    if result.period_label:
+        key = "统计时段" if chinese else "period"
+        meta.append(f"- {key}: **{result.period_label}**")
+    if result.since_query:
+        meta.append(f"- query: `--since {result.since_query}`")
     if result.until:
         meta.append(f"- until: `{result.until}`")
     if result.author:
@@ -528,46 +638,79 @@ def resolve_report_output_path(
     *,
     cwd: Path | None = None,
 ) -> tuple[Path, str | None]:
-    """Resolve --out path. On invalid parent dir, fall back to cwd + warning."""
-    cwd = cwd or Path.cwd()
-    raw = out.strip().strip('"').strip("'")
-    if not raw:
-        raise ValueError("output path is empty")
+    """Resolve --out path.
+
+    - Bare '.' / empty-ish → cwd + gai-report-YYYY-MM-DD.md
+    - Invalid format → warning + fallback to cwd + default/name
+    - Missing parent directory → create it (mkdir -p), optional note in warning
+    """
+    cwd = (cwd or Path.cwd()).resolve()
+    today = date.today().isoformat()
+    default_name = f"gai-report-{today}.md"
+    raw = (out or "").strip().strip('"').strip("'")
+
+    # Bare -o / --out (flag_value ".") or explicit current dir
+    if not raw or raw in {".", "./", ".\\"}:
+        return (cwd / default_name), None
+
+    if _path_format_invalid(raw):
+        warning = (
+            f"Invalid output path format: {out!r}. "
+            f"Falling back to current directory ({default_name})."
+        )
+        return (cwd / default_name), warning
 
     path = Path(raw).expanduser()
     warning: str | None = None
-    today = date.today().isoformat()
-    default_name = f"gai-report-{today}.md"
 
-    # Directory target (existing dir, or trailing slash/backslash)
     looks_like_dir = raw.endswith(("/", "\\")) or (path.exists() and path.is_dir())
-
     if looks_like_dir:
-        target_dir = path
-        filename = default_name
-        if not target_dir.exists():
-            warning = f"Directory not found: {target_dir}. Falling back to current directory."
-            return (cwd / filename).resolve(), warning
-        return (target_dir / filename).resolve(), warning
+        target_dir = path if path.is_absolute() else (cwd / path)
+        try:
+            target_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            warning = (
+                f"Cannot create directory {target_dir}: {exc}. "
+                f"Falling back to current directory."
+            )
+            return (cwd / default_name), warning
+        note = None
+        if not path.exists() or True:
+            # Always fine; mention if we created is hard — keep quiet unless needed
+            note = None
+        return (target_dir / default_name).resolve(), note
 
-    # File path
     if path.suffix == "":
         path = path.with_suffix(".md")
 
-    if path.is_absolute():
-        parent = path.parent
-        if not parent.exists():
-            warning = f"Directory not found: {parent}. Falling back to current directory."
-            return (cwd / path.name).resolve(), warning
-        return path.resolve(), warning
-
-    # Relative file: ensure parent under cwd exists
-    candidate = (cwd / path).resolve()
+    candidate = path if path.is_absolute() else (cwd / path)
     parent = candidate.parent
-    if not parent.exists():
-        warning = f"Directory not found: {parent}. Falling back to current directory."
+    try:
+        if not parent.exists():
+            parent.mkdir(parents=True, exist_ok=True)
+            warning = f"Created directory: {parent}"
+        return candidate.resolve(), warning
+    except OSError as exc:
+        warning = (
+            f"Cannot create directory {parent}: {exc}. "
+            f"Falling back to current directory."
+        )
         return (cwd / path.name).resolve(), warning
-    return candidate, warning
+
+
+def _path_format_invalid(raw: str) -> bool:
+    text = raw.strip()
+    if not text:
+        return True
+    illegal = '<>"|?*\0'
+    check = text
+    if re.match(r"^[A-Za-z]:[\\/]", text):
+        check = text[2:]
+    if any(c in check for c in illegal):
+        return True
+    if "::" in text:
+        return True
+    return False
 
 
 def export_report(
@@ -577,11 +720,12 @@ def export_report(
     chinese: bool = False,
     cwd: Path | None = None,
 ) -> tuple[Path, str | None]:
-    """Write Markdown report to disk. Returns (path, optional warning)."""
+    """Write Markdown report to disk. Returns (absolute_path, optional warning/note)."""
     target, warning = resolve_report_output_path(out, cwd=cwd)
     content = build_export_markdown(result, chinese=chinese)
+    target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content, encoding="utf-8")
-    return target, warning
+    return target.resolve(), warning
 
 
 def render_report(
@@ -595,13 +739,17 @@ def render_report(
     meta_bits = [f"{result.commit_count} commits"]
     if result.team_mode:
         meta_bits.append(f"{result.contributor_count} contributors")
-    if result.since:
+    if result.period_label:
+        meta_bits.append(result.period_label)
+    elif result.since:
         meta_bits.append(f"since {result.since}")
-    if result.until:
-        meta_bits.append(f"until {result.until}")
     if result.author:
         meta_bits.append(f"author {result.author}")
     console.print("[dim]" + " · ".join(meta_bits) + "[/dim]")
+
+    if result.period_label:
+        title = "统计时段" if chinese else "Report period"
+        console.print(Panel(result.period_label, title=title, border_style="white"))
 
     if result.truncated:
         tip = (

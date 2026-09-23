@@ -136,12 +136,29 @@ def test_resolve_report_output_path_filename(tmp_path: Path):
     assert target == (tmp_path / "week.md").resolve()
 
 
-def test_resolve_report_output_path_missing_parent_fallback(tmp_path: Path):
-    bad = tmp_path / "nope" / "nested" / "week.md"
-    target, warning = resolve_report_output_path(str(bad), cwd=tmp_path)
+def test_resolve_report_output_path_bare_dot(tmp_path: Path):
+    target, warning = resolve_report_output_path(".", cwd=tmp_path)
+    assert warning is None
+    assert target.parent == tmp_path.resolve()
+    assert target.name.startswith("gai-report-")
+    assert target.suffix == ".md"
+
+
+def test_resolve_report_output_path_creates_missing_parent(tmp_path: Path):
+    nested = tmp_path / "nope" / "nested" / "week.md"
+    target, warning = resolve_report_output_path(str(nested), cwd=tmp_path)
+    assert target == nested.resolve()
+    assert target.parent.exists()
     assert warning is not None
-    assert "not found" in warning.lower() or "Directory" in warning
-    assert target == (tmp_path / "week.md").resolve()
+    assert "Created" in warning
+
+
+def test_resolve_report_output_path_invalid_format_fallback(tmp_path: Path):
+    target, warning = resolve_report_output_path("week<>.md", cwd=tmp_path)
+    assert warning is not None
+    assert "Invalid" in warning
+    assert target.parent == tmp_path.resolve()
+    assert target.name.startswith("gai-report-")
 
 
 def test_resolve_report_output_path_directory(tmp_path: Path):
@@ -152,6 +169,48 @@ def test_resolve_report_output_path_directory(tmp_path: Path):
     assert target.parent == reports.resolve()
     assert target.name.startswith("gai-report-")
     assert target.suffix == ".md"
+
+
+def test_compute_period_bounds_7d():
+    from datetime import date
+
+    from gai.report import compute_period_bounds
+
+    today = date(2026, 9, 23)
+    start, end, label = compute_period_bounds(
+        since_query="7d",
+        until_query=None,
+        alltime=False,
+        commits=[],
+        today=today,
+        chinese=True,
+    )
+    assert start == "2026-09-16"
+    assert end == "2026-09-23"
+    assert "2026-09-16 至今天" in label
+    assert "--since 7d" in label
+
+
+def test_compute_period_bounds_alltime_uses_commits():
+    from datetime import date
+
+    from gai.report import compute_period_bounds
+
+    commits = [
+        CommitInfo("h1", "A", "a@e.com", "2026-01-01", "a"),
+        CommitInfo("h2", "A", "a@e.com", "2026-03-01", "b"),
+    ]
+    start, end, label = compute_period_bounds(
+        since_query="alltime",
+        until_query=None,
+        alltime=True,
+        commits=commits,
+        today=date(2026, 9, 23),
+        chinese=True,
+    )
+    assert start == "2026-01-01"
+    assert end == "2026-09-23"
+    assert "--alltime" in label
 
 
 def test_build_export_markdown_includes_participants():
