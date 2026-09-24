@@ -206,6 +206,45 @@ def add(paths: list[str] | tuple[str, ...] | None = None, cwd: Path | None = Non
         raise GitError(result.stderr.strip() or result.stdout.strip() or "git add failed")
 
 
+def unadd(paths: list[str] | tuple[str, ...] | None = None, cwd: Path | None = None) -> None:
+    """Unstage files via `git restore --staged`. Defaults to `.` when paths is empty."""
+    ensure_repo(cwd)
+    if not has_staged_changes(cwd):
+        raise GitError("nothing staged to unadd")
+    targets = [p for p in (paths or []) if str(p).strip()]
+    if not targets:
+        targets = ["."]
+    result = run_git("restore", "--staged", "--", *targets, cwd=cwd)
+    if result.returncode != 0:
+        raise GitError(
+            result.stderr.strip() or result.stdout.strip() or "git restore --staged failed"
+        )
+
+
+def last_commit_subject(cwd: Path | None = None) -> str | None:
+    """Return the latest commit subject, or None if no commits."""
+    ensure_repo(cwd)
+    result = run_git("log", "-1", "--pretty=format:%s", cwd=cwd)
+    if result.returncode != 0:
+        return None
+    subject = (result.stdout or "").strip()
+    return subject or None
+
+
+def uncommit(cwd: Path | None = None) -> str:
+    """Undo the latest commit with soft reset. Returns undone commit subject."""
+    ensure_repo(cwd)
+    subject = last_commit_subject(cwd)
+    if subject is None:
+        raise GitError("no commit to undo (repository has no commits?)")
+    result = run_git("reset", "--soft", "HEAD~1", cwd=cwd)
+    if result.returncode != 0:
+        raise GitError(
+            result.stderr.strip() or result.stdout.strip() or "git reset --soft HEAD~1 failed"
+        )
+    return subject
+
+
 def short_status(cwd: Path | None = None) -> str:
     ensure_repo(cwd)
     result = run_git("status", "--short", cwd=cwd)

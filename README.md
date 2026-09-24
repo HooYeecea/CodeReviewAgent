@@ -84,6 +84,8 @@ gai commit --cn --push          # 提交成功后推送到已配置的 remote
 gai push --cn                   # 仅推送当前分支
 gai push -y --cn
 gai add --cn -t                 # 暂存并打印底层 git 链路
+gai unadd --cn                  # 撤销暂存（需确认）
+gai uncommit --cn               # 撤销最近一次提交（soft，需确认）
 gai commit --cn --trace         # 提交过程打印 git 命令链路
 gai config --show --trace --cn  # 未跑 git 时提示「本次未涉及 git 操作」
 ```
@@ -138,6 +140,35 @@ gai add
 gai add .
 gai add src/ README.md
 gai add --cn -t
+```
+
+### `gai unadd`
+
+撤销暂存（包装 `git restore --staged`）。**默认需确认**（确认提示默认否）。未给路径时撤销全部暂存。
+
+| 参数 | 说明 |
+|------|------|
+| `PATHS...` | 要取消暂存的路径；省略则为 `.`（全部暂存区） |
+| `--cn` | 中文提示 |
+| `-t` / `--trace` | 打印底层 git 命令链路 |
+
+```bash
+gai unadd --cn
+gai unadd src/ --cn -t
+```
+
+### `gai uncommit`
+
+撤销**最近一次**提交（`git reset --soft HEAD~1`）。改动会保留在暂存区。**默认需确认**。
+
+| 参数 | 说明 |
+|------|------|
+| `--cn` | 中文提示 |
+| `-t` / `--trace` | 打印底层 git 命令链路 |
+
+```bash
+gai uncommit --cn
+gai uncommit --cn -t
 ```
 
 ### `gai review`
@@ -248,8 +279,9 @@ gai report --since 2026-09-01 --until 2026-09-23 --json
 
 ## 设计要点
 
-- **暂存**：可用 `gai add`（默认 `.`）保持指令前缀一致；也仍可用原生 `git add`。
+- **暂存**：可用 `gai add`（默认 `.`）；撤销暂存用 `gai unadd`（需确认）。
 - **审查/提交**：只看 staged diff（`git diff --cached`）；未暂存会提示先 `gai add`。
+- **撤销提交**：`gai uncommit` 使用 soft reset，改动留在暂存区（需确认）。
 - **推送**：要求已配置 remote；无 remote / 无权限时给出明确错误，可用原生 `git push` 兜底。
 - **工作总结**：读 `git log`（默认排除 merge），结合 subject + shortstat 归纳；报告会标明指令对应的具体起止日期。
 - **导出**：`-o` 支持裸参数默认命名；缺目录自动创建；非法路径回退当前目录；成功后打印完整路径。
@@ -265,7 +297,7 @@ CodeReviewAgent/
   pyproject.toml
   README.md
   src/gai/
-    cli.py           # typer 入口：add / review / commit / push / report / config
+    cli.py           # typer 入口：add / unadd / uncommit / review / commit / push / report / config
     git_ops.py       # git subprocess 封装
     config.py        # 环境变量与 ~/.gai/config.toml
     review.py        # 审查引擎与终端渲染
