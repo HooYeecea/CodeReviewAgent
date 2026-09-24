@@ -81,8 +81,10 @@ gai commit                # 审查 → 建议 Message → 确认 → 提交
 gai review --cn
 gai commit --cn
 gai commit --cn --push          # 提交成功后推送到已配置的 remote
-gai push --cn                   # 仅推送当前分支
+gai push --cn                   # 仅推送当前分支（无可推送时提示）
 gai push -y --cn
+gai pull --cn                   # 检查后确认再拉取（无可拉取时提示）
+gai pull -y --cn
 gai add --cn -t                 # 暂存并打印底层 git 链路
 gai unadd --cn                  # 撤销暂存（需确认）
 gai uncommit --cn               # 撤销最近一次提交（soft，需确认）
@@ -209,7 +211,7 @@ gai commit -y --push -r origin
 
 ### `gai push`
 
-将当前分支推送到**已配置**的远程仓库（不会帮你 `git remote add`）。
+将当前分支推送到**已配置**的远程仓库（不会帮你 `git remote add`）。推送前会 `fetch` 并检查本地是否领先远程；**没有可推送的提交时提示「没有可推送的内容」**，不会再显示推送成功。
 
 | 参数 | 说明 |
 |------|------|
@@ -228,6 +230,26 @@ gai push -r origin -u --cn
 ```
 
 前提：仓库已配置 remote（例如 `git remote -v` 能看到 `origin`），并且本机具备推送权限（SSH / HTTPS 凭证）。
+
+### `gai pull`
+
+从已配置的远程拉取更新。先 `fetch` 检查是否有可拉取的提交：
+
+- **没有可拉取内容** → 提示「没有可拉取的内容」，不执行 pull
+- **有可拉取内容** → 显示待拉取提交数，**确认后再拉取**（默认不直接确认）
+
+| 参数 | 说明 |
+|------|------|
+| `-r` / `--remote` | 远程名；默认用 `origin`，否则唯一 remote |
+| `-y` / `--yes` | 跳过确认（仍会先检查是否有可拉取内容） |
+| `--cn` | 中文提示文案 |
+| `-t` / `--trace` | 打印底层 git 命令链路 |
+
+```bash
+gai pull --cn
+gai pull -y
+gai pull -r origin --cn
+```
 
 ### `gai report`
 
@@ -282,7 +304,8 @@ gai report --since 2026-09-01 --until 2026-09-23 --json
 - **暂存**：可用 `gai add`（默认 `.`）；撤销暂存用 `gai unadd`（需确认）。
 - **审查/提交**：只看 staged diff（`git diff --cached`）；未暂存会提示先 `gai add`。
 - **撤销提交**：`gai uncommit` 使用 soft reset，改动留在暂存区（需确认）。
-- **推送**：要求已配置 remote；无 remote / 无权限时给出明确错误，可用原生 `git push` 兜底。
+- **推送**：要求已配置 remote；推送前检查是否有可推送提交；无可推送时提示而非报成功。无 remote / 无权限时给出明确错误，可用原生 `git push` 兜底。
+- **拉取**：`gai pull` 先检查远程是否有可拉取内容；有则确认后再拉，没有则提示。
 - **工作总结**：读 `git log`（默认排除 merge），结合 subject + shortstat 归纳；报告会标明指令对应的具体起止日期。
 - **导出**：`-o` 支持裸参数默认命名；缺目录自动创建；非法路径回退当前目录；成功后打印完整路径。
 - **`--trace` / `-t`**：打印本次实际执行的 git 命令；若未执行任何 git，提示未涉及 git 操作（支持 `--cn`）。
@@ -297,7 +320,7 @@ CodeReviewAgent/
   pyproject.toml
   README.md
   src/gai/
-    cli.py           # typer 入口：add / unadd / uncommit / review / commit / push / report / config
+    cli.py           # typer 入口：add / unadd / uncommit / review / commit / push / pull / report / config
     git_ops.py       # git subprocess 封装
     config.py        # 环境变量与 ~/.gai/config.toml
     review.py        # 审查引擎与终端渲染

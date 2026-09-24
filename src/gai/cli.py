@@ -14,12 +14,16 @@ from gai import __version__
 from gai.config import CONFIG_FILE, load_settings, save_settings, settings_summary
 from gai.git_ops import (
     GitError,
+    NothingToPull,
+    NothingToPush,
     add as git_add,
+    check_sync,
     commit as git_commit,
     get_traced_commands,
     has_staged_changes,
     last_commit_subject,
     plan_push,
+    pull as git_pull,
     push as git_push,
     set_tracing,
     short_status,
@@ -628,6 +632,25 @@ def _do_push(
     set_upstream: bool | None = None,
 ) -> None:
     plan = plan_push(remote=remote, set_upstream=set_upstream)
+    status = "正在检查远程同步状态..." if chinese else "Checking remote sync status..."
+    with console.status(f"[bold]{status}[/bold]"):
+        sync = check_sync(remote=plan.remote, do_fetch=True)
+
+    if sync.ahead <= 0:
+        tip = (
+            f"没有可推送的内容：本地与 {plan.remote}/{plan.branch} 已同步。"
+            if chinese
+            else f"Nothing to push: local is up to date with {plan.remote}/{plan.branch}."
+        )
+        console.print(f"[yellow]{tip}[/yellow]")
+        raise typer.Exit(code=0)
+
+    ahead_tip = (
+        f"待推送提交数：{sync.ahead}"
+        if chinese
+        else f"Commits to push: {sync.ahead}"
+    )
+    console.print(f"[dim]{ahead_tip}[/dim]")
     console.print(f"[bold]{'将执行' if chinese else 'Will run'}:[/bold] {plan.describe()}")
     if plan.set_upstream:
         tip = (
@@ -642,13 +665,74 @@ def _do_push(
         console.print("已取消推送。" if chinese else "Push aborted.")
         raise typer.Exit(code=0)
 
-    status = "正在推送..." if chinese else "Pushing..."
-    with console.status(f"[bold]{status}[/bold]"):
-        git_push(remote=remote, set_upstream=set_upstream)
+    push_status = "正在推送..." if chinese else "Pushing..."
+    with console.status(f"[bold]{push_status}[/bold]"):
+        try:
+            git_push(remote=remote, set_upstream=set_upstream, check=sync)
+        except NothingToPush as exc:
+            tip = (
+                f"没有可推送的内容：{exc}"
+                if chinese
+                else f"Nothing to push: {exc}"
+            )
+            console.print(f"[yellow]{tip}[/yellow]")
+            raise typer.Exit(code=0) from exc
+
     done = (
-        f"已推送：{plan.remote}/{plan.branch}"
+        f"已推送 {sync.ahead} 个提交：{plan.remote}/{plan.branch}"
         if chinese
-        else f"Pushed: {plan.remote}/{plan.branch}"
+        else f"Pushed {sync.ahead} commit(s): {plan.remote}/{plan.branch}"
+    )
+    console.print(f"[green]{done}[/green]")
+
+
+def _do_pull(
+    *,
+    remote: str | None = None,
+    yes: bool = False,
+    chinese: bool = False,
+) -> None:
+    status = "正在检查远程是否有可拉取内容..." if chinese else "Checking remote for updates..."
+    with console.status(f"[bold]{status}[/bold]"):
+        sync = check_sync(remote=remote, do_fetch=True)
+
+    if sync.behind <= 0:
+        tip = (
+            f"没有可拉取的内容：已与 {sync.remote}/{sync.branch} 同步。"
+            if chinese
+            else f"Nothing to pull: already up to date with {sync.remote}/{sync.branch}."
+        )
+        console.print(f"[yellow]{tip}[/yellow]")
+        raise typer.Exit(code=0)
+
+    behind_tip = (
+        f"待拉取提交数：{sync.behind}（{sync.remote}/{sync.branch}）"
+        if chinese
+        else f"Commits to pull: {sync.behind} ({sync.remote}/{sync.branch})"
+    )
+    console.print(f"[dim]{behind_tip}[/dim]")
+    ask = "确定从远程拉取？" if chinese else "Confirm pull from remote?"
+    if not yes and not Confirm.ask(ask, default=False):
+        console.print("已取消拉取。" if chinese else "Pull aborted.")
+        raise typer.Exit(code=0)
+
+    pull_status = "正在拉取..." if chinese else "Pulling..."
+    with console.status(f"[bold]{pull_status}[/bold]"):
+        try:
+            git_pull(remote=remote, check=sync)
+        except NothingToPull as exc:
+            tip = (
+                f"没有可拉取的内容：{exc}"
+                if chinese
+                else f"Nothing to pull: {exc}"
+            )
+            console.print(f"[yellow]{tip}[/yellow]")
+            raise typer.Exit(code=0) from exc
+
+    done = (
+        f"已拉取 {sync.behind} 个提交：{sync.remote}/{sync.branch}"
+        if chinese
+        else f"Pulled {sync.behind} commit(s): {sync.remote}/{sync.branch}"
     )
     console.print(f"[green]{done}[/green]")
 
@@ -709,6 +793,60 @@ def push_cmd(
             chinese=cn,
             set_upstream=True if set_upstream else None,
         )
+    except (GitError, RuntimeError) as exc:
+        err_console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+    except typer.Exit:
+        raise
+    except KeyboardInterrupt:
+        console.print("\n已取消。" if cn else "\nAborted.")
+        raise typer.Exit(code=130) from None
+    finally:
+        _print_trace(trace=trace, chinese=cn)
+
+
+@app.command(
+    "pull",
+    help=H(
+        "Pull updates from a configured remote. Checks for incoming commits and requires confirmation.",
+        "从已配置的远程拉取更新。先检查是否有可拉取内容，并需确认。",
+    ),
+)
+def pull_cmd(
+    remote: Optional[str] = typer.Option(
+        None,
+        "--remote",
+        "-r",
+        help=H(
+            "Remote name (default: origin if present).",
+            "远程名（默认优先 origin）。",
+        ),
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help=H("Skip interactive confirmation.", "跳过交互确认。"),
+    ),
+    cn: bool = typer.Option(
+        False,
+        "--cn",
+        help=H(
+            "Use Simplified Chinese prompts.",
+            "使用简体中文提示；与 -h 联用时显示中文帮助。",
+        ),
+    ),
+    trace: bool = typer.Option(
+        False,
+        "--trace",
+        "-t",
+        help=_TRACE_OPT_HELP,
+    ),
+) -> None:
+    """Pull from remote after verifying there is something to pull."""
+    _start_trace(trace)
+    try:
+        _do_pull(remote=remote, yes=yes, chinese=cn)
     except (GitError, RuntimeError) as exc:
         err_console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(code=1) from exc

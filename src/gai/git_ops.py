@@ -324,6 +324,78 @@ class PushPlan:
         return " ".join(["git", "push", *self.args])
 
 
+@dataclass(frozen=True)
+class SyncCheck:
+    remote: str
+    branch: str
+    upstream: str | None
+    ahead: int
+    behind: int
+
+
+def fetch_remote(remote: str, cwd: Path | None = None) -> None:
+    ensure_repo(cwd)
+    result = run_git("fetch", remote, cwd=cwd)
+    if result.returncode != 0:
+        raise GitError(
+            (result.stderr or result.stdout or f"git fetch {remote} failed").strip()
+        )
+
+
+def _rev_list_count(range_spec: str, cwd: Path | None = None) -> int:
+    result = run_git("rev-list", "--count", range_spec, cwd=cwd)
+    if result.returncode != 0:
+        raise GitError(
+            (result.stderr or result.stdout or f"git rev-list failed for {range_spec}").strip()
+        )
+    text = (result.stdout or "").strip()
+    try:
+        return int(text or "0")
+    except ValueError as exc:
+        raise GitError(f"unexpected rev-list output: {text!r}") from exc
+
+
+def _remote_branch_exists(remote: str, branch: str, cwd: Path | None = None) -> bool:
+    result = run_git("rev-parse", "--verify", f"refs/remotes/{remote}/{branch}", cwd=cwd)
+    return result.returncode == 0
+
+
+def check_sync(
+    cwd: Path | None = None,
+    *,
+    remote: str | None = None,
+    do_fetch: bool = True,
+) -> SyncCheck:
+    """Fetch (optional) and compute how many commits are ahead/behind remote."""
+    remotes = list_remotes(cwd)
+    remote_name = choose_remote(remotes, preferred=remote)
+    branch = get_current_branch(cwd)
+    if do_fetch:
+        fetch_remote(remote_name, cwd)
+
+    upstream = get_upstream_ref(cwd)
+    remote_ref = f"{remote_name}/{branch}"
+
+    if upstream:
+        ahead = _rev_list_count(f"{upstream}..HEAD", cwd)
+        behind = _rev_list_count(f"HEAD..{upstream}", cwd)
+    elif _remote_branch_exists(remote_name, branch, cwd):
+        ahead = _rev_list_count(f"{remote_ref}..HEAD", cwd)
+        behind = _rev_list_count(f"HEAD..{remote_ref}", cwd)
+    else:
+        # No remote branch yet: everything local is outgoing; nothing incoming.
+        ahead = _rev_list_count("HEAD", cwd)
+        behind = 0
+
+    return SyncCheck(
+        remote=remote_name,
+        branch=branch,
+        upstream=upstream,
+        ahead=ahead,
+        behind=behind,
+    )
+
+
 def plan_push(
     cwd: Path | None = None,
     *,
@@ -359,14 +431,72 @@ def plan_push(
     )
 
 
-def push(cwd: Path | None = None, *, remote: str | None = None, set_upstream: bool | None = None) -> PushPlan:
+class NothingToPush(GitError):
+    """Raised when local branch has no commits ahead of remote."""
+
+
+class NothingToPull(GitError):
+    """Raised when remote has no commits to pull."""
+
+
+def push(
+    cwd: Path | None = None,
+    *,
+    remote: str | None = None,
+    set_upstream: bool | None = None,
+    check: SyncCheck | None = None,
+) -> PushPlan:
     """Push current branch to remote. Returns the plan that was executed."""
     plan = plan_push(cwd, remote=remote, set_upstream=set_upstream)
+    sync = check or check_sync(cwd, remote=plan.remote, do_fetch=True)
+    if sync.ahead <= 0:
+        raise NothingToPush(
+            f"Nothing to push: {plan.remote}/{plan.branch} is up to date "
+            f"(ahead={sync.ahead})."
+        )
+
     result = run_git("push", *plan.args, cwd=cwd)
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "git push failed").strip()
         raise GitError(detail)
+
+    combined = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
+    if "everything up-to-date" in combined:
+        raise NothingToPush(
+            f"Nothing to push: {plan.remote}/{plan.branch} is already up to date."
+        )
     return plan
+
+
+def pull(
+    cwd: Path | None = None,
+    *,
+    remote: str | None = None,
+    check: SyncCheck | None = None,
+) -> SyncCheck:
+    """Pull from remote after verifying there is something to pull."""
+    sync = check or check_sync(cwd, remote=remote, do_fetch=True)
+    if sync.behind <= 0:
+        raise NothingToPull(
+            f"Nothing to pull: already up to date with "
+            f"{sync.remote}/{sync.branch} (behind={sync.behind})."
+        )
+
+    if sync.upstream:
+        result = run_git("pull", cwd=cwd)
+    else:
+        result = run_git("pull", sync.remote, sync.branch, cwd=cwd)
+
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "git pull failed").strip()
+        raise GitError(detail)
+
+    combined = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
+    if "already up to date" in combined or "already up-to-date" in combined:
+        raise NothingToPull(
+            f"Nothing to pull: already up to date with {sync.remote}/{sync.branch}."
+        )
+    return sync
 
 
 @dataclass(frozen=True)
