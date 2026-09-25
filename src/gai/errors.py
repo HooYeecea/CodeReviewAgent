@@ -182,21 +182,33 @@ _GIT_MESSAGES: dict[str, tuple[str, str]] = {
 _PERIOD_MESSAGES: dict[str, tuple[str, str]] = {
     "since_after_until": (
         "Invalid period: --since ({since}) is later than --until ({until}). "
-        "Start time must not be after end time.",
-        "时间范围无效：--since（{since}）晚于 --until（{until}）。开始时间不能晚于结束时间。",
+        "Start time must not be after end time. "
+        "Example: --since 2026-09-01 --until 2026-09-20",
+        "时间范围无效：--since（{since}）晚于 --until（{until}）。开始时间不能晚于结束时间。"
+        "正确示例：--since 2026-09-01 --until 2026-09-20",
     ),
     "invalid_since": (
-        "Invalid --since date: {value!r}. Use YYYY-MM-DD, relative like 7d/2w, or alltime.",
-        "无效的 --since 日期：{value!r}。请使用 YYYY-MM-DD、相对时间如 7d/2w，或 alltime。",
+        "Invalid --since date: {value!r}. "
+        "Correct formats: YYYY-MM-DD (e.g. 2026-09-01), "
+        "relative N[dwmy] (e.g. 7d / 2w / 1m / 1y), or alltime.",
+        "无效的 --since 日期：{value!r}。"
+        "正确格式：YYYY-MM-DD（如 2026-09-01）、"
+        "相对时间 N[dwmy]（如 7d / 2w / 1m / 1y），或 alltime。",
     ),
     "invalid_until": (
-        "Invalid --until date: {value!r}. Use YYYY-MM-DD or a git-compatible date.",
-        "无效的 --until 日期：{value!r}。请使用 YYYY-MM-DD 或 git 可识别的日期。",
+        "Invalid --until date: {value!r}. "
+        "Correct formats: YYYY-MM-DD (e.g. 2026-09-20), "
+        "or a git-compatible date string.",
+        "无效的 --until 日期：{value!r}。"
+        "正确格式：YYYY-MM-DD（如 2026-09-20），"
+        "或 git 可识别的日期字符串。",
     ),
     "no_commits": (
         "No commits found in the selected range. "
-        "Try a wider --since / --alltime or drop --author.",
-        "所选时间范围内没有提交。请扩大 --since / 使用 --alltime，或去掉 --author。",
+        "Try a wider --since / --alltime or drop --author. "
+        "Example: --since 14d  or  --since 2026-09-01 --until 2026-09-20",
+        "所选时间范围内没有提交。请扩大 --since / 使用 --alltime，或去掉 --author。"
+        "正确示例：--since 14d  或  --since 2026-09-01 --until 2026-09-20",
     ),
 }
 

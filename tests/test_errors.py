@@ -72,6 +72,25 @@ def test_period_invalid_iso_since():
             today=date(2026, 9, 25),
         )
     assert caught.value.code == "invalid_since"
+    en = format_cli_error(caught.value, chinese=False)
+    cn = format_cli_error(caught.value, chinese=True)
+    assert "YYYY-MM-DD" in en
+    assert "7d" in en
+    assert "正确格式" in cn
+    assert "2026-09-01" in cn
+
+
+def test_period_invalid_iso_until():
+    with pytest.raises(PeriodError) as caught:
+        validate_report_period(
+            since_query="7d",
+            until_query="2026-99-01",
+            today=date(2026, 9, 25),
+        )
+    assert caught.value.code == "invalid_until"
+    cn = format_cli_error(caught.value, chinese=True)
+    assert "正确格式" in cn
+    assert "YYYY-MM-DD" in cn
 
 
 def test_period_relative_vs_until_ok():
