@@ -9,57 +9,75 @@ from typing import Iterable
 import click
 from click.exceptions import NoSuchOption, UsageError
 
-# Subcommand → short correct examples (EN / 简体中文)
-_COMMAND_EXAMPLES: dict[str, tuple[str, ...]] = {
+# Subcommand → (command, English what-it-does, Chinese what-it-does)
+_COMMAND_EXAMPLES: dict[str, tuple[tuple[str, str, str], ...]] = {
     "add": (
-        "gai add",
-        "gai add src/",
-        "gai add --cn -t",
+        ("gai add", "Stage all changes in the current directory", "暂存当前目录全部变更"),
+        ("gai add src/", "Stage files under src/", "暂存 src/ 目录下的文件"),
+        ("gai add --cn -t", "Stage with Chinese tips and print git trace", "中文提示暂存，并打印 git 链路"),
     ),
     "unadd": (
-        "gai unadd --cn",
-        "gai unadd src/",
+        ("gai unadd --cn", "Unstage all staged files (asks for confirmation)", "撤销全部暂存（需确认）"),
+        ("gai unadd src/", "Unstage files under src/", "撤销 src/ 下的暂存"),
     ),
     "uncommit": (
-        "gai uncommit --cn",
+        ("gai uncommit --cn", "Soft-undo the latest commit (keeps changes staged)", "软撤销最近一次提交（改动仍保留在暂存区）"),
     ),
     "review": (
-        "gai review --cn",
-        "gai review --json",
+        ("gai review --cn", "AI-review staged changes only (no commit)", "仅审查已暂存变更（不提交）"),
+        ("gai review --json", "Output the review result as JSON", "以 JSON 输出审查结果"),
     ),
     "commit": (
-        "gai commit --cn",
-        "gai commit -y --cn",
-        "gai commit --cn --push",
-        "gai commit -m \"fix: handle nil\" --no-ai",
+        ("gai commit --cn", "Review → suggest message → confirm → commit", "审查 → 建议提交信息 → 确认 → 提交"),
+        ("gai commit -y --cn", "Commit with defaults, skip interactive confirm", "按默认流程提交，跳过交互确认"),
+        ("gai commit --cn --push", "Commit then push to the configured remote", "提交成功后推送到已配置的远程"),
+        (
+            'gai commit -m "fix: handle nil" --no-ai',
+            "Commit with a given message, skip AI",
+            "使用指定信息提交，跳过 AI",
+        ),
     ),
     "push": (
-        "gai push --cn",
-        "gai push -y --cn",
-        "gai push -r origin -u --cn",
+        ("gai push --cn", "Push current branch (checks there is something to push)", "推送当前分支（先检查是否有可推送内容）"),
+        ("gai push -y --cn", "Push without interactive confirmation", "推送并跳过交互确认"),
+        ("gai push -r origin -u --cn", "Push to origin and set upstream tracking", "推送到 origin 并设置上游跟踪"),
     ),
     "pull": (
-        "gai pull --cn",
-        "gai pull -y --cn",
+        ("gai pull --cn", "Pull after checking remote has updates (asks to confirm)", "检查远程有更新后确认再拉取"),
+        ("gai pull -y --cn", "Pull without interactive confirmation", "拉取并跳过交互确认"),
     ),
     "report": (
-        "gai report --cn",
-        "gai report --since 7d --cn",
-        "gai report --since 2026-09-01 --until 2026-09-20 --cn",
-        "gai report --alltime --author me --cn",
+        ("gai report --cn", "Summarize recent commits into a work report", "根据近期提交生成工作总结"),
+        ("gai report --since 7d --cn", "Report covering the last 7 days", "统计最近 7 天的提交"),
+        (
+            "gai report --since 2026-09-01 --until 2026-09-20 --cn",
+            "Report for an explicit date range",
+            "按指定起止日期生成报告",
+        ),
+        (
+            "gai report --alltime --author me --cn",
+            "Full-history report for the current git user",
+            "当前用户的全部历史提交总结",
+        ),
     ),
     "config": (
-        "gai config --show --cn",
-        "gai config --api-key <key>",
+        ("gai config --show --cn", "Show effective config (secrets masked)", "查看当前生效配置（密钥已掩码）"),
+        ("gai config --api-key <key>", "Save API key to ~/.gai/config.toml", "把 API Key 写入 ~/.gai/config.toml"),
     ),
 }
 
-_COMMON_OPTION_EXAMPLES: tuple[str, ...] = (
-    "--cn",
-    "-t / --trace",
-    "-h / --help",
-    "-y / --yes",
-)
+
+def _example_lines(command: str, *, chinese: bool, limit: int = 3) -> list[str]:
+    """Format '正确示例/Correct examples' lines with what each command does."""
+    items = _COMMAND_EXAMPLES.get(command, ())
+    if not items:
+        return []
+    header = "正确示例：" if chinese else "Correct examples:"
+    lines = [header]
+    for cmd, en, cn in items[:limit]:
+        desc = cn if chinese else en
+        lines.append(f"  {cmd}  —  {desc}")
+    return lines
 
 
 def want_chinese(argv: Iterable[str] | None = None) -> bool:
@@ -221,9 +239,7 @@ def format_usage_error(
                 lines.append("你是否想执行：" + "、".join(f"`{s}`" for s in suggestions))
             target = suggestions[0] if suggestions else None
             if target and target in _COMMAND_EXAMPLES:
-                lines.append("正确示例：")
-                for ex in _COMMAND_EXAMPLES[target][:3]:
-                    lines.append(f"  {ex}")
+                lines.extend(_example_lines(target, chinese=True, limit=3))
             else:
                 lines.append("可用子命令：" + "、".join(commands))
                 lines.append("查看帮助：gai -h --cn")
@@ -233,9 +249,7 @@ def format_usage_error(
                 lines.append("Did you mean: " + ", ".join(f"`{s}`" for s in suggestions))
             target = suggestions[0] if suggestions else None
             if target and target in _COMMAND_EXAMPLES:
-                lines.append("Correct examples:")
-                for ex in _COMMAND_EXAMPLES[target][:3]:
-                    lines.append(f"  {ex}")
+                lines.extend(_example_lines(target, chinese=False, limit=3))
             else:
                 lines.append("Available commands: " + ", ".join(commands))
                 lines.append("See help: gai -h")
@@ -277,9 +291,7 @@ def format_usage_error(
             if suggestions:
                 lines.append("你是否想使用：" + "、".join(f"`{s}`" for s in suggestions))
             if invoked_cmd and invoked_cmd in _COMMAND_EXAMPLES:
-                lines.append("正确示例：")
-                for ex in _COMMAND_EXAMPLES[invoked_cmd][:3]:
-                    lines.append(f"  {ex}")
+                lines.extend(_example_lines(invoked_cmd, chinese=True, limit=3))
             lines.append(f"查看该命令帮助：gai {invoked_cmd or '<command>'} -h --cn")
         else:
             lines.append(f"Unknown option: {token}" if token else "Unknown option.")
@@ -291,9 +303,7 @@ def format_usage_error(
             if suggestions:
                 lines.append("Did you mean: " + ", ".join(f"`{s}`" for s in suggestions))
             if invoked_cmd and invoked_cmd in _COMMAND_EXAMPLES:
-                lines.append("Correct examples:")
-                for ex in _COMMAND_EXAMPLES[invoked_cmd][:3]:
-                    lines.append(f"  {ex}")
+                lines.extend(_example_lines(invoked_cmd, chinese=False, limit=3))
             lines.append(f"See help: gai {invoked_cmd or '<command>'} -h")
         return "\n".join(lines)
 
@@ -319,8 +329,8 @@ def format_usage_error(
                     lines.append(f"正确示例：gai {invoked_cmd} {uniq[0]}")
             if invoked_cmd and invoked_cmd in _COMMAND_EXAMPLES:
                 lines.append("更多示例：")
-                for ex in _COMMAND_EXAMPLES[invoked_cmd][:2]:
-                    lines.append(f"  {ex}")
+                for cmd, _en, cn in _COMMAND_EXAMPLES[invoked_cmd][:2]:
+                    lines.append(f"  {cmd}  —  {cn}")
             lines.append(f"查看帮助：gai {invoked_cmd or '-h'} -h --cn")
         else:
             lines.append(
@@ -334,8 +344,8 @@ def format_usage_error(
                     lines.append(f"Correct example: gai {invoked_cmd} {uniq[0]}")
             if invoked_cmd and invoked_cmd in _COMMAND_EXAMPLES:
                 lines.append("More examples:")
-                for ex in _COMMAND_EXAMPLES[invoked_cmd][:2]:
-                    lines.append(f"  {ex}")
+                for cmd, en, _cn in _COMMAND_EXAMPLES[invoked_cmd][:2]:
+                    lines.append(f"  {cmd}  —  {en}")
             lines.append(f"See help: gai {invoked_cmd or '-h'} -h")
         return "\n".join(lines)
 
@@ -344,16 +354,12 @@ def format_usage_error(
         lines.append(f"命令用法有误：{message}")
         lines.append("可用子命令：" + "、".join(commands))
         if invoked_cmd and invoked_cmd in _COMMAND_EXAMPLES:
-            lines.append("正确示例：")
-            for ex in _COMMAND_EXAMPLES[invoked_cmd][:3]:
-                lines.append(f"  {ex}")
+            lines.extend(_example_lines(invoked_cmd, chinese=True, limit=3))
         lines.append("查看帮助：gai -h --cn")
     else:
         lines.append(f"Usage error: {message}")
         lines.append("Available commands: " + ", ".join(commands))
         if invoked_cmd and invoked_cmd in _COMMAND_EXAMPLES:
-            lines.append("Correct examples:")
-            for ex in _COMMAND_EXAMPLES[invoked_cmd][:3]:
-                lines.append(f"  {ex}")
+            lines.extend(_example_lines(invoked_cmd, chinese=False, limit=3))
         lines.append("See help: gai -h")
     return "\n".join(lines)

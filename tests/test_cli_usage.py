@@ -14,7 +14,7 @@ def test_close_matches_commit_typo():
 
 def test_format_unknown_command_cn():
     root = get_command(app)
-    # Simulate click message
+
     class Exc(Exception):
         pass
 
@@ -23,6 +23,25 @@ def test_format_unknown_command_cn():
     assert "未知子命令" in tip
     assert "commit" in tip
     assert "gai commit" in tip
+    assert "—" in tip
+    assert "审查" in tip or "提交" in tip
+
+
+def test_format_unknown_command_en_has_desc():
+    root = get_command(app)
+
+    class Exc(Exception):
+        pass
+
+    tip = format_usage_error(
+        Exc("No such command 'pus'."),
+        argv=["pus"],
+        root=root,
+        chinese=False,
+    )
+    assert "Correct examples" in tip
+    assert "gai push" in tip
+    assert "Push current branch" in tip
 
 
 def test_format_unknown_option_double_dash_cn():
