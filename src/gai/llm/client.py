@@ -7,6 +7,7 @@ from typing import Any
 import httpx
 
 from gai.config import Settings
+from gai.llm.usage import record_llm_call
 
 
 class LLMError(RuntimeError):
@@ -131,4 +132,29 @@ class LLMClient:
 
         if not isinstance(content, str) or not content.strip():
             raise LLMError("LLM returned empty content", kind="empty")
+
+        usage = data.get("usage") if isinstance(data, dict) else None
+        prompt_tokens = completion_tokens = total_tokens = None
+        if isinstance(usage, dict):
+            prompt_tokens = _as_int(usage.get("prompt_tokens"))
+            completion_tokens = _as_int(usage.get("completion_tokens"))
+            total_tokens = _as_int(usage.get("total_tokens"))
+        model_name = ""
+        if isinstance(data, dict):
+            model_name = str(data.get("model") or "").strip()
+        record_llm_call(
+            model=model_name or self.settings.model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+        )
         return content
+
+
+def _as_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None

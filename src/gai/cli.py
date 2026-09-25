@@ -34,6 +34,7 @@ from gai.git_ops import (
 )
 from gai.help_i18n import H
 from gai.llm.client import LLMError
+from gai.llm.usage import clear_llm_usage, get_llm_calls, usage_totals
 from gai.report import export_report, render_report, run_report
 from gai.review import render_review, run_review
 
@@ -64,6 +65,67 @@ def _version_callback(value: bool) -> None:
 
 def _start_trace(trace: bool) -> None:
     set_tracing(trace)
+    clear_llm_usage()
+
+
+def _print_llm_usage(*, chinese: bool = False) -> None:
+    """Always report whether this invocation called the LLM (and token usage)."""
+    calls = get_llm_calls()
+    if not calls:
+        msg = (
+            "本次命令未涉及调用大模型。"
+            if chinese
+            else "This command did not call the LLM."
+        )
+        console.print(f"[dim]{msg}[/dim]")
+        return
+
+    models: list[str] = []
+    for c in calls:
+        if c.model and c.model not in models:
+            models.append(c.model)
+    model_text = "、".join(models) if chinese else ", ".join(models)
+    prompt, completion, total = usage_totals(calls)
+    n = len(calls)
+
+    if chinese:
+        head = (
+            f"本次命令已调用大模型（{n} 次）：模型 {model_text}"
+            if n > 1
+            else f"本次命令已调用大模型：模型 {model_text}"
+        )
+        if total is not None:
+            detail = f"，消耗 token 约 {total}"
+            parts = []
+            if prompt is not None:
+                parts.append(f"输入 {prompt}")
+            if completion is not None:
+                parts.append(f"输出 {completion}")
+            if parts:
+                detail += f"（{' + '.join(parts)}）"
+            head += detail
+        else:
+            head += "（接口未返回 token 用量）"
+        console.print(f"[dim]{head}。[/dim]")
+    else:
+        head = (
+            f"This command called the LLM ({n} time(s)): model {model_text}"
+            if n > 1
+            else f"This command called the LLM: model {model_text}"
+        )
+        if total is not None:
+            detail = f", ~{total} tokens"
+            parts = []
+            if prompt is not None:
+                parts.append(f"prompt {prompt}")
+            if completion is not None:
+                parts.append(f"completion {completion}")
+            if parts:
+                detail += f" ({' + '.join(parts)})"
+            head += detail
+        else:
+            head += " (provider did not return token usage)"
+        console.print(f"[dim]{head}.[/dim]")
 
 
 def _print_trace(*, trace: bool, chinese: bool = False) -> None:
@@ -83,6 +145,12 @@ def _print_trace(*, trace: bool, chinese: bool = False) -> None:
     console.print(f"[bold]{title}[/bold]")
     for cmd in cmds:
         console.print(f"  [cyan]→[/cyan] {cmd}")
+
+
+def _print_footer(*, trace: bool, chinese: bool = False) -> None:
+    console.print()
+    _print_llm_usage(chinese=chinese)
+    _print_trace(trace=trace, chinese=chinese)
 
 
 def _print_error(
@@ -174,7 +242,7 @@ def add_cmd(
         _print_error(exc, chinese=cn, trace=trace)
         raise typer.Exit(code=1) from exc
     finally:
-        _print_trace(trace=trace, chinese=cn)
+        _print_footer(trace=trace, chinese=cn)
 
 
 @app.command(
@@ -248,7 +316,7 @@ def unadd_cmd(
         console.print("\n已取消。" if cn else "\nAborted.")
         raise typer.Exit(code=130) from None
     finally:
-        _print_trace(trace=trace, chinese=cn)
+        _print_footer(trace=trace, chinese=cn)
 
 
 @app.command(
@@ -321,7 +389,7 @@ def uncommit_cmd(
         console.print("\n已取消。" if cn else "\nAborted.")
         raise typer.Exit(code=130) from None
     finally:
-        _print_trace(trace=trace, chinese=cn)
+        _print_footer(trace=trace, chinese=cn)
 
 
 @app.command(
@@ -397,7 +465,7 @@ def review_cmd(
     except typer.Exit:
         raise
     finally:
-        _print_trace(trace=trace, chinese=cn)
+        _print_footer(trace=trace, chinese=cn)
 
 
 @app.command(
@@ -601,7 +669,7 @@ def commit_cmd(
         console.print("\n已取消。" if cn else "\nAborted.")
         raise typer.Exit(code=130) from None
     finally:
-        _print_trace(trace=trace, chinese=cn)
+        _print_footer(trace=trace, chinese=cn)
 
 
 def _confirm_and_commit(
@@ -820,7 +888,7 @@ def push_cmd(
         console.print("\n已取消。" if cn else "\nAborted.")
         raise typer.Exit(code=130) from None
     finally:
-        _print_trace(trace=trace, chinese=cn)
+        _print_footer(trace=trace, chinese=cn)
 
 
 @app.command(
@@ -874,7 +942,7 @@ def pull_cmd(
         console.print("\n已取消。" if cn else "\nAborted.")
         raise typer.Exit(code=130) from None
     finally:
-        _print_trace(trace=trace, chinese=cn)
+        _print_footer(trace=trace, chinese=cn)
 
 
 @app.command(
@@ -1041,7 +1109,7 @@ def report_cmd(
         _print_error(exc, chinese=cn, trace=trace)
         raise typer.Exit(code=1) from exc
     finally:
-        _print_trace(trace=trace, chinese=cn)
+        _print_footer(trace=trace, chinese=cn)
 
 
 @app.command(
@@ -1141,7 +1209,7 @@ def config_cmd(
                 )
                 console.print(tip)
     finally:
-        _print_trace(trace=trace, chinese=cn)
+        _print_footer(trace=trace, chinese=cn)
 
 
 def run(argv: list[str] | None = None) -> int:
