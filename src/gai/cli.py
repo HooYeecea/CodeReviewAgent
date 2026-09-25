@@ -11,6 +11,7 @@ from rich.console import Console
 from rich.prompt import Confirm, Prompt
 
 from gai import __version__
+from gai.cli_usage import format_usage_error, want_chinese
 from gai.config import CONFIG_FILE, load_settings, save_settings, settings_summary
 from gai.errors import PeriodError, format_cli_error
 from gai.git_ops import (
@@ -1143,6 +1144,60 @@ def config_cmd(
         _print_trace(trace=trace, chinese=cn)
 
 
+def run(argv: list[str] | None = None) -> int:
+    """CLI entrypoint with friendly usage-error hints (typos / missing dashes)."""
+    from typer.main import get_command
+
+    args = list(sys.argv[1:] if argv is None else argv)
+    chinese = want_chinese(args)
+    root = get_command(app)
+
+    def _exit_code(exc: BaseException) -> int | None:
+        if type(exc).__name__ == "Exit":
+            code = getattr(exc, "exit_code", 0)
+            return int(code) if code is not None else 0
+        if isinstance(exc, typer.Exit):
+            code = getattr(exc, "exit_code", 0)
+            return int(code) if code is not None else 0
+        return None
+
+    def _is_usage_error(exc: BaseException) -> bool:
+        name = type(exc).__name__
+        if name in {
+            "UsageError",
+            "NoSuchOption",
+            "NoSuchCommand",
+            "BadOptionUsage",
+            "BadArgumentUsage",
+            "BadParameter",
+        }:
+            return True
+        try:
+            import click
+
+            return isinstance(exc, click.ClickException) and type(exc).__name__ != "Exit"
+        except Exception:
+            return False
+
+    try:
+        root.main(args=args, prog_name="gai", standalone_mode=False)
+        return 0
+    except BaseException as exc:
+        code = _exit_code(exc)
+        if code is not None:
+            return code
+        if type(exc).__name__ == "Abort":
+            tip = "\n已取消。" if chinese else "\nAborted."
+            err_console.print(tip)
+            return 130
+        if _is_usage_error(exc):
+            tip = format_usage_error(exc, argv=args, root=root, chinese=chinese)
+            label = "用法错误：" if chinese else "Usage:"
+            err_console.print(f"[red]{label}[/red]")
+            err_console.print(tip)
+            return 2
+        raise
+
+
 if __name__ == "__main__":
-    app()
-    sys.exit(0)
+    raise SystemExit(run())

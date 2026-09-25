@@ -23,7 +23,7 @@ dev = [
 ]
 
 [project.scripts]
-gai = "gai.cli:app"
+gai = "gai.cli:run"
 
 [tool.setuptools.packages.find]
 where = ["src"]
