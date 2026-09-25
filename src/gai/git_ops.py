@@ -13,6 +13,10 @@ from pathlib import Path
 class GitError(RuntimeError):
     """Raised when a git command fails or the cwd is not a repo."""
 
+    def __init__(self, message: str, *, code: str | None = None) -> None:
+        super().__init__(message)
+        self.code = code
+
 
 @dataclass(frozen=True)
 class GitResult:
@@ -64,7 +68,7 @@ def run_git(*args: str, cwd: Path | None = None) -> GitResult:
             check=False,
         )
     except FileNotFoundError as exc:
-        raise GitError("git executable not found on PATH") from exc
+        raise GitError("git executable not found on PATH", code="no_git") from exc
 
     return GitResult(
         stdout=completed.stdout or "",
@@ -76,7 +80,10 @@ def run_git(*args: str, cwd: Path | None = None) -> GitResult:
 def ensure_repo(cwd: Path | None = None) -> Path:
     result = run_git("rev-parse", "--show-toplevel", cwd=cwd)
     if result.returncode != 0:
-        raise GitError(result.stderr.strip() or "not a git repository")
+        raise GitError(
+            result.stderr.strip() or "not a git repository",
+            code="not_repo",
+        )
     return Path(result.stdout.strip())
 
 
@@ -189,10 +196,13 @@ def get_staged_diff(
 def commit(message: str, cwd: Path | None = None) -> None:
     ensure_repo(cwd)
     if not message.strip():
-        raise GitError("commit message must not be empty")
+        raise GitError("commit message must not be empty", code="empty_message")
     result = run_git("commit", "-m", message, cwd=cwd)
     if result.returncode != 0:
-        raise GitError(result.stderr.strip() or result.stdout.strip() or "git commit failed")
+        raise GitError(
+            result.stderr.strip() or result.stdout.strip() or "git commit failed",
+            code="commit_failed",
+        )
 
 
 def add(paths: list[str] | tuple[str, ...] | None = None, cwd: Path | None = None) -> None:
@@ -203,21 +213,25 @@ def add(paths: list[str] | tuple[str, ...] | None = None, cwd: Path | None = Non
         targets = ["."]
     result = run_git("add", "--", *targets, cwd=cwd)
     if result.returncode != 0:
-        raise GitError(result.stderr.strip() or result.stdout.strip() or "git add failed")
+        raise GitError(
+            result.stderr.strip() or result.stdout.strip() or "git add failed",
+            code="add_failed",
+        )
 
 
 def unadd(paths: list[str] | tuple[str, ...] | None = None, cwd: Path | None = None) -> None:
     """Unstage files via `git restore --staged`. Defaults to `.` when paths is empty."""
     ensure_repo(cwd)
     if not has_staged_changes(cwd):
-        raise GitError("nothing staged to unadd")
+        raise GitError("nothing staged to unadd", code="nothing_to_unadd")
     targets = [p for p in (paths or []) if str(p).strip()]
     if not targets:
         targets = ["."]
     result = run_git("restore", "--staged", "--", *targets, cwd=cwd)
     if result.returncode != 0:
         raise GitError(
-            result.stderr.strip() or result.stdout.strip() or "git restore --staged failed"
+            result.stderr.strip() or result.stdout.strip() or "git restore --staged failed",
+            code="unadd_failed",
         )
 
 
@@ -236,11 +250,15 @@ def uncommit(cwd: Path | None = None) -> str:
     ensure_repo(cwd)
     subject = last_commit_subject(cwd)
     if subject is None:
-        raise GitError("no commit to undo (repository has no commits?)")
+        raise GitError(
+            "no commit to undo (repository has no commits?)",
+            code="no_commit",
+        )
     result = run_git("reset", "--soft", "HEAD~1", cwd=cwd)
     if result.returncode != 0:
         raise GitError(
-            result.stderr.strip() or result.stdout.strip() or "git reset --soft HEAD~1 failed"
+            result.stderr.strip() or result.stdout.strip() or "git reset --soft HEAD~1 failed",
+            code="uncommit_failed",
         )
     return subject
 
@@ -268,7 +286,10 @@ def get_current_branch(cwd: Path | None = None) -> str:
         raise GitError(result.stderr.strip() or "failed to get current branch")
     branch = result.stdout.strip()
     if not branch or branch == "HEAD":
-        raise GitError("detached HEAD; checkout a branch before pushing")
+        raise GitError(
+            "detached HEAD; checkout a branch before pushing",
+            code="detached_head",
+        )
     return branch
 
 
@@ -293,13 +314,15 @@ def choose_remote(remotes: list[str], preferred: str | None = None) -> str:
     if not remotes:
         raise GitError(
             "No git remote configured. Add one first, e.g. "
-            "`git remote add origin <url>`."
+            "`git remote add origin <url>`.",
+            code="no_remote",
         )
     if preferred:
         name = preferred.strip()
         if name not in remotes:
             raise GitError(
-                f"Remote '{name}' not found. Available: {', '.join(remotes)}"
+                f"Remote '{name}' not found. Available: {', '.join(remotes)}",
+                code="remote_not_found",
             )
         return name
     if "origin" in remotes:
@@ -308,7 +331,8 @@ def choose_remote(remotes: list[str], preferred: str | None = None) -> str:
         return remotes[0]
     raise GitError(
         "Multiple remotes found and none named 'origin'. "
-        f"Pass --remote explicitly. Available: {', '.join(remotes)}"
+        f"Pass --remote explicitly. Available: {', '.join(remotes)}",
+        code="multiple_remotes",
     )
 
 
@@ -333,13 +357,54 @@ class SyncCheck:
     behind: int
 
 
+def classify_remote_failure(detail: str) -> str:
+    """Map git remote stderr to a stable error code."""
+    text = (detail or "").lower()
+    auth_hints = (
+        "authentication failed",
+        "permission denied",
+        "could not read username",
+        "invalid username",
+        "access denied",
+        "403",
+        "401",
+        "terminal prompts disabled",
+        "publickey",
+    )
+    if any(h in text for h in auth_hints):
+        return "auth"
+    reject_hints = (
+        "non-fast-forward",
+        "fetch first",
+        "rejected",
+        "protected branch",
+        "updates were rejected",
+    )
+    if any(h in text for h in reject_hints):
+        return "rejected"
+    net_hints = (
+        "could not resolve host",
+        "failed to connect",
+        "connection refused",
+        "network is unreachable",
+        "timed out",
+        "timeout",
+        "ssl",
+        "tls",
+        "unable to access",
+    )
+    if any(h in text for h in net_hints):
+        return "network"
+    return "generic"
+
+
 def fetch_remote(remote: str, cwd: Path | None = None) -> None:
     ensure_repo(cwd)
     result = run_git("fetch", remote, cwd=cwd)
     if result.returncode != 0:
-        raise GitError(
-            (result.stderr or result.stdout or f"git fetch {remote} failed").strip()
-        )
+        detail = (result.stderr or result.stdout or f"git fetch {remote} failed").strip()
+        code = classify_remote_failure(detail)
+        raise GitError(detail, code="fetch_failed" if code == "generic" else code)
 
 
 def _rev_list_count(range_spec: str, cwd: Path | None = None) -> int:
@@ -414,7 +479,8 @@ def plan_push(
     elif set_upstream is False and upstream is None:
         raise GitError(
             f"Branch '{branch}' has no upstream. "
-            "Re-run with --set-upstream (or omit --no-set-upstream)."
+            "Re-run with --set-upstream (or omit --no-set-upstream).",
+            code="no_upstream",
         )
 
     if need_upstream:
@@ -458,7 +524,8 @@ def push(
     result = run_git("push", *plan.args, cwd=cwd)
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "git push failed").strip()
-        raise GitError(detail)
+        code = classify_remote_failure(detail)
+        raise GitError(detail, code="push_failed" if code == "generic" else code)
 
     combined = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
     if "everything up-to-date" in combined:
@@ -489,7 +556,8 @@ def pull(
 
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "git pull failed").strip()
-        raise GitError(detail)
+        code = classify_remote_failure(detail)
+        raise GitError(detail, code="pull_failed" if code == "generic" else code)
 
     combined = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
     if "already up to date" in combined or "already up-to-date" in combined:
@@ -571,7 +639,8 @@ def current_author_filter(cwd: Path | None = None) -> str:
         return name.stdout.strip()
     raise GitError(
         "Cannot resolve current user. Set git user.email/user.name "
-        "or pass --author explicitly."
+        "or pass --author explicitly.",
+        code="no_author",
     )
 
 
@@ -617,7 +686,10 @@ def get_commits(
 
     result = run_git(*args, cwd=cwd)
     if result.returncode != 0:
-        raise GitError(result.stderr.strip() or "git log failed")
+        raise GitError(
+            result.stderr.strip() or "git log failed",
+            code="log_failed",
+        )
 
     return _parse_commit_log(result.stdout)
 

@@ -16,6 +16,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from gai.config import Settings, load_settings
+from gai.errors import PeriodError
 from gai.git_ops import (
     CommitInfo,
     current_author_filter,
@@ -166,6 +167,7 @@ def format_participants_for_prompt(stats: list[ParticipantStat]) -> str:
 
 _RELATIVE_PERIOD = re.compile(r"^(\d+)\s*([dwmy])$", re.IGNORECASE)
 _ISO_DATE = re.compile(r"^(\d{4}-\d{2}-\d{2})")
+_ISO_DATE_LOOKALIKE = re.compile(r"^\d{4}-\d{1,2}-\d{1,2}")
 
 
 def _parse_calendar_date(value: str | None, *, fallback: date) -> date:
@@ -179,6 +181,58 @@ def _parse_calendar_date(value: str | None, *, fallback: date) -> date:
         except ValueError:
             return fallback
     return fallback
+
+
+def _parse_period_token(value: str, *, field: str, today: date) -> date | None:
+    """Parse --since/--until into a calendar date when comparable.
+
+    Returns None for alltime / git freeform dates that we cannot compare.
+    Raises PeriodError for invalid ISO-like dates.
+    """
+    text = value.strip()
+    if not text or is_alltime_token(text):
+        return None
+    if _RELATIVE_PERIOD.match(text):
+        return resolve_since_to_calendar_date(text, today)
+    if _ISO_DATE_LOOKALIKE.match(text):
+        m = _ISO_DATE.match(text)
+        code = "invalid_since" if field == "since" else "invalid_until"
+        if not m:
+            raise PeriodError(code, value=text)
+        try:
+            return date.fromisoformat(m.group(1))
+        except ValueError as exc:
+            raise PeriodError(code, value=text) from exc
+    # Git-compatible freeform (e.g. "3 days ago") — skip calendar compare.
+    return None
+
+
+def validate_report_period(
+    *,
+    since_query: str | None,
+    until_query: str | None,
+    alltime: bool = False,
+    today: date | None = None,
+) -> None:
+    """Ensure --since/--until are valid and start is not after end."""
+    today = today or date.today()
+    until_date = None
+    if until_query:
+        until_date = _parse_period_token(until_query, field="until", today=today)
+
+    if alltime or is_alltime_token(since_query):
+        return
+
+    since_date = None
+    if since_query:
+        since_date = _parse_period_token(since_query, field="since", today=today)
+
+    if since_date is not None and until_date is not None and since_date > until_date:
+        raise PeriodError(
+            "since_after_until",
+            since=since_date.isoformat(),
+            until=until_date.isoformat(),
+        )
 
 
 def resolve_since_to_calendar_date(value: str | None, today: date) -> date | None:
@@ -450,6 +504,12 @@ def run_report(
 
     until_resolved = until.strip() if until and until.strip() else None
 
+    validate_report_period(
+        since_query=since_query,
+        until_query=until_resolved,
+        alltime=alltime_mode,
+    )
+
     author_filter = author
     if author_filter and author_filter.strip().lower() in {"me", "self"}:
         author_filter = current_author_filter()
@@ -468,10 +528,7 @@ def run_report(
         include_stat=include_stat,
     )
     if not commits:
-        raise RuntimeError(
-            "No commits found in the selected range. "
-            "Try a wider --since / --alltime or drop --author."
-        )
+        raise PeriodError("no_commits")
 
     period_start, period_end, period_label = compute_period_bounds(
         since_query=since_query,

@@ -12,6 +12,7 @@ from rich.prompt import Confirm, Prompt
 
 from gai import __version__
 from gai.config import CONFIG_FILE, load_settings, save_settings, settings_summary
+from gai.errors import PeriodError, format_cli_error
 from gai.git_ops import (
     GitError,
     NothingToPull,
@@ -81,6 +82,22 @@ def _print_trace(*, trace: bool, chinese: bool = False) -> None:
     console.print(f"[bold]{title}[/bold]")
     for cmd in cmds:
         console.print(f"  [cyan]→[/cyan] {cmd}")
+
+
+def _print_error(
+    exc: BaseException,
+    *,
+    chinese: bool = False,
+    trace: bool = False,
+) -> None:
+    """Print a friendly error; with --trace also show raw detail when available."""
+    label = "错误：" if chinese else "Error:"
+    msg = format_cli_error(exc, chinese=chinese)
+    err_console.print(f"[red]{label}[/red] {msg}")
+    detail = getattr(exc, "detail", None)
+    if trace and detail:
+        tip = "原始详情：" if chinese else "Raw detail:"
+        err_console.print(f"[dim]{tip} {detail}[/dim]")
 
 
 @app.callback()
@@ -153,7 +170,7 @@ def add_cmd(
         if status:
             console.print("[dim]" + status + "[/dim]")
     except (GitError, RuntimeError) as exc:
-        err_console.print(f"[red]Error:[/red] {exc}")
+        _print_error(exc, chinese=cn, trace=trace)
         raise typer.Exit(code=1) from exc
     finally:
         _print_trace(trace=trace, chinese=cn)
@@ -222,7 +239,7 @@ def unadd_cmd(
         if status:
             console.print("[dim]" + status + "[/dim]")
     except (GitError, RuntimeError) as exc:
-        err_console.print(f"[red]Error:[/red] {exc}")
+        _print_error(exc, chinese=cn, trace=trace)
         raise typer.Exit(code=1) from exc
     except typer.Exit:
         raise
@@ -295,7 +312,7 @@ def uncommit_cmd(
         if status:
             console.print("[dim]" + status + "[/dim]")
     except (GitError, RuntimeError) as exc:
-        err_console.print(f"[red]Error:[/red] {exc}")
+        _print_error(exc, chinese=cn, trace=trace)
         raise typer.Exit(code=1) from exc
     except typer.Exit:
         raise
@@ -374,7 +391,7 @@ def review_cmd(
                 label = "建议的提交信息：" if cn else "Suggested commit message:"
                 console.print(f"[bold]{label}[/bold] {result.commit_message}")
     except (GitError, LLMError, RuntimeError) as exc:
-        err_console.print(f"[red]Error:[/red] {exc}")
+        _print_error(exc, chinese=cn, trace=trace)
         raise typer.Exit(code=1) from exc
     except typer.Exit:
         raise
@@ -575,7 +592,7 @@ def commit_cmd(
             yes=yes,
         )
     except (GitError, LLMError, RuntimeError) as exc:
-        err_console.print(f"[red]Error:[/red] {exc}")
+        _print_error(exc, chinese=cn, trace=trace)
         raise typer.Exit(code=1) from exc
     except typer.Exit:
         raise
@@ -794,7 +811,7 @@ def push_cmd(
             set_upstream=True if set_upstream else None,
         )
     except (GitError, RuntimeError) as exc:
-        err_console.print(f"[red]Error:[/red] {exc}")
+        _print_error(exc, chinese=cn, trace=trace)
         raise typer.Exit(code=1) from exc
     except typer.Exit:
         raise
@@ -848,7 +865,7 @@ def pull_cmd(
     try:
         _do_pull(remote=remote, yes=yes, chinese=cn)
     except (GitError, RuntimeError) as exc:
-        err_console.print(f"[red]Error:[/red] {exc}")
+        _print_error(exc, chinese=cn, trace=trace)
         raise typer.Exit(code=1) from exc
     except typer.Exit:
         raise
@@ -1019,8 +1036,8 @@ def report_cmd(
                 else f"Wrote report: {path}"
             )
             console.print(f"[green]{saved}[/green]")
-    except (GitError, LLMError, RuntimeError, ValueError, OSError) as exc:
-        err_console.print(f"[red]Error:[/red] {exc}")
+    except (GitError, LLMError, PeriodError, RuntimeError, ValueError, OSError) as exc:
+        _print_error(exc, chinese=cn, trace=trace)
         raise typer.Exit(code=1) from exc
     finally:
         _print_trace(trace=trace, chinese=cn)
@@ -1114,10 +1131,14 @@ def config_cmd(
             summary = settings_summary(settings)
             console.print(json.dumps(summary, indent=2, ensure_ascii=False))
             if not CONFIG_FILE.is_file() and not settings.api_key:
-                console.print(
-                    "\n[dim]Tip: set key via env GAI_API_KEY / OPENAI_API_KEY "
+                tip = (
+                    "\n[dim]提示：可通过环境变量 GAI_API_KEY / OPENAI_API_KEY "
+                    "或 `gai config --api-key <key>` 设置密钥。[/dim]"
+                    if cn
+                    else "\n[dim]Tip: set key via env GAI_API_KEY / OPENAI_API_KEY "
                     "or `gai config --api-key <key>`.[/dim]"
                 )
+                console.print(tip)
     finally:
         _print_trace(trace=trace, chinese=cn)
 
