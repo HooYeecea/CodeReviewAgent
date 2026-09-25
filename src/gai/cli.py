@@ -63,13 +63,22 @@ def _version_callback(value: bool) -> None:
         raise typer.Exit()
 
 
+_LLM_USAGE_PRINTED = False
+
+
 def _start_trace(trace: bool) -> None:
     set_tracing(trace)
     clear_llm_usage()
+    global _LLM_USAGE_PRINTED
+    _LLM_USAGE_PRINTED = False
 
 
-def _print_llm_usage(*, chinese: bool = False) -> None:
-    """Always report whether this invocation called the LLM (and token usage)."""
+def _print_llm_usage(*, chinese: bool = False, once: bool = True) -> None:
+    """Report whether this invocation called the LLM (yellow). Skip if already printed."""
+    global _LLM_USAGE_PRINTED
+    if once and _LLM_USAGE_PRINTED:
+        return
+
     calls = get_llm_calls()
     if not calls:
         msg = (
@@ -77,7 +86,8 @@ def _print_llm_usage(*, chinese: bool = False) -> None:
             if chinese
             else "This command did not call the LLM."
         )
-        console.print(f"[dim]{msg}[/dim]")
+        console.print(f"[yellow]{msg}[/yellow]")
+        _LLM_USAGE_PRINTED = True
         return
 
     models: list[str] = []
@@ -106,7 +116,7 @@ def _print_llm_usage(*, chinese: bool = False) -> None:
             head += detail
         else:
             head += "（接口未返回 token 用量）"
-        console.print(f"[dim]{head}。[/dim]")
+        console.print(f"[yellow]{head}。[/yellow]")
     else:
         head = (
             f"This command called the LLM ({n} time(s)): model {model_text}"
@@ -125,7 +135,9 @@ def _print_llm_usage(*, chinese: bool = False) -> None:
             head += detail
         else:
             head += " (provider did not return token usage)"
-        console.print(f"[dim]{head}.[/dim]")
+        console.print(f"[yellow]{head}.[/yellow]")
+
+    _LLM_USAGE_PRINTED = True
 
 
 def _print_trace(*, trace: bool, chinese: bool = False) -> None:

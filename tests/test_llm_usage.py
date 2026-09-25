@@ -27,18 +27,26 @@ def test_usage_totals_sum_multiple_calls():
 
 
 def test_print_llm_usage_not_called(capsys):
+    from gai import cli as cli_mod
     from gai.cli import _print_llm_usage
 
     clear_llm_usage()
+    cli_mod._LLM_USAGE_PRINTED = False
     _print_llm_usage(chinese=True)
     out = capsys.readouterr().out
     assert "未涉及调用大模型" in out
+    # second call skipped (once=True)
+    _print_llm_usage(chinese=True)
+    out2 = capsys.readouterr().out
+    assert out2 == ""
 
 
 def test_print_llm_usage_called_with_tokens(capsys):
+    from gai import cli as cli_mod
     from gai.cli import _print_llm_usage
 
     clear_llm_usage()
+    cli_mod._LLM_USAGE_PRINTED = False
     record_llm_call(
         model="gpt-4o-mini",
         prompt_tokens=120,
