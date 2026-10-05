@@ -151,6 +151,14 @@ _GIT_MESSAGES: dict[str, tuple[str, str]] = {
         "git pull failed.",
         "git pull 失败。",
     ),
+    "dirty_worktree": (
+        "Working tree has uncommitted changes. Commit, stash, or discard them before pulling.",
+        "工作区有未提交改动。请先提交、stash 或丢弃后再拉取。",
+    ),
+    "pull_conflict": (
+        "Pull stopped on a merge/rebase conflict. Resolve conflicts, then continue or abort the git operation.",
+        "拉取因合并/变基冲突中断。请解决冲突后继续，或中止本次 git 操作。",
+    ),
     "add_failed": (
         "git add failed.",
         "git add 失败。",
@@ -275,6 +283,8 @@ def format_cli_error(exc: BaseException, *, chinese: bool = False) -> str:
                 "commit_failed",
                 "add_failed",
                 "log_failed",
+                "dirty_worktree",
+                "pull_conflict",
             } and raw:
                 detail = raw if len(raw) <= 240 else raw[:240] + "…"
                 # Avoid duplicating when message already is the detail

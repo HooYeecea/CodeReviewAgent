@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Any
+import time
+from typing import Any, Callable
 
 import httpx
 
 from gai.config import Settings
 from gai.llm.usage import record_llm_call
+
+_RETRYABLE_KINDS = frozenset({"timeout", "network", "rate_limit", "server"})
+_DEFAULT_MAX_ATTEMPTS = 3
+_DEFAULT_BACKOFF = (1.0, 2.0, 4.0)
 
 
 class LLMError(RuntimeError):
@@ -20,11 +25,13 @@ class LLMError(RuntimeError):
         kind: str = "api",
         status_code: int | None = None,
         detail: str | None = None,
+        retry_after: float | None = None,
     ) -> None:
         super().__init__(message)
         self.kind = kind
         self.status_code = status_code
         self.detail = detail
+        self.retry_after = retry_after
 
 
 def classify_http_error(status_code: int, body: str) -> str:
@@ -62,9 +69,36 @@ def classify_http_error(status_code: int, body: str) -> str:
     return "api"
 
 
+def _parse_retry_after(value: str | None) -> float | None:
+    if not value:
+        return None
+    try:
+        seconds = float(value.strip())
+    except ValueError:
+        return None
+    if seconds < 0:
+        return None
+    return min(seconds, 30.0)
+
+
+def _retry_delay(attempt: int, exc: LLMError) -> float:
+    if exc.retry_after is not None:
+        return exc.retry_after
+    idx = min(max(attempt - 1, 0), len(_DEFAULT_BACKOFF) - 1)
+    return _DEFAULT_BACKOFF[idx]
+
+
 class LLMClient:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        max_attempts: int = _DEFAULT_MAX_ATTEMPTS,
+        sleep: Callable[[float], None] | None = None,
+    ) -> None:
         self.settings = settings
+        self.max_attempts = max(1, int(max_attempts))
+        self._sleep = sleep or time.sleep
 
     def chat(
         self,
@@ -80,6 +114,30 @@ class LLMClient:
                 kind="missing_key",
             )
 
+        last_error: LLMError | None = None
+        for attempt in range(1, self.max_attempts + 1):
+            try:
+                return self._chat_once(
+                    system=system,
+                    user=user,
+                    temperature=temperature,
+                )
+            except LLMError as exc:
+                last_error = exc
+                if exc.kind not in _RETRYABLE_KINDS or attempt >= self.max_attempts:
+                    raise
+                self._sleep(_retry_delay(attempt, exc))
+
+        assert last_error is not None
+        raise last_error
+
+    def _chat_once(
+        self,
+        *,
+        system: str,
+        user: str,
+        temperature: float,
+    ) -> str:
         url = f"{self.settings.base_url}/chat/completions"
         headers = {
             "Authorization": f"Bearer {self.settings.api_key}",
@@ -118,6 +176,7 @@ class LLMClient:
                 kind=kind,
                 status_code=response.status_code,
                 detail=detail,
+                retry_after=_parse_retry_after(response.headers.get("Retry-After")),
             )
 
         try:

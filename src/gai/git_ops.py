@@ -271,6 +271,11 @@ def short_status(cwd: Path | None = None) -> str:
     return result.stdout.strip()
 
 
+def is_worktree_dirty(cwd: Path | None = None) -> bool:
+    """True when there are uncommitted (staged or unstaged) changes."""
+    return bool(short_status(cwd))
+
+
 def list_remotes(cwd: Path | None = None) -> list[str]:
     ensure_repo(cwd)
     result = run_git("remote", cwd=cwd)
@@ -395,6 +400,27 @@ def classify_remote_failure(detail: str) -> str:
     )
     if any(h in text for h in net_hints):
         return "network"
+    conflict_hints = (
+        "fix conflicts",
+        "merge conflict",
+        "conflicted",
+        "unmerged paths",
+        "failed to merge",
+        "could not apply",
+        "needs merge",
+        "you are in the middle of an unresolved merge",
+        "resolve your current index first",
+    )
+    if any(h in text for h in conflict_hints):
+        return "pull_conflict"
+    dirty_hints = (
+        "please commit your changes or stash",
+        "would be overwritten",
+        "uncommitted changes",
+        "your local changes",
+    )
+    if any(h in text for h in dirty_hints):
+        return "dirty_worktree"
     return "generic"
 
 
@@ -540,6 +566,7 @@ def pull(
     *,
     remote: str | None = None,
     check: SyncCheck | None = None,
+    rebase: bool = False,
 ) -> SyncCheck:
     """Pull from remote after verifying there is something to pull."""
     sync = check or check_sync(cwd, remote=remote, do_fetch=True)
@@ -549,10 +576,13 @@ def pull(
             f"{sync.remote}/{sync.branch} (behind={sync.behind})."
         )
 
+    args: list[str] = ["pull"]
+    if rebase:
+        args.append("--rebase")
     if sync.upstream:
-        result = run_git("pull", cwd=cwd)
+        result = run_git(*args, cwd=cwd)
     else:
-        result = run_git("pull", sync.remote, sync.branch, cwd=cwd)
+        result = run_git(*args, sync.remote, sync.branch, cwd=cwd)
 
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "git pull failed").strip()

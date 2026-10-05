@@ -23,6 +23,7 @@ from gai.git_ops import (
     commit as git_commit,
     get_traced_commands,
     has_staged_changes,
+    is_worktree_dirty,
     last_commit_subject,
     plan_push,
     pull as git_pull,
@@ -105,7 +106,7 @@ def _print_llm_usage(*, chinese: bool = False, once: bool = True) -> None:
             else f"本次命令已调用大模型：模型 {model_text}"
         )
         if total is not None:
-            detail = f"，消耗 token 约 {total}"
+            detail = f"，消耗 token {total}"
             parts = []
             if prompt is not None:
                 parts.append(f"输入 {prompt}")
@@ -114,6 +115,13 @@ def _print_llm_usage(*, chinese: bool = False, once: bool = True) -> None:
             if parts:
                 detail += f"（{' + '.join(parts)}）"
             head += detail
+        elif prompt is not None or completion is not None:
+            bits = []
+            if prompt is not None:
+                bits.append(f"输入 {prompt}")
+            if completion is not None:
+                bits.append(f"输出 {completion}")
+            head += f"（{' + '.join(bits)}；未返回合计 token）"
         else:
             head += "（接口未返回 token 用量）"
         console.print(f"[yellow]{head}。[/yellow]")
@@ -124,7 +132,7 @@ def _print_llm_usage(*, chinese: bool = False, once: bool = True) -> None:
             else f"This command called the LLM: model {model_text}"
         )
         if total is not None:
-            detail = f", ~{total} tokens"
+            detail = f", {total} tokens"
             parts = []
             if prompt is not None:
                 parts.append(f"prompt {prompt}")
@@ -133,6 +141,13 @@ def _print_llm_usage(*, chinese: bool = False, once: bool = True) -> None:
             if parts:
                 detail += f" ({' + '.join(parts)})"
             head += detail
+        elif prompt is not None or completion is not None:
+            bits = []
+            if prompt is not None:
+                bits.append(f"prompt {prompt}")
+            if completion is not None:
+                bits.append(f"completion {completion}")
+            head += f" ({' + '.join(bits)}; no total tokens returned)"
         else:
             head += " (provider did not return token usage)"
         console.print(f"[yellow]{head}.[/yellow]")
@@ -789,6 +804,7 @@ def _do_pull(
     remote: str | None = None,
     yes: bool = False,
     chinese: bool = False,
+    rebase: bool | None = None,
 ) -> None:
     status = "正在检查远程是否有可拉取内容..." if chinese else "Checking remote for updates..."
     with console.status(f"[bold]{status}[/bold]"):
@@ -809,15 +825,86 @@ def _do_pull(
         else f"Commits to pull: {sync.behind} ({sync.remote}/{sync.branch})"
     )
     console.print(f"[dim]{behind_tip}[/dim]")
-    ask = "确定从远程拉取？" if chinese else "Confirm pull from remote?"
-    if not yes and not Confirm.ask(ask, default=False):
-        console.print("已取消拉取。" if chinese else "Pull aborted.")
-        raise typer.Exit(code=0)
+    if sync.ahead > 0:
+        diverge = (
+            f"本地同时领先 {sync.ahead} 个提交，历史已分叉。"
+            if chinese
+            else f"Local is also ahead by {sync.ahead} commit(s); histories have diverged."
+        )
+        console.print(f"[yellow]{diverge}[/yellow]")
 
-    pull_status = "正在拉取..." if chinese else "Pulling..."
+    dirty = is_worktree_dirty()
+    if dirty:
+        status_text = short_status()
+        tip = (
+            "工作区有未提交改动，拉取可能覆盖文件或产生冲突。建议先提交或 stash。"
+            if chinese
+            else "Working tree has uncommitted changes; pull may overwrite files or conflict. Commit or stash first."
+        )
+        console.print(f"[yellow]{tip}[/yellow]")
+        if status_text:
+            console.print(f"[dim]{status_text}[/dim]")
+        if yes:
+            err = (
+                "已指定 --yes，为避免覆盖本地改动，已取消拉取。"
+                if chinese
+                else "Refusing to pull with --yes while the working tree is dirty."
+            )
+            err_console.print(f"[red]{err}[/red]")
+            raise typer.Exit(code=1)
+        proceed = (
+            "仍要继续拉取？"
+            if chinese
+            else "Continue pull anyway?"
+        )
+        if not Confirm.ask(proceed, default=False):
+            console.print("已取消拉取。" if chinese else "Pull aborted.")
+            raise typer.Exit(code=0)
+
+    use_rebase = bool(rebase)
+    if rebase is None and sync.ahead > 0:
+        if yes:
+            use_rebase = False
+            note = (
+                "已指定 --yes：分叉时默认 merge 拉取。"
+                if chinese
+                else "--yes: using merge pull for diverged histories."
+            )
+            console.print(f"[dim]{note}[/dim]")
+        else:
+            strategy = Prompt.ask(
+                "拉取方式" if chinese else "Pull strategy",
+                choices=["merge", "rebase", "cancel"],
+                default="merge",
+            )
+            if strategy == "cancel":
+                console.print("已取消拉取。" if chinese else "Pull aborted.")
+                raise typer.Exit(code=0)
+            use_rebase = strategy == "rebase"
+    elif rebase is None:
+        ask = "确定从远程拉取（merge）？" if chinese else "Confirm merge-pull from remote?"
+        if not yes and not Confirm.ask(ask, default=False):
+            console.print("已取消拉取。" if chinese else "Pull aborted.")
+            raise typer.Exit(code=0)
+    else:
+        mode = "rebase" if use_rebase else "merge"
+        ask = (
+            f"确定用 {mode} 从远程拉取？"
+            if chinese
+            else f"Confirm {mode}-pull from remote?"
+        )
+        if not yes and not Confirm.ask(ask, default=False):
+            console.print("已取消拉取。" if chinese else "Pull aborted.")
+            raise typer.Exit(code=0)
+
+    pull_status = (
+        ("正在变基拉取..." if use_rebase else "正在合并拉取...")
+        if chinese
+        else ("Pulling with rebase..." if use_rebase else "Pulling...")
+    )
     with console.status(f"[bold]{pull_status}[/bold]"):
         try:
-            git_pull(remote=remote, check=sync)
+            git_pull(remote=remote, check=sync, rebase=use_rebase)
         except NothingToPull as exc:
             tip = (
                 f"没有可拉取的内容：{exc}"
@@ -829,8 +916,10 @@ def _do_pull(
 
     done = (
         f"已拉取 {sync.behind} 个提交：{sync.remote}/{sync.branch}"
+        + ("（rebase）" if use_rebase else "")
         if chinese
         else f"Pulled {sync.behind} commit(s): {sync.remote}/{sync.branch}"
+        + (" (rebase)" if use_rebase else "")
     )
     console.print(f"[green]{done}[/green]")
 
@@ -926,6 +1015,14 @@ def pull_cmd(
         "-y",
         help=H("Skip interactive confirmation.", "跳过交互确认。"),
     ),
+    rebase: bool = typer.Option(
+        False,
+        "--rebase",
+        help=H(
+            "Pull with git pull --rebase instead of merge.",
+            "使用 git pull --rebase（变基）而不是 merge。",
+        ),
+    ),
     cn: bool = typer.Option(
         False,
         "--cn",
@@ -944,7 +1041,7 @@ def pull_cmd(
     """Pull from remote after verifying there is something to pull."""
     _start_trace(trace)
     try:
-        _do_pull(remote=remote, yes=yes, chinese=cn)
+        _do_pull(remote=remote, yes=yes, chinese=cn, rebase=True if rebase else None)
     except (GitError, RuntimeError) as exc:
         _print_error(exc, chinese=cn, trace=trace)
         raise typer.Exit(code=1) from exc

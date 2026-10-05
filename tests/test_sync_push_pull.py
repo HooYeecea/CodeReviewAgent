@@ -11,6 +11,7 @@ from gai.git_ops import (
     NothingToPull,
     NothingToPush,
     check_sync,
+    is_worktree_dirty,
     pull,
     push,
 )
@@ -135,3 +136,32 @@ def test_pull_succeeds_when_behind(synced_pair: tuple[Path, Path], tmp_path: Pat
     after = check_sync(local, do_fetch=True)
     assert after.behind == 0
     assert after.ahead == 0
+
+
+def test_worktree_dirty_detects_uncommitted(synced_pair: tuple[Path, Path]) -> None:
+    local, _ = synced_pair
+    assert is_worktree_dirty(local) is False
+    (local / "scratch.txt").write_text("wip\n", encoding="utf-8")
+    assert is_worktree_dirty(local) is True
+
+
+def test_pull_rebase_when_diverged(synced_pair: tuple[Path, Path], tmp_path: Path) -> None:
+    local, bare = synced_pair
+    other = tmp_path / "other"
+    _git(tmp_path, "clone", str(bare), str(other))
+    _git(other, "config", "user.email", "other@example.com")
+    _git(other, "config", "user.name", "Other User")
+    _commit_file(other, "remote.txt", "from other\n")
+    _git(other, "push", "origin", BRANCH)
+    _commit_file(local, "local.txt", "from local\n")
+
+    sync = check_sync(local, do_fetch=True)
+    assert sync.ahead == 1
+    assert sync.behind == 1
+
+    pull(local, check=sync, rebase=True)
+    assert (local / "remote.txt").read_text(encoding="utf-8") == "from other\n"
+    assert (local / "local.txt").read_text(encoding="utf-8") == "from local\n"
+    after = check_sync(local, do_fetch=True)
+    assert after.ahead == 1
+    assert after.behind == 0

@@ -15,7 +15,14 @@ def test_usage_empty_after_clear():
     assert usage_totals() == (None, None, None)
 
 
-def test_usage_totals_sum_multiple_calls():
+def test_usage_totals_missing_total_not_estimated():
+    clear_llm_usage()
+    record_llm_call(model="m1", prompt_tokens=8, completion_tokens=2, total_tokens=None)
+    prompt, completion, total = usage_totals()
+    assert prompt == 8
+    assert completion == 2
+    assert total is None
+
     clear_llm_usage()
     record_llm_call(model="m1", prompt_tokens=100, completion_tokens=20, total_tokens=120)
     record_llm_call(model="m1", prompt_tokens=50, completion_tokens=10, total_tokens=60)

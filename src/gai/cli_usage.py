@@ -44,7 +44,8 @@ _COMMAND_EXAMPLES: dict[str, tuple[tuple[str, str, str], ...]] = {
     ),
     "pull": (
         ("gai pull --cn", "Pull after checking remote has updates (asks to confirm)", "检查远程有更新后确认再拉取"),
-        ("gai pull -y --cn", "Pull without interactive confirmation", "拉取并跳过交互确认"),
+        ("gai pull -y --cn", "Pull without interactive confirmation (merge if diverged)", "拉取并跳过交互确认（分叉时用 merge）"),
+        ("gai pull --rebase --cn", "Pull with rebase instead of merge", "用 rebase 拉取而不是 merge"),
     ),
     "report": (
         ("gai report --cn", "Summarize recent commits into a work report", "根据近期提交生成工作总结"),

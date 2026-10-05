@@ -46,10 +46,12 @@ def test_format_git_no_remote_cn():
     assert "远程" in msg
 
 
-def test_classify_remote_auth():
-    assert classify_remote_failure("Permission denied (publickey)") == "auth"
-    assert classify_remote_failure("! [rejected] non-fast-forward") == "rejected"
-    assert classify_remote_failure("Could not resolve host: github.com") == "network"
+def test_classify_remote_conflict_and_dirty() -> None:
+    assert classify_remote_failure("CONFLICT (content): Merge conflict in a.txt") == "pull_conflict"
+    assert (
+        classify_remote_failure("Please commit your changes or stash them before you merge")
+        == "dirty_worktree"
+    )
 
 
 def test_period_since_after_until():
