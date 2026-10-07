@@ -78,6 +78,38 @@ def test_completion_show_powershell_script():
     assert "Register-ArgumentCompleter" in script
     assert "_GAI_COMPLETE" in script
     assert "gai" in script
+    assert "try" in script and "finally" in script
+    assert "Remove-Item Env:_GAI_COMPLETE" in script
+    assert "# >>> gai completion >>>" in script
+
+
+def test_install_powershell_replaces_legacy_block(tmp_path, monkeypatch):
+    from gai import completion_cmd as mod
+
+    profile = tmp_path / "Microsoft.PowerShell_profile.ps1"
+    profile.write_text(
+        "Write-Host hi\n"
+        "Import-Module PSReadLine\n"
+        "Set-PSReadLineKeyHandler -Chord Tab -Function MenuComplete\n"
+        "$scriptblock = {\n"
+        "    param($wordToComplete, $commandAst, $cursorPosition)\n"
+        '    $Env:_GAI_COMPLETE = "complete_powershell"\n'
+        "    gai | ForEach-Object { $_\n"
+        "    }\n"
+        '    $Env:_GAI_COMPLETE = ""\n'
+        "}\n"
+        "Register-ArgumentCompleter -Native -CommandName gai -ScriptBlock $scriptblock\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(mod, "_powershell_profile_path", lambda shell: profile)
+    path = mod.install_powershell_completion(shell="powershell")
+    text = path.read_text(encoding="utf-8")
+    assert text.count("Register-ArgumentCompleter") == 1
+    assert "Write-Host hi" in text
+    assert "Set-PSReadLineKeyHandler" not in text
+    assert "finally" in text
+    assert text.count("# >>> gai completion >>>") == 1
 
 
 def test_completion_show_rejects_unknown_shell():

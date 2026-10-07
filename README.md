@@ -60,6 +60,14 @@ gai completion install --cn
 
 查看脚本（不写入配置）：`gai completion show --shell powershell`
 
+若误按 Tab 后 `gai -h` 只打印 `--cn:::` 这类行，说明补全环境变量残留，在当前窗口执行：
+
+```powershell
+Remove-Item Env:_GAI_COMPLETE, Env:_TYPER_COMPLETE_ARGS, Env:_TYPER_COMPLETE_WORD_TO_COMPLETE -ErrorAction SilentlyContinue
+```
+
+然后重开终端（或再执行一次 `gai completion install --shell powershell --cn` 以更新为带 try/finally 的脚本）。
+
 ## 配置
 
 支持 OpenAI 兼容接口（OpenAI / DeepSeek / 通义兼容模式 / 硅基流动等）。
