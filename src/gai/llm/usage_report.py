@@ -518,6 +518,7 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
   }}
   .kpi, .card, .filters {{
     position: relative;
+    isolation: isolate;
     background: var(--panel);
     border: 1px solid var(--panel-border);
     border-radius: 18px;
@@ -527,32 +528,41 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
   .kpi, .card {{
     z-index: 1;
   }}
+  /* Shine stays behind content — never wash out titles / table text. */
   .kpi::before, .card::before, .filters::before {{
     content: "";
     position: absolute;
     inset: 0;
+    z-index: 0;
     border-radius: inherit;
     pointer-events: none;
     background: linear-gradient(180deg, var(--panel-shine), transparent 42%);
-    opacity: .9;
+    opacity: .55;
+  }}
+  .kpi > *, .card > *, .filters > * {{
+    position: relative;
+    z-index: 1;
   }}
   .kpi {{
     padding: 16px 16px 14px;
   }}
   .kpi .label {{
     color: var(--muted);
-    font-size: .78rem;
+    font-size: .8rem;
+    font-weight: 650;
   }}
   .kpi .value {{
     margin-top: 8px;
     font-size: 1.45rem;
-    font-weight: 740;
+    font-weight: 760;
     letter-spacing: -.02em;
+    color: var(--text);
   }}
   .kpi .sub {{
     margin-top: 4px;
     color: var(--muted);
-    font-size: .75rem;
+    font-size: .78rem;
+    font-weight: 550;
   }}
   .value.ok {{ color: var(--ok); }}
   .value.fail {{ color: var(--fail); }}
@@ -568,22 +578,38 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
   .card.full {{ grid-column: 1 / -1; }}
   .card h2 {{
     margin: 0 0 4px;
-    font-size: .98rem;
-    font-weight: 700;
+    font-size: 1.02rem;
+    font-weight: 750;
     color: var(--text);
+    letter-spacing: -.01em;
   }}
   .card .hint {{
     color: var(--muted);
-    font-size: .8rem;
-    font-weight: 500;
+    font-size: .84rem;
+    font-weight: 600;
     margin-bottom: 6px;
+    line-height: 1.45;
+  }}
+  html[data-theme="light"] .card h2,
+  html[data-theme="light"] .card-head h2 {{
+    color: #071526;
   }}
   html[data-theme="light"] .card .hint,
   html[data-theme="light"] .kpi .label,
   html[data-theme="light"] .kpi .sub,
   html[data-theme="light"] .meta,
-  html[data-theme="light"] footer {{
-    color: #1e3350;
+  html[data-theme="light"] footer,
+  html[data-theme="light"] th {{
+    color: #1a2f4a;
+  }}
+  html[data-theme="light"] td {{
+    color: #0b1b33;
+  }}
+  html[data-theme="light"] .card::before,
+  html[data-theme="light"] .kpi::before,
+  html[data-theme="light"] .filters::before {{
+    opacity: .28;
+    background: linear-gradient(180deg, rgba(255,255,255,.7), transparent 36%);
   }}
   .card-head {{
     display: flex;
@@ -846,6 +872,8 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
   }}
   .chart.tall {{ height: 340px; }}
   .table-wrap {{
+    position: relative;
+    z-index: 1;
     overflow-x: auto;
     margin-top: 8px;
     border-radius: 14px;
@@ -856,20 +884,27 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
   table {{
     width: 100%;
     border-collapse: collapse;
-    font-size: .82rem;
+    font-size: .84rem;
+    color: var(--text);
   }}
   th, td {{
     text-align: left;
     padding: 10px 8px;
     border-bottom: 1px solid var(--panel-border);
     vertical-align: top;
+    color: inherit;
+    opacity: 1;
   }}
   th {{
     color: var(--muted);
-    font-weight: 600;
+    font-weight: 700;
     position: sticky;
     top: 0;
+    z-index: 2;
     background: var(--table-head);
+  }}
+  td {{
+    font-weight: 500;
   }}
   tr:hover td {{ background: color-mix(in srgb, var(--accent) 8%, transparent); }}
   .pill {{
@@ -877,10 +912,21 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
     padding: 2px 8px;
     border-radius: 999px;
     font-size: .72rem;
-    font-weight: 650;
+    font-weight: 700;
   }}
-  .pill.ok {{ background: rgba(52,211,153,.15); color: var(--ok); }}
-  .pill.fail {{ background: rgba(248,113,113,.15); color: var(--fail); }}
+  .pill.ok {{ background: rgba(4,120,87,.14); color: var(--ok); }}
+  .pill.fail {{ background: rgba(185,28,28,.12); color: var(--fail); }}
+  html[data-theme="light"] .table-wrap {{
+    background: #ffffff;
+  }}
+  html[data-theme="light"] .pill.ok {{
+    background: #d1fae5;
+    color: #065f46;
+  }}
+  html[data-theme="light"] .pill.fail {{
+    background: #fee2e2;
+    color: #991b1b;
+  }}
   .empty {{
     display: none;
     padding: 64px 20px;
