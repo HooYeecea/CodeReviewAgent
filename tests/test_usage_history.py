@@ -20,6 +20,14 @@ from gai.llm.history import (
 from gai.llm.usage import clear_llm_usage, set_llm_action
 
 
+def test_usage_log_path_under_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("GAI_USAGE_LOG", raising=False)
+    monkeypatch.setattr("gai.llm.history.project_root", lambda cwd=None: tmp_path)
+    from gai.llm.history import usage_log_path
+
+    assert usage_log_path() == tmp_path / ".gai" / "usage.jsonl"
+
+
 def test_append_and_load(tmp_path: Path) -> None:
     path = tmp_path / "usage.jsonl"
     append_usage_record(

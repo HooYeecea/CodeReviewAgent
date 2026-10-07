@@ -1,4 +1,4 @@
-"""Persistent local LLM usage history (JSONL under ~/.gai)."""
+"""Persistent local LLM usage history (JSONL under the project/.gai)."""
 
 from __future__ import annotations
 
@@ -9,12 +9,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from gai.config import CONFIG_DIR
-
-DEFAULT_USAGE_LOG = CONFIG_DIR / "usage.jsonl"
 # Soft cap: ~2–3 MB of short JSON lines; rotate by keeping a tail.
 _MAX_BYTES = 3_000_000
 _KEEP_TAIL_LINES = 12_000
+_USAGE_RELATIVE = Path(".gai") / "usage.jsonl"
 
 
 @dataclass(frozen=True)
@@ -53,11 +51,26 @@ class UsageRecord:
         )
 
 
-def usage_log_path() -> Path:
+def project_root(cwd: Path | None = None) -> Path:
+    """Git repo toplevel when available; otherwise current working directory."""
+    base = Path(cwd) if cwd is not None else Path.cwd()
+    try:
+        from gai.git_ops import run_git
+
+        result = run_git("rev-parse", "--show-toplevel", cwd=base, trace=False)
+        if result.returncode == 0 and result.stdout.strip():
+            return Path(result.stdout.strip())
+    except Exception:
+        pass
+    return base.resolve()
+
+
+def usage_log_path(cwd: Path | None = None) -> Path:
+    """``<project>/.gai/usage.jsonl`` (override with ``GAI_USAGE_LOG``)."""
     override = os.environ.get("GAI_USAGE_LOG", "").strip()
     if override:
         return Path(override).expanduser()
-    return DEFAULT_USAGE_LOG
+    return project_root(cwd) / _USAGE_RELATIVE
 
 
 def now_iso() -> str:
