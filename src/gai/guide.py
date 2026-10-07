@@ -541,10 +541,57 @@ def _render_html(payload: dict[str, Any]) -> str:
         radial-gradient(900px 420px at 8% -8%, var(--glow-a), transparent 55%),
         radial-gradient(700px 380px at 92% 0%, var(--glow-b), transparent 50%),
         linear-gradient(180deg, var(--bg0) 0%, var(--paper) 40%, var(--paper-2) 100%);
-      transition: background .2s ease, color .2s ease;
     }}
     a {{ color: var(--teal); text-decoration: none; }}
     a:hover {{ text-decoration: underline; }}
+
+    @media (prefers-reduced-motion: no-preference) {{
+      html.theme-ready body,
+      html.theme-ready .top,
+      html.theme-ready .seg,
+      html.theme-ready .seg button,
+      html.theme-ready .nav a,
+      html.theme-ready .step,
+      html.theme-ready .note,
+      html.theme-ready .cmd-card,
+      html.theme-ready .tips li,
+      html.theme-ready .drawer,
+      html.theme-ready .drawer-close,
+      html.theme-ready .drawer-switch button,
+      html.theme-ready .ex,
+      html.theme-ready .terminal,
+      html.theme-ready footer,
+      html.theme-ready .toast {{
+        transition:
+          background .42s cubic-bezier(.22, 1, .36, 1),
+          background-color .42s cubic-bezier(.22, 1, .36, 1),
+          color .42s cubic-bezier(.22, 1, .36, 1),
+          border-color .42s cubic-bezier(.22, 1, .36, 1),
+          box-shadow .42s cubic-bezier(.22, 1, .36, 1),
+          opacity .42s cubic-bezier(.22, 1, .36, 1);
+      }}
+      html.theme-ready .brand,
+      html.theme-ready .brand span,
+      html.theme-ready .tagline,
+      html.theme-ready .hero h1,
+      html.theme-ready .hero p,
+      html.theme-ready .sec-head,
+      html.theme-ready .hint,
+      html.theme-ready .blurb,
+      html.theme-ready .meta,
+      html.theme-ready .cmd-card .name,
+      html.theme-ready .cmd-card .title,
+      html.theme-ready .step .cmd,
+      html.theme-ready .step .desc,
+      html.theme-ready .step .n {{
+        transition: color .42s cubic-bezier(.22, 1, .36, 1), background .42s cubic-bezier(.22, 1, .36, 1);
+      }}
+      ::view-transition-old(root),
+      ::view-transition-new(root) {{
+        animation-duration: .45s;
+        animation-timing-function: cubic-bezier(.22, 1, .36, 1);
+      }}
+    }}
 
     .top {{
       position: sticky;
@@ -852,8 +899,15 @@ def _render_html(payload: dict[str, Any]) -> str:
       padding: 16px 16px 14px;
       cursor: pointer;
       box-shadow: var(--shadow);
-      transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease;
       border-top: 3px solid transparent;
+    }}
+    html.theme-ready .cmd-card {{
+      transition:
+        transform .18s ease,
+        border-color .42s cubic-bezier(.22, 1, .36, 1),
+        box-shadow .42s cubic-bezier(.22, 1, .36, 1),
+        background .42s cubic-bezier(.22, 1, .36, 1),
+        color .42s cubic-bezier(.22, 1, .36, 1);
     }}
     .cmd-card:hover {{
       transform: translateY(-3px);
@@ -1285,12 +1339,29 @@ gai config --api-key sk-xxx --base-url https://api.deepseek.com/v1 --model deeps
     return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
   }}
 
-  function setTheme(next) {{
-    const theme = next === 'dark' ? 'dark' : 'light';
+  function applyTheme(theme) {{
     document.documentElement.setAttribute('data-theme', theme);
     try {{ localStorage.setItem('gai-guide-theme', theme); }} catch (e) {{}}
     document.getElementById('btn-theme-light').classList.toggle('active', theme === 'light');
     document.getElementById('btn-theme-dark').classList.toggle('active', theme === 'dark');
+  }}
+
+  function setTheme(next, {{ animate = true }} = {{}}) {{
+    const theme = next === 'dark' ? 'dark' : 'light';
+    if (theme === currentTheme()) {{
+      applyTheme(theme);
+      return;
+    }}
+    const run = () => applyTheme(theme);
+    if (
+      animate &&
+      document.startViewTransition &&
+      !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    ) {{
+      document.startViewTransition(run);
+      return;
+    }}
+    run();
   }}
 
   function setLang(next) {{
@@ -1413,8 +1484,11 @@ gai config --api-key sk-xxx --base-url https://api.deepseek.com/v1 --model deeps
   document.addEventListener('keydown', (e) => {{
     if (e.key === 'Escape' && drawerRoot.classList.contains('open')) closeDrawer();
   }});
-  setTheme(currentTheme());
+  setTheme(currentTheme(), {{ animate: false }});
   setLang(lang);
+  requestAnimationFrame(() => {{
+    document.documentElement.classList.add('theme-ready');
+  }});
 }})();
   </script>
 </body>

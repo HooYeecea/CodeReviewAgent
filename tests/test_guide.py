@@ -22,6 +22,8 @@ def test_write_guide_html_chinese_initial(tmp_path: Path):
     assert "btn-theme-light" in text and "btn-theme-dark" in text
     assert 'data-theme="dark"' in text or "data-theme" in text
     assert "gai-guide-theme" in text
+    assert "startViewTransition" in text
+    assert "theme-ready" in text
     assert "drawer-root" in text
     assert "drawer-switch" in text
     assert "gai commit" in text
