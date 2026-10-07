@@ -37,6 +37,7 @@ from gai.git_ops import (
     add as git_add,
     check_sync,
     commit as git_commit,
+    clear_trace,
     get_traced_commands,
     has_staged_changes,
     is_worktree_dirty,
@@ -210,6 +211,27 @@ def _print_trace(*, trace: bool, chinese: bool = False) -> None:
     console.print(f"[bold]{title}[/bold]")
     for cmd in cmds:
         console.print(f"  [cyan]→[/cyan] {cmd}")
+
+
+def _print_step_trace(*, trace: bool, chinese: bool, step: str) -> None:
+    """Print git commands for one devflow step, then clear the buffer."""
+    if not trace:
+        return
+    cmds = get_traced_commands()
+    title = (
+        f"本步 Git 链路（{step}）："
+        if chinese
+        else f"Git commands this step ({step}):"
+    )
+    console.print()
+    console.print(f"[bold]{title}[/bold]")
+    if not cmds:
+        empty = "（本步未执行 git）" if chinese else "(no git in this step)"
+        console.print(f"[dim]  {empty}[/dim]")
+    else:
+        for cmd in cmds:
+            console.print(f"  [cyan]→[/cyan] {cmd}")
+    clear_trace()
 
 
 def _print_footer(*, trace: bool, chinese: bool = False) -> None:
@@ -766,32 +788,55 @@ def devflow_cmd(
         False,
         "--trace",
         "-t",
-        help=_TRACE_OPT_HELP,
+        help=H(
+            "After each step, print the git commands that step executed.",
+            "每一步结束后打印该步执行的 git 命令。",
+        ),
     ),
 ) -> None:
     """Run add → review → commit → push with interactive decisions at each step."""
     _start_trace(trace, action="devflow")
     try:
-        _run_devflow(chinese=cn, remote=remote)
+        _run_devflow(chinese=cn, remote=remote, trace=trace)
     except (GitError, LLMError, RuntimeError) as exc:
+        # Flush whatever this step accumulated before reporting the error.
+        _print_step_trace(trace=trace, chinese=cn, step="error" if not cn else "出错时")
         _print_error(exc, chinese=cn, trace=trace)
         raise typer.Exit(code=1) from exc
     except typer.Exit:
+        # Mid-flow cancel / early exit: show leftover git for the interrupted step.
+        if get_traced_commands():
+            _print_step_trace(
+                trace=trace,
+                chinese=cn,
+                step="中断前" if cn else "before exit",
+            )
         raise
     except KeyboardInterrupt:
+        if get_traced_commands():
+            _print_step_trace(
+                trace=trace,
+                chinese=cn,
+                step="中断前" if cn else "before exit",
+            )
         console.print("\n已取消。" if cn else "\nAborted.")
         raise typer.Exit(code=130) from None
     finally:
-        _print_footer(trace=trace, chinese=cn)
+        # Per-step traces already flushed; only LLM summary (+ rare leftovers).
+        console.print()
+        _print_llm_usage(chinese=cn)
+        if trace and get_traced_commands():
+            _print_trace(trace=True, chinese=cn)
 
 
-def _run_devflow(*, chinese: bool, remote: str | None) -> None:
+def _run_devflow(*, chinese: bool, remote: str | None, trace: bool = False) -> None:
     """Interactive add → review → commit → push pipeline."""
     step = (
         (lambda n, title: console.print(f"\n[bold cyan]━━ {n}. {title} ━━[/bold cyan]"))
         if chinese
         else (lambda n, title: console.print(f"\n[bold cyan]━━ {n}. {title} ━━[/bold cyan]"))
     )
+    flush = lambda label: _print_step_trace(trace=trace, chinese=chinese, step=label)
 
     # ----- 1) ADD (AI suggest) -----
     step(1, "暂存 (add)" if chinese else "Stage (add)")
@@ -802,6 +847,7 @@ def _run_devflow(*, chinese: bool, remote: str | None) -> None:
             else "Working tree is clean; nothing to stage or commit."
         )
         err_console.print(f"[yellow]{tip}[/yellow]")
+        flush("add")
         raise typer.Exit(code=1)
 
     entries = list_change_entries()
@@ -860,6 +906,7 @@ def _run_devflow(*, chinese: bool, remote: str | None) -> None:
         if not targets:
             tip = "未选择任何路径，已取消。" if chinese else "No paths selected; aborted."
             err_console.print(f"[red]{tip}[/red]")
+            flush("add")
             raise typer.Exit(code=1)
 
         git_add(targets)
@@ -887,7 +934,10 @@ def _run_devflow(*, chinese: bool, remote: str | None) -> None:
             else "Nothing staged; cannot continue to review/commit."
         )
         err_console.print(f"[red]{tip}[/red]")
+        flush("add")
         raise typer.Exit(code=1)
+
+    flush("add")
 
     # ----- 2) REVIEW -----
     step(2, "代码审查 (review)" if chinese else "Code review")
@@ -911,6 +961,7 @@ def _run_devflow(*, chinese: bool, remote: str | None) -> None:
         else "Review done. Continue to commit message?",
         default=True,
     )
+    flush("review")
     if not cont:
         console.print("已取消。" if chinese else "Aborted.")
         raise typer.Exit(code=0)
@@ -975,11 +1026,13 @@ def _run_devflow(*, chinese: bool, remote: str | None) -> None:
             else:
                 tip = "无效选择。" if chinese else "Invalid choice."
                 err_console.print(f"[red]{tip}[/red]")
+                flush("commit")
                 raise typer.Exit(code=1)
 
     if not commit_message:
         tip = "提交信息为空，已取消。" if chinese else "Empty commit message; aborted."
         err_console.print(f"[red]{tip}[/red]")
+        flush("commit")
         raise typer.Exit(code=1)
 
     label = "将使用的提交信息：" if chinese else "Commit message to use:"
@@ -989,6 +1042,7 @@ def _run_devflow(*, chinese: bool, remote: str | None) -> None:
         default=True,
     ):
         console.print("已取消提交。" if chinese else "Commit aborted.")
+        flush("commit")
         raise typer.Exit(code=0)
 
     git_commit(commit_message)
@@ -996,6 +1050,7 @@ def _run_devflow(*, chinese: bool, remote: str | None) -> None:
         ("[green]已提交：[/green] " if chinese else "[green]Committed:[/green] ")
         + commit_message
     )
+    flush("commit")
 
     # ----- 4) PUSH -----
     step(4, "推送 (push)" if chinese else "Push")
@@ -1008,9 +1063,11 @@ def _run_devflow(*, chinese: bool, remote: str | None) -> None:
             if chinese
             else "Push skipped. Commit kept locally."
         )
+        flush("push")
         raise typer.Exit(code=0)
 
     _do_push(remote=remote, yes=True, chinese=chinese)
+    flush("push")
 
 
 def _confirm_and_commit(
