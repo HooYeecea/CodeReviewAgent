@@ -5,7 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from gai.llm.history import UsageRecord, append_usage_record, load_usage_records
+from datetime import datetime
+
 from gai.llm.usage_report import (
+    build_trend_series,
     build_usage_analytics,
     path_to_file_url,
     usage_report_path,
@@ -91,8 +94,69 @@ def test_write_usage_report_fixed_path(tmp_path: Path, monkeypatch) -> None:
     assert any(cell[2] > 0 for cell in analytics["heatmap"]["data"])
     assert "chart-branch" in text
     assert "chart-heat" in text
+    assert "trend-seg" in text
+    assert "data-mode=\"today\"" in text
+    assert set(analytics["trends"]) >= {
+        "today",
+        "last7",
+        "last15",
+        "week",
+        "month",
+        "year",
+        "all_days",
+    }
 
     # Re-run overwrites same file (sync)
     write_usage_report(records, chinese=False)
     text2 = out.read_text(encoding="utf-8")
     assert "gai Token Usage Report" in text2
+
+
+def test_trend_today_is_hourly_until_now() -> None:
+    now = datetime.fromisoformat("2026-10-07T14:30:00+08:00")
+    records = [
+        UsageRecord(
+            ts="2026-10-07T09:10:00+08:00",
+            git_user="A",
+            git_email="a@x.com",
+            provider="deepseek",
+            provider_name="DeepSeek",
+            model="m",
+            action="review",
+            total_tokens=10,
+        ),
+        UsageRecord(
+            ts="2026-10-07T14:05:00+08:00",
+            git_user="A",
+            git_email="a@x.com",
+            provider="deepseek",
+            provider_name="DeepSeek",
+            model="m",
+            action="review",
+            total_tokens=20,
+        ),
+        UsageRecord(
+            ts="2026-10-06T23:00:00+08:00",
+            git_user="A",
+            git_email="a@x.com",
+            provider="deepseek",
+            provider_name="DeepSeek",
+            model="m",
+            action="review",
+            total_tokens=99,
+        ),
+    ]
+    trends = build_trend_series(records, now=now)
+    today = trends["today"]
+    assert today["labels"][0] == "00:00"
+    assert today["labels"][-1] == "14:00"
+    assert len(today["labels"]) == 15
+    assert today["tokens"][9] == 10
+    assert today["tokens"][14] == 20
+    assert sum(today["tokens"]) == 30
+
+    last7 = trends["last7"]
+    assert len(last7["labels"]) == 7
+    assert last7["labels"][-1] == "2026-10-07"
+    assert last7["tokens"][-1] == 30
+    assert "2026-10" in trends["month"]["labels"]

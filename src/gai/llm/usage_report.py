@@ -5,7 +5,7 @@ from __future__ import annotations
 import html
 import json
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -42,8 +42,6 @@ def build_usage_analytics(records: list[UsageRecord]) -> dict[str, Any]:
     durations = [r.duration_ms for r in records if r.duration_ms is not None]
     avg_ms = int(sum(durations) / len(durations)) if durations else None
 
-    by_day_tokens: dict[str, int] = defaultdict(int)
-    by_day_calls: dict[str, int] = defaultdict(int)
     by_action: dict[str, dict[str, int]] = defaultdict(lambda: {"calls": 0, "tokens": 0})
     by_provider: dict[str, dict[str, int]] = defaultdict(lambda: {"calls": 0, "tokens": 0})
     by_model: dict[str, dict[str, int]] = defaultdict(lambda: {"calls": 0, "tokens": 0})
@@ -54,10 +52,7 @@ def build_usage_analytics(records: list[UsageRecord]) -> dict[str, Any]:
     heat: dict[tuple[str, str], int] = defaultdict(int)
 
     for rec in records:
-        day = _day_key(rec.ts)
-        by_day_calls[day] += 1
         tok = rec.total_tokens or 0
-        by_day_tokens[day] += tok
 
         action = rec.action_detail or rec.action or "(unknown)"
         by_action[action]["calls"] += 1
@@ -85,8 +80,8 @@ def build_usage_analytics(records: list[UsageRecord]) -> dict[str, Any]:
         by_branch[branch]["tokens"] += tok
         heat[(branch, action)] += tok
 
-    days = sorted(by_day_calls.keys())
     recent = list(reversed(records[-100:]))
+    trends = build_trend_series(records)
 
     branches = sorted(by_branch.keys(), key=lambda b: (-by_branch[b]["tokens"], b))
     actions = sorted(by_action.keys(), key=lambda a: (-by_action[a]["tokens"], a))
@@ -112,11 +107,10 @@ def build_usage_analytics(records: list[UsageRecord]) -> dict[str, Any]:
             "unknown": unknown_count,
             "avg_duration_ms": avg_ms,
         },
-        "by_day": {
-            "labels": days,
-            "calls": [by_day_calls[d] for d in days],
-            "tokens": [by_day_tokens[d] for d in days],
-        },
+        # Backward-compatible alias: all calendar days.
+        "by_day": trends.get("all_days") or {"labels": [], "calls": [], "tokens": []},
+        "trends": trends,
+        "default_trend": "today",
         "by_action": _series(by_action),
         "by_provider": _series(by_provider),
         "by_model": _series(by_model),
@@ -137,6 +131,70 @@ def build_usage_analytics(records: list[UsageRecord]) -> dict[str, Any]:
             "data": heatmap_data,
         },
         "recent": [r.to_dict() for r in recent],
+    }
+
+
+def build_trend_series(
+    records: list[UsageRecord],
+    *,
+    now: datetime | None = None,
+) -> dict[str, dict[str, list[Any]]]:
+    """Build switchable trend buckets for the main time chart."""
+    now = now or datetime.now(timezone.utc).astimezone()
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc).astimezone()
+
+    parsed: list[tuple[datetime, int]] = []
+    for rec in records:
+        dt = _parse_ts_dt(rec.ts)
+        if dt is None:
+            continue
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=now.tzinfo)
+        else:
+            dt = dt.astimezone(now.tzinfo)
+        parsed.append((dt, rec.total_tokens or 0))
+
+    today = now.date()
+    # today: hours 00:00 .. current hour
+    today_labels = [f"{h:02d}:00" for h in range(0, now.hour + 1)]
+    today_tokens = [0] * len(today_labels)
+    today_calls = [0] * len(today_labels)
+    for dt, tok in parsed:
+        if dt.date() != today:
+            continue
+        idx = dt.hour
+        if 0 <= idx < len(today_labels):
+            today_calls[idx] += 1
+            today_tokens[idx] += tok
+
+    last7 = _rolling_day_series(parsed, today=today, days=7)
+    last15 = _rolling_day_series(parsed, today=today, days=15)
+    all_days = _bucket_series(
+        parsed,
+        key_fn=lambda dt: dt.date().isoformat(),
+        fill_keys=_all_day_keys(parsed),
+    )
+    by_week = _bucket_series(
+        parsed,
+        key_fn=lambda dt: f"{dt.isocalendar().year}-W{dt.isocalendar().week:02d}",
+    )
+    by_month = _bucket_series(parsed, key_fn=lambda dt: dt.strftime("%Y-%m"))
+    by_year = _bucket_series(parsed, key_fn=lambda dt: dt.strftime("%Y"))
+
+    return {
+        "today": {
+            "labels": today_labels,
+            "calls": today_calls,
+            "tokens": today_tokens,
+            "title_key": "trend_today",
+        },
+        "last7": {**last7, "title_key": "trend_last7"},
+        "last15": {**last15, "title_key": "trend_last15"},
+        "week": {**by_week, "title_key": "trend_week"},
+        "month": {**by_month, "title_key": "trend_month"},
+        "year": {**by_year, "title_key": "trend_year"},
+        "all_days": {**all_days, "title_key": "trend_all_days"},
     }
 
 
@@ -305,6 +363,36 @@ def render_usage_report_html(analytics: dict[str, Any], *, chinese: bool = False
     font-size: .78rem;
     margin-bottom: 6px;
   }}
+  .card-head {{
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 6px;
+  }}
+  .card-head h2 {{ margin: 0 0 4px; }}
+  .seg {{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }}
+  .seg button {{
+    border: 1px solid rgba(148,163,184,.22);
+    background: rgba(15, 23, 42, .55);
+    color: #cbd5e1;
+    border-radius: 999px;
+    padding: 5px 10px;
+    font-size: .75rem;
+    cursor: pointer;
+  }}
+  .seg button:hover {{ border-color: rgba(56,189,248,.45); color: #e0f2fe; }}
+  .seg button.active {{
+    background: rgba(56,189,248,.16);
+    border-color: rgba(56,189,248,.55);
+    color: #bae6fd;
+    font-weight: 650;
+  }}
   .chart {{
     width: 100%;
     height: 300px;
@@ -399,8 +487,21 @@ def render_usage_report_html(analytics: dict[str, Any], *, chinese: bool = False
 
       <section class="grid">
         <div class="card full">
-          <h2>{t['by_day']}</h2>
-          <div class="hint">{t['hint_day']}</div>
+          <div class="card-head">
+            <div>
+              <h2 id="trend-title">{t['trend_title']}</h2>
+              <div class="hint" id="trend-hint">{t['hint_today']}</div>
+            </div>
+            <div class="seg" id="trend-seg" role="tablist">
+              <button type="button" data-mode="today" class="active">{t['seg_today']}</button>
+              <button type="button" data-mode="last7">{t['seg_last7']}</button>
+              <button type="button" data-mode="last15">{t['seg_last15']}</button>
+              <button type="button" data-mode="week">{t['seg_week']}</button>
+              <button type="button" data-mode="month">{t['seg_month']}</button>
+              <button type="button" data-mode="year">{t['seg_year']}</button>
+              <button type="button" data-mode="all_days">{t['seg_all_days']}</button>
+            </div>
+          </div>
           <div id="chart-day" class="chart tall"></div>
         </div>
         <div class="card">
@@ -498,10 +599,39 @@ function baseText() {{
   return {{ color: '#94a3b8', fontSize: 11 }};
 }}
 
-function initDayChart() {{
-  const el = document.getElementById('chart-day');
-  const chart = echarts.init(el, null, {{ renderer: 'canvas' }});
-  const day = DATA.by_day || {{}};
+function trendHints() {{
+  return {{
+    today: I18N.hint_today,
+    last7: I18N.hint_last7,
+    last15: I18N.hint_last15,
+    week: I18N.hint_week,
+    month: I18N.hint_month,
+    year: I18N.hint_year,
+    all_days: I18N.hint_all_days,
+  }};
+}}
+
+function trendTitles() {{
+  return {{
+    today: I18N.trend_today,
+    last7: I18N.trend_last7,
+    last15: I18N.trend_last15,
+    week: I18N.trend_week,
+    month: I18N.trend_month,
+    year: I18N.trend_year,
+    all_days: I18N.trend_all_days,
+  }};
+}}
+
+function applyTrend(chart, mode) {{
+  const trends = DATA.trends || {{}};
+  const series = trends[mode] || trends.today || DATA.by_day || {{ labels: [], calls: [], tokens: [] }};
+  const titles = trendTitles();
+  const hints = trendHints();
+  const titleEl = document.getElementById('trend-title');
+  const hintEl = document.getElementById('trend-hint');
+  if (titleEl) titleEl.textContent = titles[mode] || I18N.trend_title;
+  if (hintEl) hintEl.textContent = hints[mode] || I18N.hint_day;
   chart.setOption({{
     color: ['#38bdf8', '#34d399'],
     tooltip: {{ trigger: 'axis' }},
@@ -510,12 +640,17 @@ function initDayChart() {{
       textStyle: {{ color: '#cbd5e1' }},
       top: 0
     }},
-    grid: {{ left: 48, right: 48, top: 42, bottom: 36 }},
+    grid: {{ left: 48, right: 48, top: 42, bottom: 48 }},
     xAxis: {{
       type: 'category',
-      data: day.labels || [],
+      data: series.labels || [],
       boundaryGap: false,
-      axisLabel: baseText(),
+      axisLabel: {{
+        color: '#94a3b8',
+        fontSize: 11,
+        hideOverlap: true,
+        rotate: (series.labels || []).length > 12 ? 30 : 0
+      }},
       axisLine: {{ lineStyle: {{ color: '#334155' }} }}
     }},
     yAxis: [
@@ -539,6 +674,7 @@ function initDayChart() {{
         name: I18N.tokens,
         type: 'line',
         smooth: true,
+        showSymbol: (series.labels || []).length <= 24,
         symbol: 'circle',
         symbolSize: 7,
         areaStyle: {{
@@ -547,19 +683,38 @@ function initDayChart() {{
             {{ offset: 1, color: 'rgba(56,189,248,.02)' }}
           ])
         }},
-        data: day.tokens || []
+        data: series.tokens || []
       }},
       {{
         name: I18N.calls,
         type: 'line',
         smooth: true,
         yAxisIndex: 1,
+        showSymbol: (series.labels || []).length <= 24,
         symbol: 'circle',
         symbolSize: 7,
-        data: day.calls || []
+        data: series.calls || []
       }}
     ]
-  }});
+  }}, true);
+}}
+
+function initDayChart() {{
+  const el = document.getElementById('chart-day');
+  const chart = echarts.init(el, null, {{ renderer: 'canvas' }});
+  const initial = DATA.default_trend || 'today';
+  applyTrend(chart, initial);
+  const seg = document.getElementById('trend-seg');
+  if (seg) {{
+    seg.querySelectorAll('button').forEach(btn => {{
+      btn.classList.toggle('active', btn.dataset.mode === initial);
+      btn.addEventListener('click', () => {{
+        const mode = btn.dataset.mode;
+        seg.querySelectorAll('button').forEach(b => b.classList.toggle('active', b === btn));
+        applyTrend(chart, mode);
+      }});
+    }});
+  }}
   return chart;
 }}
 
@@ -807,16 +962,84 @@ def _duration_series(bucket: dict[str, list[int]]) -> dict[str, list[Any]]:
 
 
 def _day_key(ts: str) -> str:
+    dt = _parse_ts_dt(ts)
+    if dt is None:
+        text = (ts or "").strip()
+        return text[:10] if len(text) >= 10 else "unknown"
+    return dt.date().isoformat()
+
+
+def _parse_ts_dt(ts: str) -> datetime | None:
     text = (ts or "").strip()
     if not text:
-        return "unknown"
+        return None
     try:
         if text.endswith("Z"):
             text = text[:-1] + "+00:00"
-        dt = datetime.fromisoformat(text)
-        return dt.date().isoformat()
+        return datetime.fromisoformat(text)
     except ValueError:
-        return text[:10] if len(text) >= 10 else "unknown"
+        return None
+
+
+def _rolling_day_series(
+    parsed: list[tuple[datetime, int]],
+    *,
+    today: date,
+    days: int,
+) -> dict[str, list[Any]]:
+    labels = [(today - timedelta(days=offset)).isoformat() for offset in range(days - 1, -1, -1)]
+    index = {label: i for i, label in enumerate(labels)}
+    tokens = [0] * len(labels)
+    calls = [0] * len(labels)
+    for dt, tok in parsed:
+        key = dt.date().isoformat()
+        idx = index.get(key)
+        if idx is None:
+            continue
+        calls[idx] += 1
+        tokens[idx] += tok
+    return {"labels": labels, "calls": calls, "tokens": tokens}
+
+
+def _all_day_keys(parsed: list[tuple[datetime, int]]) -> list[str]:
+    if not parsed:
+        return []
+    days = sorted({dt.date() for dt, _ in parsed})
+    start, end = days[0], days[-1]
+    out: list[str] = []
+    cur = start
+    while cur <= end:
+        out.append(cur.isoformat())
+        cur += timedelta(days=1)
+    return out
+
+
+def _bucket_series(
+    parsed: list[tuple[datetime, int]],
+    *,
+    key_fn,
+    fill_keys: list[str] | None = None,
+) -> dict[str, list[Any]]:
+    tokens_map: dict[str, int] = defaultdict(int)
+    calls_map: dict[str, int] = defaultdict(int)
+    for dt, tok in parsed:
+        key = key_fn(dt)
+        calls_map[key] += 1
+        tokens_map[key] += tok
+    if fill_keys is None:
+        labels = sorted(calls_map.keys())
+    else:
+        labels = list(fill_keys)
+        for key in calls_map:
+            if key not in labels:
+                labels.append(key)
+        # keep chronological where possible
+        labels = sorted(set(labels))
+    return {
+        "labels": labels,
+        "calls": [calls_map.get(k, 0) for k in labels],
+        "tokens": [tokens_map.get(k, 0) for k in labels],
+    }
 
 
 def _i18n(chinese: bool) -> dict[str, str]:
@@ -834,7 +1057,22 @@ def _i18n(chinese: bool) -> dict[str, str]:
             "fail": "失败",
             "unknown": "未知",
             "avg_ms": "平均耗时",
-            "by_day": "按日趋势",
+            "trend_title": "用量趋势",
+            "trend_today": "今日趋势（0 点 → 当前）",
+            "trend_last7": "最近 7 天",
+            "trend_last15": "最近 15 天",
+            "trend_week": "按周汇总",
+            "trend_month": "按月汇总",
+            "trend_year": "按年汇总",
+            "trend_all_days": "全部按日",
+            "seg_today": "今日",
+            "seg_last7": "近7天",
+            "seg_last15": "近15天",
+            "seg_week": "按周",
+            "seg_month": "按月",
+            "seg_year": "按年",
+            "seg_all_days": "全部日",
+            "by_day": "用量趋势",
             "by_branch": "按分支用量",
             "by_status": "成功 / 失败",
             "token_split": "输入 vs 输出 Token",
@@ -845,6 +1083,13 @@ def _i18n(chinese: bool) -> dict[str, str]:
             "by_user": "按用户用量",
             "heatmap": "动作 × 分支（Token 热力图）",
             "hint_day": "双轴：Token 与调用次数",
+            "hint_today": "当天 0:00 到当前时刻，按小时统计",
+            "hint_last7": "含今天在内的最近 7 个自然日",
+            "hint_last15": "含今天在内的最近 15 个自然日",
+            "hint_week": "按 ISO 周聚合（如 2026-W41）",
+            "hint_month": "按自然月聚合（YYYY-MM）",
+            "hint_year": "按自然年聚合（YYYY）",
+            "hint_all_days": "历史全部日期（按天）",
             "hint_pie": "环形图按 Token 占比",
             "hint_bar": "横向柱状图按 Token",
             "hint_status": "按调用次数看稳定性",
@@ -875,7 +1120,22 @@ def _i18n(chinese: bool) -> dict[str, str]:
         "fail": "Failed",
         "unknown": "Unknown",
         "avg_ms": "Avg duration",
-        "by_day": "Daily trend",
+        "trend_title": "Usage trend",
+        "trend_today": "Today (00:00 → now)",
+        "trend_last7": "Last 7 days",
+        "trend_last15": "Last 15 days",
+        "trend_week": "By week",
+        "trend_month": "By month",
+        "trend_year": "By year",
+        "trend_all_days": "All days",
+        "seg_today": "Today",
+        "seg_last7": "7d",
+        "seg_last15": "15d",
+        "seg_week": "Week",
+        "seg_month": "Month",
+        "seg_year": "Year",
+        "seg_all_days": "All days",
+        "by_day": "Usage trend",
         "by_branch": "By branch",
         "by_status": "Success / failure",
         "token_split": "Prompt vs completion tokens",
@@ -886,6 +1146,13 @@ def _i18n(chinese: bool) -> dict[str, str]:
         "by_user": "By user",
         "heatmap": "Action × branch heatmap (tokens)",
         "hint_day": "Dual axis: tokens and call count",
+        "hint_today": "Today from 00:00 to now, hourly buckets",
+        "hint_last7": "Last 7 calendar days including today",
+        "hint_last15": "Last 15 calendar days including today",
+        "hint_week": "Aggregated by ISO week (e.g. 2026-W41)",
+        "hint_month": "Aggregated by calendar month (YYYY-MM)",
+        "hint_year": "Aggregated by calendar year (YYYY)",
+        "hint_all_days": "All historical days",
         "hint_pie": "Donut chart by token share",
         "hint_bar": "Horizontal bars by tokens",
         "hint_status": "Call counts for reliability",
