@@ -17,7 +17,7 @@ _USAGE_RELATIVE = Path(".gai") / "usage.jsonl"
 
 @dataclass(frozen=True)
 class UsageRecord:
-    """One successful LLM call attributed to a gai action."""
+    """One LLM call attributed to a gai action (success or final failure)."""
 
     ts: str
     git_user: str
@@ -30,12 +30,46 @@ class UsageRecord:
     completion_tokens: int | None = None
     total_tokens: int | None = None
     base_url: str = ""
+    action_detail: str = ""
+    branch: str = ""
+    files_count: int | None = None
+    diff_chars: int | None = None
+    truncated: bool | None = None
+    commit_count: int | None = None
+    since: str = ""
+    ok: bool | None = None
+    duration_ms: int | None = None
+    error_kind: str = ""
+    gai_version: str = ""
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        """Omit empty optional fields to keep JSONL compact and forward-compatible."""
+        raw = asdict(self)
+        out: dict[str, Any] = {}
+        for key, value in raw.items():
+            if value is None:
+                continue
+            if value == "" and key not in {
+                "ts",
+                "git_user",
+                "git_email",
+                "provider",
+                "provider_name",
+                "model",
+                "action",
+            }:
+                continue
+            out[key] = value
+        return out
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> UsageRecord:
+        truncated = data.get("truncated")
+        if truncated is not None:
+            truncated = bool(truncated)
+        ok = data.get("ok")
+        if ok is not None:
+            ok = bool(ok)
         return cls(
             ts=str(data.get("ts") or ""),
             git_user=str(data.get("git_user") or ""),
@@ -48,6 +82,17 @@ class UsageRecord:
             completion_tokens=_as_optional_int(data.get("completion_tokens")),
             total_tokens=_as_optional_int(data.get("total_tokens")),
             base_url=str(data.get("base_url") or ""),
+            action_detail=str(data.get("action_detail") or ""),
+            branch=str(data.get("branch") or ""),
+            files_count=_as_optional_int(data.get("files_count")),
+            diff_chars=_as_optional_int(data.get("diff_chars")),
+            truncated=truncated,
+            commit_count=_as_optional_int(data.get("commit_count")),
+            since=str(data.get("since") or ""),
+            ok=ok,
+            duration_ms=_as_optional_int(data.get("duration_ms")),
+            error_kind=str(data.get("error_kind") or ""),
+            gai_version=str(data.get("gai_version") or ""),
         )
 
 
@@ -215,18 +260,22 @@ def format_usage_table(
         who = _format_who(rec)
         provider = rec.provider_name or rec.provider or "?"
         tokens = _format_tokens(rec, chinese=chinese)
-        action = rec.action or "?"
+        action = rec.action_detail or rec.action or "?"
         when = rec.ts or "?"
-        if chinese:
-            lines.append(
-                f"{when}  |  {who}  |  {provider} / {rec.model or '?'}  |  "
-                f"{action}  |  {tokens}"
-            )
-        else:
-            lines.append(
-                f"{when}  |  {who}  |  {provider} / {rec.model or '?'}  |  "
-                f"{action}  |  {tokens}"
-            )
+        extras = _format_extras(rec, chinese=chinese)
+        status = ""
+        if rec.ok is False:
+            status = "  |  FAIL" if not chinese else "  |  失败"
+            if rec.error_kind:
+                status += f"({rec.error_kind})"
+        line = (
+            f"{when}  |  {who}  |  {provider} / {rec.model or '?'}  |  "
+            f"{action}  |  {tokens}"
+        )
+        if extras:
+            line += f"  |  {extras}"
+        line += status
+        lines.append(line)
 
     summary = summarize_records(records)
     lines.append("")
@@ -290,6 +339,29 @@ def _format_who(rec: UsageRecord) -> str:
     if rec.git_user and rec.git_email:
         return f"{rec.git_user} <{rec.git_email}>"
     return rec.git_user or rec.git_email or "(unknown)"
+
+
+def _format_extras(rec: UsageRecord, *, chinese: bool) -> str:
+    bits: list[str] = []
+    if rec.branch:
+        bits.append(rec.branch)
+    if rec.files_count is not None:
+        bits.append(
+            f"{rec.files_count} 文件" if chinese else f"{rec.files_count} files"
+        )
+    if rec.diff_chars is not None:
+        bits.append(f"{rec.diff_chars} chars")
+    if rec.commit_count is not None:
+        bits.append(
+            f"{rec.commit_count} 提交" if chinese else f"{rec.commit_count} commits"
+        )
+    if rec.since:
+        bits.append(f"since={rec.since}")
+    if rec.truncated:
+        bits.append("truncated" if not chinese else "已截断")
+    if rec.duration_ms is not None:
+        bits.append(f"{rec.duration_ms}ms")
+    return ", ".join(bits)
 
 
 def _format_tokens(rec: UsageRecord, *, chinese: bool) -> str:

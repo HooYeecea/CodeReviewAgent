@@ -20,6 +20,7 @@ from gai.errors import PeriodError
 from gai.git_ops import (
     CommitInfo,
     current_author_filter,
+    current_branch_name,
     ensure_repo,
     format_commits_for_prompt,
     get_commits,
@@ -28,6 +29,7 @@ from gai.git_ops import (
 )
 from gai.llm.client import LLMClient, LLMError
 from gai.llm.prompts import REPORT_SYSTEM_PROMPT, build_report_user_prompt
+from gai.llm.usage import set_llm_usage_meta
 
 _JSON_FENCE = re.compile(r"```(?:json)?\s*([\s\S]*?)\s*```", re.IGNORECASE)
 
@@ -542,6 +544,15 @@ def run_report(
     commits_text, truncated = format_commits_for_prompt(
         commits,
         max_chars=settings.max_diff_chars,
+    )
+
+    set_llm_usage_meta(
+        action_detail="report",
+        branch=current_branch_name(),
+        commit_count=len(commits),
+        since=str(since_label or since_query or ""),
+        diff_chars=len(commits_text),
+        truncated=truncated,
     )
 
     client = LLMClient(settings)

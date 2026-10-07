@@ -303,6 +303,28 @@ def get_current_branch(cwd: Path | None = None) -> str:
     return branch
 
 
+def current_branch_name(cwd: Path | None = None) -> str:
+    """Best-effort branch name for usage logs; empty if unavailable."""
+    try:
+        result = run_git("rev-parse", "--abbrev-ref", "HEAD", cwd=cwd, trace=False)
+    except GitError:
+        return ""
+    if result.returncode != 0:
+        return ""
+    return (result.stdout or "").strip()
+
+
+def count_staged_files(cwd: Path | None = None) -> int:
+    """Number of paths in the staged diff (best-effort; 0 on failure)."""
+    try:
+        result = run_git("diff", "--cached", "--name-only", "--no-color", cwd=cwd, trace=False)
+    except GitError:
+        return 0
+    if result.returncode != 0:
+        return 0
+    return sum(1 for line in result.stdout.splitlines() if line.strip())
+
+
 def get_upstream_ref(cwd: Path | None = None) -> str | None:
     """Return upstream like 'origin/main', or None if unset."""
     ensure_repo(cwd)

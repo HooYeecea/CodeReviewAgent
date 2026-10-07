@@ -279,7 +279,15 @@ gai report --since 2026-09-01 --until 2026-09-23 --json
 
 查看 **本地** 记录的大模型调用历史（多数厂商不提供按 API Key 的历史用量接口，因此由 gai 在每次成功调用后写入一行摘要）。
 
-每条记录包含：时间、Git 用户（`user.name` / `user.email`）、厂商、模型、token（输入/输出/合计）、动作（`review` / `commit` / `report`）。日志默认写在**当前仓库根目录**的 `.gai/usage.jsonl`（跟随项目，不进用户主目录；已加入 `.gitignore`）。体积很小；过大时自动轮转保留尾部。可用环境变量 `GAI_USAGE_LOG` 覆盖路径。
+每条记录包含：时间、Git 用户、厂商、模型、token、命令动作（`review` / `commit` / `report`），以及便于事后分析的字段：
+
+- `action_detail`：细分用途（`review` / `commit-message` / `review+message` / `report`）
+- `branch`、`files_count`、`diff_chars`、`truncated`（审查/提交规模）
+- `commit_count`、`since`（工作总结范围）
+- `ok`、`duration_ms`、`error_kind`（成功/失败与耗时）
+- `gai_version`
+
+不写 prompt / diff / 模型正文。日志默认在**当前仓库根目录** `.gai/usage.jsonl`（已 `.gitignore`）；可用 `GAI_USAGE_LOG` 覆盖。过大时自动轮转。
 
 ```bash
 gai usage --cn

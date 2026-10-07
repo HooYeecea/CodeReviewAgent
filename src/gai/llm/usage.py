@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, replace
 
 
 @dataclass(frozen=True)
@@ -14,8 +14,25 @@ class LLMCallInfo:
     total_tokens: int | None = None
 
 
+@dataclass(frozen=True)
+class LLMUsageMeta:
+    """Extra context for local usage.jsonl (what the tokens were spent on)."""
+
+    action_detail: str = ""
+    branch: str = ""
+    files_count: int | None = None
+    diff_chars: int | None = None
+    truncated: bool | None = None
+    commit_count: int | None = None
+    since: str = ""
+
+
 _LLM_LOG: ContextVar[list[LLMCallInfo]] = ContextVar("gai_llm_log")
 _LLM_ACTION: ContextVar[str] = ContextVar("gai_llm_action", default="")
+_LLM_META: ContextVar[LLMUsageMeta] = ContextVar(
+    "gai_llm_meta",
+    default=LLMUsageMeta(),
+)
 
 
 def _log() -> list[LLMCallInfo]:
@@ -30,6 +47,7 @@ def _log() -> list[LLMCallInfo]:
 def clear_llm_usage() -> None:
     _LLM_LOG.set([])
     _LLM_ACTION.set("")
+    _LLM_META.set(LLMUsageMeta())
 
 
 def set_llm_action(action: str) -> None:
@@ -42,6 +60,21 @@ def get_llm_action() -> str:
         return _LLM_ACTION.get()
     except LookupError:
         return ""
+
+
+def set_llm_usage_meta(**kwargs: object) -> None:
+    """Set or merge analysis metadata for the next LLM persist."""
+    current = get_llm_usage_meta()
+    allowed = {f.name for f in fields(LLMUsageMeta)}
+    updates = {k: v for k, v in kwargs.items() if k in allowed}
+    _LLM_META.set(replace(current, **updates))  # type: ignore[arg-type]
+
+
+def get_llm_usage_meta() -> LLMUsageMeta:
+    try:
+        return _LLM_META.get()
+    except LookupError:
+        return LLMUsageMeta()
 
 
 def record_llm_call(

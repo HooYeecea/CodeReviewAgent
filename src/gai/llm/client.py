@@ -10,7 +10,7 @@ import httpx
 from gai.config import Settings
 from gai.git_ops import current_git_identity
 from gai.llm.history import UsageRecord, append_usage_record, now_iso
-from gai.llm.usage import get_llm_action, record_llm_call
+from gai.llm.usage import get_llm_action, get_llm_usage_meta, record_llm_call
 
 _RETRYABLE_KINDS = frozenset({"timeout", "network", "rate_limit", "server"})
 _DEFAULT_MAX_ATTEMPTS = 3
@@ -116,21 +116,56 @@ class LLMClient:
                 kind="missing_key",
             )
 
+        started = time.perf_counter()
         last_error: LLMError | None = None
         for attempt in range(1, self.max_attempts + 1):
             try:
-                return self._chat_once(
+                content, usage = self._chat_once(
                     system=system,
                     user=user,
                     temperature=temperature,
                 )
+                model, prompt_tokens, completion_tokens, total_tokens = usage
+                record_llm_call(
+                    model=model,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=total_tokens,
+                )
+                self._persist_usage(
+                    model=model,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=total_tokens,
+                    ok=True,
+                    duration_ms=_elapsed_ms(started),
+                )
+                return content
             except LLMError as exc:
                 last_error = exc
                 if exc.kind not in _RETRYABLE_KINDS or attempt >= self.max_attempts:
+                    self._persist_usage(
+                        model=self.settings.model,
+                        prompt_tokens=None,
+                        completion_tokens=None,
+                        total_tokens=None,
+                        ok=False,
+                        duration_ms=_elapsed_ms(started),
+                        error_kind=exc.kind,
+                    )
                     raise
                 self._sleep(_retry_delay(attempt, exc))
 
         assert last_error is not None
+        self._persist_usage(
+            model=self.settings.model,
+            prompt_tokens=None,
+            completion_tokens=None,
+            total_tokens=None,
+            ok=False,
+            duration_ms=_elapsed_ms(started),
+            error_kind=last_error.kind,
+        )
         raise last_error
 
     def _chat_once(
@@ -139,7 +174,7 @@ class LLMClient:
         system: str,
         user: str,
         temperature: float,
-    ) -> str:
+    ) -> tuple[str, tuple[str, int | None, int | None, int | None]]:
         url = f"{self.settings.base_url}/chat/completions"
         headers = {
             "Authorization": f"Bearer {self.settings.api_key}",
@@ -204,19 +239,7 @@ class LLMClient:
         if isinstance(data, dict):
             model_name = str(data.get("model") or "").strip()
         resolved_model = model_name or self.settings.model
-        record_llm_call(
-            model=resolved_model,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            total_tokens=total_tokens,
-        )
-        self._persist_usage(
-            model=resolved_model,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            total_tokens=total_tokens,
-        )
-        return content
+        return content, (resolved_model, prompt_tokens, completion_tokens, total_tokens)
 
     def _persist_usage(
         self,
@@ -225,12 +248,17 @@ class LLMClient:
         prompt_tokens: int | None,
         completion_tokens: int | None,
         total_tokens: int | None,
+        ok: bool,
+        duration_ms: int | None,
+        error_kind: str = "",
     ) -> None:
         # Lazy import: balance ↔ client already share types; avoid import cycle.
+        from gai import __version__
         from gai.llm.balance import detect_provider
 
         provider = detect_provider(self.settings.base_url)
         git_user, git_email = current_git_identity()
+        meta = get_llm_usage_meta()
         append_usage_record(
             UsageRecord(
                 ts=now_iso(),
@@ -244,8 +272,23 @@ class LLMClient:
                 completion_tokens=completion_tokens,
                 total_tokens=total_tokens,
                 base_url=self.settings.base_url,
+                action_detail=meta.action_detail,
+                branch=meta.branch,
+                files_count=meta.files_count,
+                diff_chars=meta.diff_chars,
+                truncated=meta.truncated,
+                commit_count=meta.commit_count,
+                since=meta.since,
+                ok=ok,
+                duration_ms=duration_ms,
+                error_kind=error_kind,
+                gai_version=__version__,
             )
         )
+
+
+def _elapsed_ms(started: float) -> int:
+    return max(0, int((time.perf_counter() - started) * 1000))
 
 
 def _as_int(value: Any) -> int | None:

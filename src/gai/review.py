@@ -13,9 +13,15 @@ from rich.table import Table
 from rich.text import Text
 
 from gai.config import Settings, load_settings
-from gai.git_ops import get_staged_diff, has_staged_changes
+from gai.git_ops import (
+    count_staged_files,
+    current_branch_name,
+    get_staged_diff,
+    has_staged_changes,
+)
 from gai.llm.client import LLMClient, LLMError
 from gai.llm.prompts import SYSTEM_PROMPT, build_user_prompt
+from gai.llm.usage import set_llm_usage_meta
 
 Severity = Literal["critical", "warning", "info"]
 
@@ -173,6 +179,21 @@ def run_review(
             "Staged changes are empty after ignore filters. "
             "Adjust ignore_patterns or stage other files."
         )
+
+    if message_only:
+        action_detail = "commit-message"
+    elif review_only:
+        action_detail = "review"
+    else:
+        action_detail = "review+message"
+
+    set_llm_usage_meta(
+        action_detail=action_detail,
+        branch=current_branch_name(),
+        files_count=count_staged_files(),
+        diff_chars=len(diff),
+        truncated=truncated,
+    )
 
     client = LLMClient(settings)
     user_prompt = build_user_prompt(

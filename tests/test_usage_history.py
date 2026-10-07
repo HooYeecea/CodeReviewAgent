@@ -17,7 +17,7 @@ from gai.llm.history import (
     load_usage_records,
     summarize_records,
 )
-from gai.llm.usage import clear_llm_usage, set_llm_action
+from gai.llm.usage import clear_llm_usage, set_llm_action, set_llm_usage_meta
 
 
 def test_usage_log_path_under_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -188,7 +188,14 @@ def test_client_persists_usage(
 
     monkeypatch.setattr(httpx, "Client", _FakeHttp)
     clear_llm_usage()
-    set_llm_action("review")
+    set_llm_action("commit")
+    set_llm_usage_meta(
+        action_detail="review+message",
+        branch="main",
+        files_count=3,
+        diff_chars=1200,
+        truncated=False,
+    )
     settings = Settings(
         api_key="sk-test",
         base_url="https://api.deepseek.com/v1",
@@ -201,10 +208,87 @@ def test_client_persists_usage(
     rows = load_usage_records(path=path)
     assert len(rows) == 1
     rec = rows[0]
-    assert rec.action == "review"
+    assert rec.action == "commit"
+    assert rec.action_detail == "review+message"
+    assert rec.branch == "main"
+    assert rec.files_count == 3
+    assert rec.diff_chars == 1200
+    assert rec.truncated is False
+    assert rec.ok is True
+    assert rec.duration_ms is not None and rec.duration_ms >= 0
+    assert rec.gai_version
     assert rec.provider == "deepseek"
     assert rec.provider_name == "DeepSeek"
     assert rec.model == "deepseek-chat"
     assert rec.git_user == "Tester"
     assert rec.git_email == "tester@example.com"
     assert rec.total_tokens == 14
+
+
+def test_client_persists_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "usage.jsonl"
+    monkeypatch.setenv("GAI_USAGE_LOG", str(path))
+    monkeypatch.setattr(
+        "gai.llm.client.current_git_identity",
+        lambda cwd=None: ("Tester", "tester@example.com"),
+    )
+
+    class _FakeResponse:
+        status_code = 401
+        text = "invalid key"
+        headers: dict[str, str] = {}
+
+    class _FakeHttp:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def __enter__(self) -> _FakeHttp:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def post(self, *args: object, **kwargs: object) -> _FakeResponse:
+            return _FakeResponse()
+
+    monkeypatch.setattr(httpx, "Client", _FakeHttp)
+    clear_llm_usage()
+    set_llm_action("review")
+    set_llm_usage_meta(action_detail="review", branch="dev")
+    from gai.llm.client import LLMError
+
+    client = LLMClient(
+        Settings(api_key="sk-bad", base_url="https://api.openai.com/v1", model="gpt-x"),
+        sleep=lambda _s: None,
+    )
+    with pytest.raises(LLMError):
+        client.chat(system="s", user="u")
+
+    rows = load_usage_records(path=path)
+    assert len(rows) == 1
+    assert rows[0].ok is False
+    assert rows[0].error_kind == "unauthorized"
+    assert rows[0].action_detail == "review"
+    assert rows[0].total_tokens is None
+
+
+def test_usage_record_omits_empty_optionals() -> None:
+    data = UsageRecord(
+        ts="t",
+        git_user="A",
+        git_email="a@x.com",
+        provider="openai",
+        provider_name="OpenAI",
+        model="m",
+        action="review",
+        ok=True,
+        duration_ms=12,
+    ).to_dict()
+    assert data["ok"] is True
+    assert data["duration_ms"] == 12
+    assert "error_kind" not in data
+    assert "branch" not in data
+    assert "files_count" not in data
