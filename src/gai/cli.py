@@ -76,6 +76,13 @@ from gai.llm.history import (
     usage_log_path,
 )
 from gai.local_serve import open_path, serve_gai_page
+from gai.log_store import (
+    ensure_global_logs_merged,
+    global_command_log_path,
+    global_history_report_path,
+    global_usage_log_path,
+    global_usage_report_path,
+)
 from gai.llm.usage_report import (
     path_to_file_url,
     usage_report_path,
@@ -1706,8 +1713,8 @@ def usage_cmd(
         False,
         "--report",
         help=H(
-            "Sync a fixed HTML dashboard to .gai/usage-report.html from usage.jsonl.",
-            "根据 usage.jsonl 同步生成固定 HTML 报告：.gai/usage-report.html。",
+            "Sync HTML dashboard under ~/.gai from the global usage.jsonl.",
+            "根据全局 ~/.gai/usage.jsonl 同步生成 HTML 报告。",
         ),
     ),
     open_browser: bool = typer.Option(
@@ -1722,8 +1729,8 @@ def usage_cmd(
         False,
         "--serve",
         help=H(
-            "Serve .gai over local HTTP and open (implies --report; stable Refresh).",
-            "用本地 HTTP 打开 .gai（隐含 --report；刷新更稳定）。",
+            "Serve ~/.gai over local HTTP and open (implies --report; global data).",
+            "用本地 HTTP 打开全局 ~/.gai 报告（隐含 --report）。",
         ),
     ),
     cn: bool = typer.Option(
@@ -1741,7 +1748,7 @@ def usage_cmd(
         help=_TRACE_OPT_HELP,
     ),
 ) -> None:
-    """Show locally recorded LLM usage (who / when / provider / model / tokens / action)."""
+    """Show LLM usage: local table by default; --report/--serve use global ~/.gai."""
     _start_trace(trace)
     try:
         if group and group not in {"action", "provider", "model", "user"}:
@@ -1755,12 +1762,24 @@ def usage_cmd(
 
         want_report = report or open_browser or serve
         since_dt = _parse_usage_since(since)
-        # Report always uses the full filtered set; console view respects --limit.
         if want_report:
             cap = None
+            merged = ensure_global_logs_merged()
+            if merged.get("usage"):
+                tip = (
+                    f"已合并 {merged['usage']} 条本地用量到全局日志。"
+                    if cn
+                    else f"Merged {merged['usage']} local usage row(s) into the global log."
+                )
+                console.print(f"[dim]{tip}[/dim]")
+            log_path = global_usage_log_path()
+            report_out = global_usage_report_path()
         else:
             cap = None if limit <= 0 else limit
+            log_path = usage_log_path(scope="local")
+            report_out = usage_report_path(scope="local")
         records = load_usage_records(
+            path=log_path,
             limit=cap,
             since=since_dt,
             action=action,
@@ -1768,12 +1787,17 @@ def usage_cmd(
             git_user=user,
         )
         if want_report:
-            path = write_usage_report(records, chinese=cn)
+            path = write_usage_report(
+                records,
+                chinese=cn,
+                path=report_out,
+                source=str(log_path),
+            )
             link = path_to_file_url(path)
             msg = (
-                f"已同步用量报告：{path}"
+                f"已同步全局用量报告：{path}"
                 if cn
-                else f"Synced usage report: {path}"
+                else f"Synced global usage report: {path}"
             )
             console.print(f"[green]{msg}[/green]")
             if serve:
@@ -1796,11 +1820,11 @@ def usage_cmd(
                 if open_browser:
                     open_path(path, prefer_http=False)
                 tip = (
-                    "点击上方链接即可在浏览器中查看；日常 LLM 调用会自动更新 usage-data.js。"
+                    "数据来自全局 ~/.gai；页面内可按仓库筛选。"
                     "刷新不稳时用：gai usage --serve"
                     if cn
                     else (
-                        "Click the link to open the dashboard; LLM calls refresh usage-data.js. "
+                        "Data is from global ~/.gai; filter by repo in the page. "
                         "If Refresh fails under file://, use: gai usage --serve"
                     )
                 )
@@ -1816,14 +1840,14 @@ def usage_cmd(
             console.print(text)
             if not records:
                 tip = (
-                    f"（写入位置：{usage_log_path()}；"
-                    "每次成功调用大模型后会自动追加一行。"
-                    f"可视化报告：gai usage --report → {usage_report_path()}）"
+                    f"（当前仓写入：{usage_log_path(scope='local')}；"
+                    "同时会双写到全局 ~/.gai。"
+                    f"跨仓报告：gai usage --report → {global_usage_report_path()}）"
                     if cn
                     else (
-                        f"(log path: {usage_log_path()}; "
-                        "each successful LLM call appends one line. "
-                        f"Dashboard: gai usage --report → {usage_report_path()})"
+                        f"(local log: {usage_log_path(scope='local')}; "
+                        "also dual-written to ~/.gai. "
+                        f"Cross-repo dashboard: gai usage --report → {global_usage_report_path()})"
                     )
                 )
                 console.print(f"[dim]{tip}[/dim]")
@@ -1916,8 +1940,8 @@ def guide_cmd(
 @app.command(
     "history",
     help=H(
-        "Show local gai command execution history (.gai/commands.jsonl).",
-        "查看本地 gai 命令执行记录（.gai/commands.jsonl）。",
+        "Show gai command history (local table; --report/--serve use ~/.gai).",
+        "查看 gai 命令记录（终端看当前仓；--report/--serve 用全局 ~/.gai）。",
     ),
 )
 def history_cmd(
@@ -1957,8 +1981,8 @@ def history_cmd(
         False,
         "--report",
         help=H(
-            "Sync a fixed HTML dashboard to .gai/history-report.html from commands.jsonl.",
-            "根据 commands.jsonl 同步生成固定 HTML 报告：.gai/history-report.html。",
+            "Sync HTML dashboard under ~/.gai from the global commands.jsonl.",
+            "根据全局 ~/.gai/commands.jsonl 同步生成 HTML 报告。",
         ),
     ),
     open_browser: bool = typer.Option(
@@ -1973,8 +1997,8 @@ def history_cmd(
         False,
         "--serve",
         help=H(
-            "Serve .gai over local HTTP and open (implies --report; stable Refresh).",
-            "用本地 HTTP 打开 .gai（隐含 --report；刷新更稳定）。",
+            "Serve ~/.gai over local HTTP and open (implies --report; global data).",
+            "用本地 HTTP 打开全局 ~/.gai 报告（隐含 --report）。",
         ),
     ),
     as_json: bool = typer.Option(
@@ -1997,25 +2021,46 @@ def history_cmd(
         help=_TRACE_OPT_HELP,
     ),
 ) -> None:
-    """Show locally recorded gai CLI invocations."""
+    """Show gai CLI invocations: local table by default; --report/--serve use global."""
     _start_trace(trace)
     try:
         want_report = report or open_browser or serve
         since_dt = _parse_usage_since(since)
-        cap = None if want_report else (None if limit <= 0 else limit)
+        if want_report:
+            cap = None
+            merged = ensure_global_logs_merged()
+            if merged.get("commands"):
+                tip = (
+                    f"已合并 {merged['commands']} 条本地命令记录到全局日志。"
+                    if cn
+                    else f"Merged {merged['commands']} local command row(s) into the global log."
+                )
+                console.print(f"[dim]{tip}[/dim]")
+            log_path = global_command_log_path()
+            report_out = global_history_report_path()
+        else:
+            cap = None if limit <= 0 else limit
+            log_path = command_log_path(scope="local")
+            report_out = history_report_path(scope="local")
         records = load_command_records(
+            path=log_path,
             limit=cap,
             since=since_dt,
             command=command,
             ok=False if failed else None,
         )
         if want_report:
-            path = write_history_report(records, chinese=cn)
+            path = write_history_report(
+                records,
+                chinese=cn,
+                path=report_out,
+                source=str(log_path),
+            )
             link = path_to_file_url(path)
             msg = (
-                f"已同步命令执行报告：{path}"
+                f"已同步全局命令执行报告：{path}"
                 if cn
-                else f"Synced command history report: {path}"
+                else f"Synced global command history report: {path}"
             )
             console.print(f"[green]{msg}[/green]")
             if serve:
@@ -2038,11 +2083,11 @@ def history_cmd(
                 if open_browser:
                     open_path(path, prefer_http=False)
                 tip = (
-                    "点击上方链接即可查看图表；日常 gai 调用会自动更新 history-data.js。"
+                    "数据来自全局 ~/.gai；页面内可按仓库筛选。"
                     "刷新不稳时用：gai history --serve"
                     if cn
                     else (
-                        "Click the link to open the dashboard; gai runs refresh history-data.js. "
+                        "Data is from global ~/.gai; filter by repo in the page. "
                         "If Refresh fails under file://, use: gai history --serve"
                     )
                 )
@@ -2057,16 +2102,14 @@ def history_cmd(
             console.print(format_command_table(records, chinese=cn))
             if not records:
                 tip = (
-                    f"（写入位置：{command_log_path()}；"
-                    "每次执行 gai 子命令后会自动追加一行。"
-                    f"可视化报告：gai history --report → {history_report_path()}；"
-                    "可用环境变量 GAI_HISTORY=0 关闭。）"
+                    f"（当前仓写入：{command_log_path(scope='local')}；"
+                    "同时会双写到全局 ~/.gai（GAI_HISTORY=0 可关闭）。"
+                    f"跨仓报告：gai history --report → {global_history_report_path()}）"
                     if cn
                     else (
-                        f"(log path: {command_log_path()}; "
-                        "each gai invocation appends one line. "
-                        f"Dashboard: gai history --report → {history_report_path()}; "
-                        "Disable with GAI_HISTORY=0.)"
+                        f"(local log: {command_log_path(scope='local')}; "
+                        "also dual-written to ~/.gai (disable with GAI_HISTORY=0). "
+                        f"Cross-repo dashboard: gai history --report → {global_history_report_path()})"
                     )
                 )
                 console.print(f"[dim]{tip}[/dim]")

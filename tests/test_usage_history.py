@@ -22,6 +22,7 @@ from gai.llm.usage import clear_llm_usage, set_llm_action, set_llm_usage_meta
 
 def test_usage_log_path_under_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("GAI_USAGE_LOG", raising=False)
+    monkeypatch.setattr("gai.log_store.project_root", lambda cwd=None: tmp_path)
     monkeypatch.setattr("gai.llm.history.project_root", lambda cwd=None: tmp_path)
     from gai.llm.history import usage_log_path
 

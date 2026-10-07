@@ -11,7 +11,13 @@ from pathlib import Path
 from typing import Any
 
 from gai.command_history import CommandRecord, command_log_path, load_command_records
-from gai.llm.history import project_root
+from gai.log_store import (
+    global_command_log_path,
+    global_gai_dir,
+    global_history_report_path,
+    local_gai_dir,
+    local_history_report_path,
+)
 from gai.llm.usage_report import path_to_file_url
 from gai.web_prefs import PREF_LANG, PREF_THEME, early_prefs_script
 
@@ -32,12 +38,16 @@ __all__ = [
 ]
 
 
-def history_report_path(cwd: Path | None = None) -> Path:
-    return project_root(cwd) / _REPORT_RELATIVE
+def history_report_path(cwd: Path | None = None, *, scope: str = "local") -> Path:
+    if scope == "global":
+        return global_history_report_path()
+    return local_history_report_path(cwd)
 
 
-def history_data_path(cwd: Path | None = None) -> Path:
-    return project_root(cwd) / _DATA_RELATIVE
+def history_data_path(cwd: Path | None = None, *, scope: str = "local") -> Path:
+    if scope == "global":
+        return global_gai_dir() / "history-data.js"
+    return local_gai_dir(cwd) / "history-data.js"
 
 
 def write_history_data_js(
@@ -75,7 +85,8 @@ def sync_history_data_file(
         ):
             return data_path
         records = load_command_records(path=log_path)
-        datasets = build_history_datasets(records)
+        src = str(log_path) if log_path is not None else str(command_log_path())
+        datasets = build_history_datasets(records, source=src)
         written = write_history_data_js(datasets, path=data_path)
         if ensure_html:
             html_path = data_path.parent / "history-report.html"
@@ -94,9 +105,15 @@ def write_history_report(
     *,
     chinese: bool = False,
     path: Path | None = None,
+    source: str | None = None,
 ) -> Path:
     target = path or history_report_path()
-    datasets = build_history_datasets(records)
+    src = source or (
+        str(global_command_log_path())
+        if target.resolve() == global_history_report_path().resolve()
+        else str(command_log_path())
+    )
+    datasets = build_history_datasets(records, source=src)
     target.parent.mkdir(parents=True, exist_ok=True)
     write_history_data_js(datasets, path=target.parent / "history-data.js")
     target.write_text(
@@ -106,19 +123,28 @@ def write_history_report(
     return target
 
 
-def build_history_datasets(records: list[CommandRecord]) -> dict[str, Any]:
+def build_history_datasets(
+    records: list[CommandRecord],
+    *,
+    source: str | None = None,
+) -> dict[str, Any]:
     labels: dict[str, str] = {}
     for rec in records:
         key = _project_key(rec)
         labels[key] = _project_label(rec)
 
+    src = source or str(command_log_path())
     by_project: dict[str, dict[str, Any]] = {}
     for key in labels:
         subset = [r for r in records if _project_key(r) == key]
-        by_project[key] = build_history_analytics(subset)
+        blob = build_history_analytics(subset)
+        blob["source"] = src
+        by_project[key] = blob
 
+    all_blob = build_history_analytics(records)
+    all_blob["source"] = src
     return {
-        "all": build_history_analytics(records),
+        "all": all_blob,
         "by_project": by_project,
         "projects": [{"id": key, "label": labels[key]} for key in sorted(labels.keys())],
         "default_project": "__all__",
@@ -434,7 +460,7 @@ def _i18n(chinese: bool) -> dict[str, str]:
             "page_of": "第 {{page}}/{{pages}} 页 · {{shown}}",
             "theme_light": "日间",
             "theme_dark": "夜间",
-            "footer": "数据来自 .gai/commands.jsonl（同步为 history-data.js）。点「刷新」可加载最新数据；日常 gai 调用也会自动更新。file:// 不稳时用 gai history --serve。",
+            "footer": "数据来自全局 ~/.gai/commands.jsonl（同步为 history-data.js）。点「刷新」可加载最新数据；日常 gai 调用会双写本地与全局。file:// 不稳时用 gai history --serve。",
         }
     return {
         "title": "gai Command History Report",
@@ -498,7 +524,7 @@ def _i18n(chinese: bool) -> dict[str, str]:
         "page_of": "Page {{page}}/{{pages}} · {{shown}}",
         "theme_light": "Light",
         "theme_dark": "Dark",
-        "footer": "Data from .gai/commands.jsonl (synced to history-data.js). Click Refresh for the latest snapshot; normal gai runs also update the data file. Prefer gai history --serve if file:// refresh is blocked.",
+        "footer": "Data from global ~/.gai/commands.jsonl (synced to history-data.js). Click Refresh for the latest snapshot; gai dual-writes local + global. Prefer gai history --serve if file:// refresh is blocked.",
     }
 
 

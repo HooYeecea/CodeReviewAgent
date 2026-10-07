@@ -1,4 +1,4 @@
-"""Local gai command execution history (JSONL under project/.gai)."""
+"""gai command execution history (JSONL under project/.gai and ~/.gai)."""
 
 from __future__ import annotations
 
@@ -147,12 +147,17 @@ def history_enabled() -> bool:
     return True
 
 
-def command_log_path(cwd: Path | None = None) -> Path:
-    """``<project>/.gai/commands.jsonl`` (override with ``GAI_HISTORY_LOG``)."""
-    override = os.environ.get("GAI_HISTORY_LOG", "").strip()
-    if override:
-        return Path(override).expanduser()
-    return project_root(cwd) / _HISTORY_RELATIVE
+def command_log_path(cwd: Path | None = None, *, scope: str = "local") -> Path:
+    """Command JSONL path.
+
+    ``scope="local"`` → ``<project>/.gai/commands.jsonl`` (``GAI_HISTORY_LOG``).
+    ``scope="global"`` → ``~/.gai/commands.jsonl`` (``GAI_HISTORY_LOG_GLOBAL``).
+    """
+    from gai.log_store import global_command_log_path, local_command_log_path
+
+    if scope == "global":
+        return global_command_log_path()
+    return local_command_log_path(cwd)
 
 
 def sanitize_argv(argv: list[str]) -> list[str]:
@@ -224,9 +229,7 @@ def extract_command(argv: list[str]) -> tuple[str, str]:
     return "", ""
 
 
-def append_command_record(record: CommandRecord, *, path: Path | None = None) -> None:
-    """Append one JSON line. Failures are swallowed so logging never breaks CLI."""
-    target = path or command_log_path()
+def _append_command_to(target: Path, record: CommandRecord) -> None:
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
         line = json.dumps(record.to_dict(), ensure_ascii=False, separators=(",", ":"))
@@ -235,12 +238,36 @@ def append_command_record(record: CommandRecord, *, path: Path | None = None) ->
         _maybe_rotate(target)
     except OSError:
         return
-    # Keep the HTML dashboard's companion data file fresh for in-page Refresh.
     try:
         from gai.history_report import sync_history_data_file
 
         sync_history_data_file(log_path=target)
     except Exception:
+        return
+
+
+def append_command_record(record: CommandRecord, *, path: Path | None = None) -> None:
+    """Append one JSON line. Failures are swallowed so logging never breaks CLI.
+
+    When ``path`` is omitted, dual-writes to local project ``.gai`` and global
+    ``~/.gai``.
+    """
+    if path is not None:
+        _append_command_to(path, record)
+        return
+
+    from gai.log_store import global_command_log_path, local_command_log_path
+
+    local = local_command_log_path()
+    _append_command_to(local, record)
+    # Explicit GAI_HISTORY_LOG override (tests/custom) → single destination only.
+    if os.environ.get("GAI_HISTORY_LOG", "").strip():
+        return
+    try:
+        global_path = global_command_log_path()
+        if global_path.resolve() != local.resolve():
+            _append_command_to(global_path, record)
+    except OSError:
         return
 
 

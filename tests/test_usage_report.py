@@ -19,7 +19,7 @@ from gai.llm.usage_report import (
 
 
 def test_write_usage_report_fixed_path(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr("gai.llm.usage_report.project_root", lambda cwd=None: tmp_path)
+    monkeypatch.setattr("gai.log_store.project_root", lambda cwd=None: tmp_path)
     monkeypatch.setattr("gai.llm.history.project_root", lambda cwd=None: tmp_path)
 
     log = tmp_path / ".gai" / "usage.jsonl"
@@ -194,7 +194,7 @@ def test_trend_today_is_hourly_until_now() -> None:
 
 
 def test_sync_usage_data_file_creates_html_shell(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr("gai.llm.usage_report.project_root", lambda cwd=None: tmp_path)
+    monkeypatch.setattr("gai.log_store.project_root", lambda cwd=None: tmp_path)
     monkeypatch.setattr("gai.llm.history.project_root", lambda cwd=None: tmp_path)
     log = tmp_path / ".gai" / "usage.jsonl"
     append_usage_record(

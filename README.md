@@ -362,22 +362,27 @@ gai report --since 2026-09-01 --until 2026-09-23 --json
 - `ok`、`duration_ms`、`error_kind`（成功/失败与耗时）
 - `gai_version`
 
-不写 prompt / diff / 模型正文。日志默认在**当前仓库根目录** `.gai/usage.jsonl`（已 `.gitignore`）；可用 `GAI_USAGE_LOG` 覆盖。过大时自动轮转。
+不写 prompt / diff / 模型正文。每次 LLM 调用会**双写**：
+
+- **本地**：当前仓库 `.gai/usage.jsonl`（终端 `gai usage` 默认看这里）
+- **全局**：`~/.gai/usage.jsonl`（`--report` / `--open` / `--serve` 用这里，可跨仓）
+
+可用 `GAI_USAGE_LOG` / `GAI_USAGE_LOG_GLOBAL` 覆盖路径。过大时自动轮转。首次 `--report/--serve` 会把已发现的本地仓（含同级 `CodeReviewAgent` / `NatureLanguageCRUD`）幂等合并进全局。
 
 ```bash
 gai usage --cn
-gai usage --report --cn                 # 固定写入 .gai/usage-report.html（覆盖同步）
+gai usage --report --cn                 # 全局 ~/.gai/usage-report.html
 gai usage --open --cn                   # 同步并打开浏览器（隐含 --report）
-gai usage --serve --cn                  # 本地 HTTP 打开，刷新更稳定（隐含 --report）
+gai usage --serve --cn                  # 本地 HTTP 打开全局报告（隐含 --report）
 gai usage --report --since 7d --cn      # 只把近 7 天数据同步进报告
 gai usage --since 7d --group action --cn
 gai usage --action commit -n 50 --cn
 gai usage --user alice --json
 ```
 
-`--report` / `--open` / `--serve` 会读取当前项目的 `.gai/usage.jsonl`，**覆盖写入** `.gai/usage-report.html`，并同步 `.gai/usage-data.js`。首次有 LLM 用量写入时也会自动生成报告壳（不必先跑 `--report`）。报告页支持：
+`--report` / `--open` / `--serve` 读取**全局** `~/.gai/usage.jsonl`，写入 `~/.gai/usage-report.html` + `usage-data.js`。报告页支持：
 
-- **刷新**：加载最新 `usage-data.js`（日常 `gai` 调用会自动更新；`file://` 被拦时改用 `--serve`）
+- **刷新**：加载最新 `usage-data.js`（日常双写会更新全局；`file://` 被拦时改用 `--serve`）
 - **导出 CSV**、最近记录分页
 - **中 / 英**、**日间 / 夜间**主题（与指南共用 `gai-ui-lang` / `gai-ui-theme`）
 
@@ -396,9 +401,9 @@ gai usage --user alice --json
 | `--provider` | 按厂商 id 过滤（如 `deepseek`） |
 | `-u` / `--user` | 按 git 用户名或邮箱子串过滤 |
 | `-g` / `--group` | 额外汇总：`action` / `provider` / `model` / `user` |
-| `--report` | 同步生成 `.gai/usage-report.html` 可视化报告 |
+| `--report` | 同步生成全局 `~/.gai/usage-report.html` |
 | `--open` | 打开浏览器（隐含 `--report`） |
-| `--serve` | 本地 HTTP 打开（隐含 `--report`；刷新更稳） |
+| `--serve` | 本地 HTTP 打开全局报告（隐含 `--report`；刷新更稳） |
 | `--json` | JSON 输出 |
 | `--cn` | 中文输出 |
 | `-t` / `--trace` | 打印链路（本命令通常无 git） |
@@ -424,19 +429,24 @@ gai guide                # 首屏英文
 
 ### `gai history`
 
-查看 **本地** 记录的 gai 命令执行历史（与 `gai usage` 的 token 用量分开）。每次通过 `gai` 入口执行的子命令都会追加一行到仓库 `.gai/commands.jsonl`（已 `.gitignore`）；可用 `GAI_HISTORY=0` 关闭，或用 `GAI_HISTORY_LOG` 覆盖路径。密钥类参数（如 `--api-key`）会掩码为 `***`。
+查看 gai 命令执行历史（与 `gai usage` 的 token 用量分开）。每次通过 `gai` 入口执行的子命令会**双写**：
+
+- **本地**：仓库 `.gai/commands.jsonl`（终端 `gai history` 默认看这里）
+- **全局**：`~/.gai/commands.jsonl`（`--report` / `--open` / `--serve` 用这里）
+
+可用 `GAI_HISTORY=0` 关闭；`GAI_HISTORY_LOG` / `GAI_HISTORY_LOG_GLOBAL` 覆盖路径。密钥类参数（如 `--api-key`）会掩码为 `***`。
 
 ```bash
 gai history --cn
-gai history --report --cn               # 固定写入 .gai/history-report.html（覆盖同步）
+gai history --report --cn               # 全局 ~/.gai/history-report.html
 gai history --open --cn                 # 同步并打开浏览器（隐含 --report）
-gai history --serve --cn                # 本地 HTTP 打开，刷新更稳定（隐含 --report）
+gai history --serve --cn                # 本地 HTTP 打开全局报告（隐含 --report）
 gai history --command commit --cn
 gai history --failed --since 7d --cn
 gai history -n 50 --json
 ```
 
-`--report` / `--open` / `--serve` 会读取 `.gai/commands.jsonl`，**覆盖写入** `.gai/history-report.html`，并同步 `.gai/history-data.js`。首次有命令记录写入时也会自动生成报告壳。报告页与用量报告交互一致：
+`--report` / `--open` / `--serve` 读取**全局** `~/.gai/commands.jsonl`，写入 `~/.gai/history-report.html` + `history-data.js`。报告页与用量报告交互一致：
 
 - **全部项目 / 单仓库**筛选（跨仓对比 vs 仓内详情）
 - **刷新**、**导出 CSV**、最近记录分页
@@ -500,7 +510,7 @@ gai balance
 - **余额查询**：`gai balance` 先确认 API Key；按 `base_url` 识别厂商查询（DeepSeek / 硅基流动 / Moonshot·Kimi / OpenRouter）；未接入的厂商会提示当前厂商与模型。
 - **Git**：非仓库、无 remote、鉴权失败、推送被拒、拉取冲突、脏工作区等有可读说明；`--trace` 时额外打印原始详情。
 - **用量**：黄色一行显示本次调用；有 token 合计时只显示接口返回值，**不估算**。历史用量见 `gai usage`（本地 JSONL）。
-- **命令记录**：每次 `gai …` 执行会写入 `.gai/commands.jsonl`；用 `gai history` / `gai history --report` 查看，`GAI_HISTORY=0` 可关闭。
+- **命令记录**：每次 `gai …` 双写本地 `.gai/commands.jsonl` 与全局 `~/.gai/commands.jsonl`；终端看本地，`--report/--serve` 看全局（可按仓库筛选），`GAI_HISTORY=0` 可关闭。
 
 ## 设计要点
 

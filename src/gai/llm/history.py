@@ -1,4 +1,4 @@
-"""Persistent local LLM usage history (JSONL under the project/.gai)."""
+"""Persistent LLM usage history (JSONL under project/.gai and ~/.gai)."""
 
 from __future__ import annotations
 
@@ -123,21 +123,24 @@ def project_root(cwd: Path | None = None) -> Path:
     return base.resolve()
 
 
-def usage_log_path(cwd: Path | None = None) -> Path:
-    """``<project>/.gai/usage.jsonl`` (override with ``GAI_USAGE_LOG``)."""
-    override = os.environ.get("GAI_USAGE_LOG", "").strip()
-    if override:
-        return Path(override).expanduser()
-    return project_root(cwd) / _USAGE_RELATIVE
+def usage_log_path(cwd: Path | None = None, *, scope: str = "local") -> Path:
+    """Usage JSONL path.
+
+    ``scope="local"`` → ``<project>/.gai/usage.jsonl`` (``GAI_USAGE_LOG`` override).
+    ``scope="global"`` → ``~/.gai/usage.jsonl`` (``GAI_USAGE_LOG_GLOBAL`` override).
+    """
+    from gai.log_store import global_usage_log_path, local_usage_log_path
+
+    if scope == "global":
+        return global_usage_log_path()
+    return local_usage_log_path(cwd)
 
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 
 
-def append_usage_record(record: UsageRecord, *, path: Path | None = None) -> None:
-    """Append one JSON line. Failures are swallowed so logging never breaks CLI."""
-    target = path or usage_log_path()
+def _append_usage_to(target: Path, record: UsageRecord) -> None:
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
         line = json.dumps(record.to_dict(), ensure_ascii=False, separators=(",", ":"))
@@ -146,12 +149,36 @@ def append_usage_record(record: UsageRecord, *, path: Path | None = None) -> Non
         _maybe_rotate(target)
     except OSError:
         return
-    # Keep the HTML dashboard's companion data file fresh for in-page Refresh.
     try:
         from gai.llm.usage_report import sync_usage_data_file
 
         sync_usage_data_file(log_path=target)
     except Exception:
+        return
+
+
+def append_usage_record(record: UsageRecord, *, path: Path | None = None) -> None:
+    """Append one JSON line. Failures are swallowed so logging never breaks CLI.
+
+    When ``path`` is omitted, dual-writes to local project ``.gai`` and global
+    ``~/.gai`` (skipped if both resolve to the same file).
+    """
+    if path is not None:
+        _append_usage_to(path, record)
+        return
+
+    from gai.log_store import global_usage_log_path, local_usage_log_path
+
+    local = local_usage_log_path()
+    _append_usage_to(local, record)
+    # Explicit GAI_USAGE_LOG override (tests/custom) → single destination only.
+    if os.environ.get("GAI_USAGE_LOG", "").strip():
+        return
+    try:
+        global_path = global_usage_log_path()
+        if global_path.resolve() != local.resolve():
+            _append_usage_to(global_path, record)
+    except OSError:
         return
 
 

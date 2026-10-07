@@ -14,9 +14,15 @@ from urllib.parse import quote
 from gai.llm.history import (
     UsageRecord,
     load_usage_records,
-    project_root,
     summarize_records,
     usage_log_path,
+)
+from gai.log_store import (
+    global_gai_dir,
+    global_usage_log_path,
+    global_usage_report_path,
+    local_gai_dir,
+    local_usage_report_path,
 )
 from gai.web_prefs import PREF_LANG, PREF_THEME, early_prefs_script
 
@@ -26,13 +32,17 @@ _DATA_RELATIVE = Path(".gai") / "usage-data.js"
 _SYNC_MIN_INTERVAL_SEC = 2.0
 
 
-def usage_report_path(cwd: Path | None = None) -> Path:
-    return project_root(cwd) / _REPORT_RELATIVE
+def usage_report_path(cwd: Path | None = None, *, scope: str = "local") -> Path:
+    if scope == "global":
+        return global_usage_report_path()
+    return local_usage_report_path(cwd)
 
 
-def usage_data_path(cwd: Path | None = None) -> Path:
+def usage_data_path(cwd: Path | None = None, *, scope: str = "local") -> Path:
     """Companion datasets file loaded by the HTML report (refreshable)."""
-    return project_root(cwd) / _DATA_RELATIVE
+    if scope == "global":
+        return global_gai_dir() / "usage-data.js"
+    return local_gai_dir(cwd) / "usage-data.js"
 
 
 def write_usage_data_js(
@@ -75,7 +85,8 @@ def sync_usage_data_file(
         ):
             return data_path
         records = load_usage_records(path=log_path)
-        datasets = build_report_datasets(records)
+        src = str(log_path) if log_path is not None else str(usage_log_path())
+        datasets = build_report_datasets(records, source=src)
         written = write_usage_data_js(datasets, path=data_path)
         if ensure_html:
             html_path = data_path.parent / "usage-report.html"
@@ -180,7 +191,7 @@ def build_usage_analytics(records: list[UsageRecord]) -> dict[str, Any]:
 
     return {
         "generated_at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
-        "source": str(usage_log_path()),
+        "source": str(usage_log_path()),  # overridden by build_report_datasets when needed
         "totals": {
             "calls": summary.calls,
             "tokens": summary.total_tokens,
@@ -225,20 +236,29 @@ def build_usage_analytics(records: list[UsageRecord]) -> dict[str, Any]:
     }
 
 
-def build_report_datasets(records: list[UsageRecord]) -> dict[str, Any]:
+def build_report_datasets(
+    records: list[UsageRecord],
+    *,
+    source: str | None = None,
+) -> dict[str, Any]:
     """Precompute analytics for all projects and each repo_name."""
     labels: dict[str, str] = {}
     for rec in records:
         key = _project_key(rec)
         labels[key] = _project_label(rec)
 
+    src = source or str(usage_log_path())
     by_project: dict[str, dict[str, Any]] = {}
     for key in labels:
         subset = [r for r in records if _project_key(r) == key]
-        by_project[key] = build_usage_analytics(subset)
+        blob = build_usage_analytics(subset)
+        blob["source"] = src
+        by_project[key] = blob
 
+    all_blob = build_usage_analytics(records)
+    all_blob["source"] = src
     return {
-        "all": build_usage_analytics(records),
+        "all": all_blob,
         "by_project": by_project,
         "projects": [
             {"id": key, "label": labels[key]}
@@ -329,10 +349,16 @@ def write_usage_report(
     *,
     chinese: bool = False,
     path: Path | None = None,
+    source: str | None = None,
 ) -> Path:
     """Overwrite the fixed HTML report with data synced from usage.jsonl."""
     target = path or usage_report_path()
-    datasets = build_report_datasets(records)
+    src = source or (
+        str(global_usage_log_path())
+        if target.resolve() == global_usage_report_path().resolve()
+        else str(usage_log_path())
+    )
+    datasets = build_report_datasets(records, source=src)
     target.parent.mkdir(parents=True, exist_ok=True)
     write_usage_data_js(datasets, path=target.parent / "usage-data.js")
     target.write_text(
@@ -2208,7 +2234,7 @@ def _i18n(chinese: bool) -> dict[str, str]:
             "page_of": "第 {{page}}/{{pages}} 页 · {{shown}}",
             "theme_light": "日间",
             "theme_dark": "夜间",
-            "footer": "数据来自 .gai/usage.jsonl（同步为 usage-data.js）。点「刷新」可加载最新数据；日常 gai 调用也会自动更新数据文件。file:// 刷新不稳时用 gai usage --report --serve。",
+            "footer": "数据来自全局 ~/.gai/usage.jsonl（同步为 usage-data.js）。点「刷新」可加载最新数据；日常 gai 调用会双写本地与全局。file:// 刷新不稳时用 gai usage --serve。",
         }
     return {
         "title": "gai Token Usage Report",
@@ -2296,5 +2322,5 @@ def _i18n(chinese: bool) -> dict[str, str]:
         "page_of": "Page {{page}}/{{pages}} · {{shown}}",
         "theme_light": "Light",
         "theme_dark": "Dark",
-        "footer": "Data from .gai/usage.jsonl (synced to usage-data.js). Click Refresh for the latest snapshot; normal gai LLM calls also update the data file. Prefer gai usage --report --serve if file:// refresh is blocked.",
+        "footer": "Data from global ~/.gai/usage.jsonl (synced to usage-data.js). Click Refresh for the latest snapshot; gai dual-writes local + global. Prefer gai usage --serve if file:// refresh is blocked.",
     }
