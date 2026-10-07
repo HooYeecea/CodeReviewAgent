@@ -107,7 +107,7 @@ $env:GAI_PROFILE = "1"                               # 本次会话用档 1
 ```bash
 gai config --api-key sk-xxx --base-url https://api.deepseek.com/v1 --model deepseek-chat
 gai config --api-key sk-yyy --name 1 --base-url https://api.openai.com/v1 --model gpt-4o-mini
-gai config --list --cn          # 档数、当前编号、余额 + 配置档列表
+gai config --list --cn          # 档数、当前编号；每个配置档含余额字段
 gai config --use 1 --cn         # 切换当前配置档（写入 llm.current）
 gai config --show --cn          # 当前生效配置（含 profile）
 ```
@@ -481,7 +481,7 @@ gai balance
 | 参数 | 说明 |
 |------|------|
 | `--show` | 显示当前生效配置（含 `profile`，密钥已掩码） |
-| `--list` / `-l` | 列出全部配置档：档数、当前编号，并查询当前 API Key 余额（厂商不支持则说明） |
+| `--list` / `-l` | 列出全部配置档：档数、当前编号；每个 API Key 带余额字段（厂商不支持则说明） |
 | `--use <id>` | 切换当前配置档（写入 `llm.current`） |
 | `--name <id>` | 与 `--api-key` 等联用，写入指定配置档 |
 | `--api-key` | 设置 API Key |

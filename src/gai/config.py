@@ -427,11 +427,7 @@ def format_profile_label(name: str, *, chinese: bool = False) -> str:
     return f"配置档 {name}" if chinese else f"profile {name}"
 
 
-def format_profiles_overview(
-    *,
-    chinese: bool = False,
-    balance_line: str | None = None,
-) -> str:
+def format_profiles_overview(*, chinese: bool = False) -> str:
     profiles = list_profiles()
     keyed = [p for p in profiles if p.api_key]
     active = next((p for p in profiles if p.active), None)
@@ -442,14 +438,10 @@ def format_profiles_overview(
             lines.append(f"当前使用：{format_profile_label(active.name, chinese=True)}")
         else:
             lines.append("当前使用：（无）")
-        if balance_line:
-            lines.append(f"余额：{balance_line}")
     else:
         lines.append(f"Configured API keys: {len(keyed)}")
         if active:
             lines.append(f"In use: {format_profile_label(active.name, chinese=False)}")
         else:
             lines.append("In use: (none)")
-        if balance_line:
-            lines.append(f"Balance: {balance_line}")
     return "\n".join(lines)

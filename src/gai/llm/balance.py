@@ -437,15 +437,14 @@ def _first_amount(result: BalanceResult) -> str | None:
 
 
 def format_balance_brief(result: BalanceResult, *, chinese: bool = False) -> str:
-    """One-line balance for config --list."""
-    provider = result.provider.name_cn if chinese else result.provider.name_en
+    """One-line balance field for a single API-key profile."""
     if not result.supported:
         if chinese:
-            return f"{provider}不支持余额查询"
-        return f"{provider} does not support balance lookup"
+            return "该厂商不提供余额查询"
+        return "this vendor does not provide balance lookup"
     amount = _first_amount(result)
     if amount:
-        return f"{amount}（{provider}）" if chinese else f"{amount} ({provider})"
+        return amount
     if chinese:
-        return f"已查询（{provider}），无明细金额"
-    return f"queried ({provider}), no amount returned"
+        return "已查询，无明细金额"
+    return "queried, no amount returned"

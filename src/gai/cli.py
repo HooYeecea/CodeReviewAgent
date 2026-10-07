@@ -24,6 +24,8 @@ from gai.command_history import (
 from gai.completion_cmd import completion_app
 from gai.config import (
     CONFIG_FILE,
+    ProfileInfo,
+    Settings,
     format_profiles_overview,
     list_profiles,
     load_settings,
@@ -2132,20 +2134,14 @@ def balance_cmd(
         _print_footer(trace=trace, chinese=cn)
 
 
-def _query_active_profile_balance(*, chinese: bool) -> str:
-    """Best-effort one-line balance for the active profile; never raises."""
-    profiles = list_profiles()
-    active = next((p for p in profiles if p.active), None)
-    if active is None:
-        return "（无当前配置档）" if chinese else "(no active profile)"
-    if not active.api_key:
-        return (
-            "当前配置档未设置 API Key"
-            if chinese
-            else "active profile has no API key"
-        )
+def _query_profile_balance(
+    profile: ProfileInfo, *, chinese: bool, template: Settings
+) -> str:
+    """Best-effort one-line balance for one profile; never raises."""
+    if not profile.api_key:
+        return "未设置 API Key" if chinese else "API key not set"
     try:
-        settings = settings_from_profile(active, load_settings())
+        settings = settings_from_profile(profile, template)
         result = fetch_balance(settings)
         return format_balance_brief(result, chinese=chinese)
     except (LLMError, RuntimeError, OSError) as exc:
@@ -2154,6 +2150,23 @@ def _query_active_profile_balance(*, chinese: bool) -> str:
         return f"查询失败（{first}）" if chinese else f"lookup failed ({first})"
     except Exception as exc:  # noqa: BLE001 — list must still print
         return f"查询失败（{exc}）" if chinese else f"lookup failed ({exc})"
+
+
+def _attach_profile_balances(
+    rows: list[dict[str, str]], *, chinese: bool
+) -> list[dict[str, str]]:
+    """Add a balance field to each listed profile."""
+    template = load_settings()
+    profiles = list_profiles()
+    by_name = {p.name: p for p in profiles}
+    out: list[dict[str, str]] = []
+    for row in rows:
+        info = by_name.get(row.get("profile", ""))
+        if info is None:
+            info = ProfileInfo(name=row.get("profile", ""))
+        balance = _query_profile_balance(info, chinese=chinese, template=template)
+        out.append({**row, "balance": balance})
+    return out
 
 
 @app.command(
@@ -2177,8 +2190,8 @@ def config_cmd(
         "--list",
         "-l",
         help=H(
-            "List profiles, show which key is in use, and query its balance.",
-            "列出配置档、当前编号，并查询该 API Key 余额（不支持则说明）。",
+            "List profiles, show the active number, and query each key's balance.",
+            "列出配置档与当前编号，并为每个 API Key 查询余额（不支持则说明）。",
         ),
     ),
     use_profile: Optional[str] = typer.Option(
@@ -2297,11 +2310,17 @@ def config_cmd(
 
         if list_profiles_flag:
             rows = profiles_summary(chinese=cn)
-            balance_line = _query_active_profile_balance(chinese=cn)
-            console.print(format_profiles_overview(chinese=cn, balance_line=balance_line))
+            console.print(format_profiles_overview(chinese=cn))
             if not rows:
                 console.print("（尚无配置档）" if cn else "(no profiles yet)")
             else:
+                status = (
+                    "正在查询各配置档余额..."
+                    if cn
+                    else "Checking balance for each profile..."
+                )
+                with console.status(f"[bold]{status}[/bold]"):
+                    rows = _attach_profile_balances(rows, chinese=cn)
                 console.print(json.dumps(rows, indent=2, ensure_ascii=False))
             # Avoid dumping --show by default when user only asked for --list.
             if not show and not has_updates and use_profile is None:

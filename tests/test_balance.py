@@ -48,7 +48,7 @@ def test_unsupported_provider_message_cn():
     assert "未提供" in text or "余额查询" in text
     assert "DeepSeek" in text
     brief = format_balance_brief(result, chinese=True)
-    assert brief == "OpenAI不支持余额查询"
+    assert brief == "该厂商不提供余额查询"
 
 
 def test_deepseek_balance_ok(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -101,7 +101,7 @@ def test_deepseek_balance_ok(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "DeepSeek" in text
     brief = format_balance_brief(result, chinese=True)
     assert "12.34" in brief
-    assert "DeepSeek" in brief
+    assert "CNY" in brief
 
 
 def test_siliconflow_balance_ok(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -102,8 +102,8 @@ _COMMAND_EXAMPLES: dict[str, tuple[tuple[str, str, str], ...]] = {
         ("gai config --show --cn", "Show effective config (secrets masked)", "查看当前生效配置（密钥已掩码）"),
         (
             "gai config --list --cn",
-            "Count keys, show the active profile number, and query its balance",
-            "列出档数、当前编号，并查询该 API Key 余额",
+            "Count keys, show the active number, and query each key's balance",
+            "列出档数与当前编号，并为每个 API Key 查询余额",
         ),
         ("gai config --use 1 --cn", "Switch active profile to 1", "切换当前配置档为 1"),
         ("gai config --api-key <key>", "Save API key to ~/.gai/config.toml", "把 API Key 写入 ~/.gai/config.toml"),

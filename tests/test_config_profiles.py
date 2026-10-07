@@ -152,21 +152,38 @@ def test_profiles_overview_counts_and_current(
     monkeypatch.setenv("GAI_API_KEY", "sk-zero-aaaaaaaa")
     monkeypatch.setenv("GAI_API_KEY1", "sk-one-bbbbbbbb")
     monkeypatch.setenv("GAI_PROFILE", "1")
-    text = config.format_profiles_overview(
-        chinese=True,
-        balance_line="DeepSeek 可用总额 12.34 CNY",
-    )
+    text = config.format_profiles_overview(chinese=True)
     assert "已配置 API Key：2 个" in text
     assert "当前使用：编号 1" in text
-    assert "余额：DeepSeek 可用总额 12.34 CNY" in text
+    assert "余额：" not in text
 
 
-def test_query_active_balance_unsupported_vendor(
+def test_attach_balance_field_per_profile(
     cfg_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("GAI_API_KEY", "sk-test-xxxxxxxx")
     monkeypatch.setenv("GAI_BASE_URL", "https://api.openai.com/v1")
-    from gai.cli import _query_active_profile_balance
+    monkeypatch.setenv("GAI_API_KEY1", "sk-ds-yyyyyyyyyy")
+    monkeypatch.setenv("GAI_BASE_URL1", "https://api.deepseek.com/v1")
+    from gai.cli import _attach_profile_balances
+    from gai.llm.balance import BalanceResult
+    from gai.llm import balance as balance_mod
 
-    line = _query_active_profile_balance(chinese=True)
-    assert "不支持余额查询" in line
+    def fake_fetch(settings):
+        provider = balance_mod.detect_provider(settings.base_url)
+        if not provider.supports_balance:
+            return BalanceResult(supported=False, provider=provider, model=settings.model)
+        return BalanceResult(
+            supported=True,
+            provider=provider,
+            model=settings.model,
+            items=[balance_mod.BalanceItem(currency="CNY", total="9.40")],
+        )
+
+    monkeypatch.setattr(balance_mod, "fetch_balance", fake_fetch)
+    monkeypatch.setattr("gai.cli.fetch_balance", fake_fetch)
+    rows = config.profiles_summary()
+    out = _attach_profile_balances(rows, chinese=True)
+    by_id = {row["profile"]: row["balance"] for row in out}
+    assert by_id["0"] == "该厂商不提供余额查询"
+    assert "9.40" in by_id["1"]
