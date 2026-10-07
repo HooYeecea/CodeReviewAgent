@@ -280,7 +280,7 @@ gai report --since 2026-09-01 --until 2026-09-23 --json
 
 查看 **本地** 记录的大模型调用历史（多数厂商不提供按 API Key 的历史用量接口，因此由 gai 在每次成功调用后写入一行摘要）。
 
-每条记录包含：时间、Git 用户、厂商、模型、token、命令动作（`review` / `commit` / `report`），以及便于事后分析的字段：
+每条记录包含：时间、Git 用户、**仓库根目录名**（`repo_name`）、**远程名**（`remote_name`，无远程则为 `null`）、厂商、模型、token、命令动作（`review` / `commit` / `report`），以及便于事后分析的字段：
 
 - `action_detail`：细分用途（`review` / `commit-message` / `review+message` / `report`）
 - `branch`、`files_count`、`diff_chars`、`truncated`（审查/提交规模）

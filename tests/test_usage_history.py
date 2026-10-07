@@ -156,6 +156,10 @@ def test_client_persists_usage(
         "gai.llm.client.current_git_identity",
         lambda cwd=None: ("Tester", "tester@example.com"),
     )
+    monkeypatch.setattr(
+        "gai.llm.client.current_repo_identity",
+        lambda cwd=None: ("CodeReviewAgent", "origin"),
+    )
 
     class _FakeResponse:
         status_code = 200
@@ -222,7 +226,27 @@ def test_client_persists_usage(
     assert rec.model == "deepseek-chat"
     assert rec.git_user == "Tester"
     assert rec.git_email == "tester@example.com"
+    assert rec.repo_name == "CodeReviewAgent"
+    assert rec.remote_name == "origin"
     assert rec.total_tokens == 14
+    assert rec.to_dict()["remote_name"] == "origin"
+
+
+def test_usage_record_remote_null_in_json() -> None:
+    data = UsageRecord(
+        ts="t",
+        git_user="A",
+        git_email="a@x.com",
+        repo_name="Demo",
+        remote_name=None,
+        provider="openai",
+        provider_name="OpenAI",
+        model="m",
+        action="review",
+    ).to_dict()
+    assert data["repo_name"] == "Demo"
+    assert "remote_name" in data
+    assert data["remote_name"] is None
 
 
 def test_client_persists_failure(
@@ -292,3 +316,4 @@ def test_usage_record_omits_empty_optionals() -> None:
     assert "error_kind" not in data
     assert "branch" not in data
     assert "files_count" not in data
+    assert data["remote_name"] is None

@@ -1,8 +1,16 @@
 """Tests for git diff ignore filtering and remote selection."""
 
+from pathlib import Path
+
 import pytest
 
-from gai.git_ops import GitError, choose_remote, filter_diff_by_ignore
+from gai.git_ops import (
+    GitError,
+    GitResult,
+    choose_remote,
+    current_repo_identity,
+    filter_diff_by_ignore,
+)
 
 
 SAMPLE_DIFF = """\
@@ -64,3 +72,36 @@ def test_choose_remote_missing_raises():
         choose_remote(["origin"], preferred="nope")
     with pytest.raises(GitError, match="Multiple remotes"):
         choose_remote(["a", "b"])
+
+
+def test_current_repo_identity_prefers_origin(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    calls: list[tuple[str, ...]] = []
+
+    def fake_run_git(*args: str, cwd=None, trace: bool = True):
+        calls.append(args)
+        if args[:2] == ("rev-parse", "--show-toplevel"):
+            return GitResult(str(tmp_path / "MyRepo"), "", 0)
+        if args == ("remote",):
+            return GitResult("upstream\norigin\n", "", 0)
+        return GitResult("", "unexpected", 1)
+
+    monkeypatch.setattr("gai.git_ops.run_git", fake_run_git)
+    repo_name, remote_name = current_repo_identity(tmp_path)
+    assert repo_name == "MyRepo"
+    assert remote_name == "origin"
+
+
+def test_current_repo_identity_no_remote_is_null(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    def fake_run_git(*args: str, cwd=None, trace: bool = True):
+        if args[:2] == ("rev-parse", "--show-toplevel"):
+            return GitResult(str(tmp_path / "LocalOnly"), "", 0)
+        if args == ("remote",):
+            return GitResult("", "", 0)
+        return GitResult("", "unexpected", 1)
+
+    monkeypatch.setattr("gai.git_ops.run_git", fake_run_git)
+    repo_name, remote_name = current_repo_identity(tmp_path)
+    assert repo_name == "LocalOnly"
+    assert remote_name is None

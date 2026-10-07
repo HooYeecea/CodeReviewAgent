@@ -22,10 +22,12 @@ class UsageRecord:
     ts: str
     git_user: str
     git_email: str
-    provider: str
-    provider_name: str
-    model: str
-    action: str
+    repo_name: str = ""
+    remote_name: str | None = None
+    provider: str = ""
+    provider_name: str = ""
+    model: str = ""
+    action: str = ""
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     total_tokens: int | None = None
@@ -43,16 +45,20 @@ class UsageRecord:
     gai_version: str = ""
 
     def to_dict(self) -> dict[str, Any]:
-        """Omit empty optional fields to keep JSONL compact and forward-compatible."""
+        """Omit empty optional fields; always emit ``remote_name`` (may be JSON null)."""
         raw = asdict(self)
         out: dict[str, Any] = {}
         for key, value in raw.items():
+            if key == "remote_name":
+                out[key] = value  # keep explicit null when no remote
+                continue
             if value is None:
                 continue
             if value == "" and key not in {
                 "ts",
                 "git_user",
                 "git_email",
+                "repo_name",
                 "provider",
                 "provider_name",
                 "model",
@@ -70,10 +76,17 @@ class UsageRecord:
         ok = data.get("ok")
         if ok is not None:
             ok = bool(ok)
+        remote_raw = data.get("remote_name", None)
+        if remote_raw is None or remote_raw == "":
+            remote_name = None
+        else:
+            remote_name = str(remote_raw)
         return cls(
             ts=str(data.get("ts") or ""),
             git_user=str(data.get("git_user") or ""),
             git_email=str(data.get("git_email") or ""),
+            repo_name=str(data.get("repo_name") or ""),
+            remote_name=remote_name,
             provider=str(data.get("provider") or "unknown"),
             provider_name=str(data.get("provider_name") or ""),
             model=str(data.get("model") or ""),
@@ -337,8 +350,15 @@ def format_usage_table(
 
 def _format_who(rec: UsageRecord) -> str:
     if rec.git_user and rec.git_email:
-        return f"{rec.git_user} <{rec.git_email}>"
-    return rec.git_user or rec.git_email or "(unknown)"
+        who = f"{rec.git_user} <{rec.git_email}>"
+    else:
+        who = rec.git_user or rec.git_email or "(unknown)"
+    if not rec.repo_name and rec.remote_name is None:
+        return who
+    remote = rec.remote_name if rec.remote_name is not None else "null"
+    if rec.repo_name:
+        return f"{who} @ {rec.repo_name} / remote={remote}"
+    return f"{who} @ remote={remote}"
 
 
 def _format_extras(rec: UsageRecord, *, chinese: bool) -> str:

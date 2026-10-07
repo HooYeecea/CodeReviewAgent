@@ -557,6 +557,8 @@ def render_usage_report_html(analytics: dict[str, Any], *, chinese: bool = False
                 <tr>
                   <th>{t['col_time']}</th>
                   <th>{t['col_user']}</th>
+                  <th>{t['col_repo']}</th>
+                  <th>{t['col_remote']}</th>
                   <th>{t['col_provider']}</th>
                   <th>{t['col_model']}</th>
                   <th>{t['col_action']}</th>
@@ -863,6 +865,10 @@ function fillTable() {{
     const who = r.git_user && r.git_email
       ? `${{r.git_user}} <${{r.git_email}}>`
       : (r.git_user || r.git_email || '—');
+    const repo = r.repo_name || '—';
+    const remote = (r.remote_name === null || r.remote_name === undefined)
+      ? 'null'
+      : (r.remote_name || '—');
     const action = r.action_detail || r.action || '—';
     const tokens = r.total_tokens != null ? r.total_tokens : '—';
     const meta = [
@@ -879,6 +885,8 @@ function fillTable() {{
     tr.innerHTML = `
       <td>${{esc(r.ts || '')}}</td>
       <td>${{esc(who)}}</td>
+      <td>${{esc(repo)}}</td>
+      <td>${{esc(remote)}}</td>
       <td>${{esc(r.provider_name || r.provider || '')}}</td>
       <td>${{esc(r.model || '')}}</td>
       <td>${{esc(action)}}</td>
@@ -1099,6 +1107,8 @@ def _i18n(chinese: bool) -> dict[str, str]:
             "recent": "最近记录（最多 100 条）",
             "col_time": "时间",
             "col_user": "用户",
+            "col_repo": "仓库",
+            "col_remote": "远程",
             "col_provider": "厂商",
             "col_model": "模型",
             "col_action": "动作",
@@ -1162,6 +1172,8 @@ def _i18n(chinese: bool) -> dict[str, str]:
         "recent": "Recent records (up to 100)",
         "col_time": "Time",
         "col_user": "User",
+        "col_repo": "Repo",
+        "col_remote": "Remote",
         "col_provider": "Provider",
         "col_model": "Model",
         "col_action": "Action",

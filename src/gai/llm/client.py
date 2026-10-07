@@ -8,7 +8,7 @@ from typing import Any, Callable
 import httpx
 
 from gai.config import Settings
-from gai.git_ops import current_git_identity
+from gai.git_ops import current_git_identity, current_repo_identity
 from gai.llm.history import UsageRecord, append_usage_record, now_iso
 from gai.llm.usage import get_llm_action, get_llm_usage_meta, record_llm_call
 
@@ -258,12 +258,15 @@ class LLMClient:
 
         provider = detect_provider(self.settings.base_url)
         git_user, git_email = current_git_identity()
+        repo_name, remote_name = current_repo_identity()
         meta = get_llm_usage_meta()
         append_usage_record(
             UsageRecord(
                 ts=now_iso(),
                 git_user=git_user,
                 git_email=git_email,
+                repo_name=repo_name,
+                remote_name=remote_name,
                 provider=provider.id,
                 provider_name=provider.name_en,
                 model=model,

@@ -701,6 +701,38 @@ def current_git_identity(cwd: Path | None = None) -> tuple[str, str]:
     return name, email
 
 
+def current_repo_identity(cwd: Path | None = None) -> tuple[str, str | None]:
+    """Return ``(repo_root_name, remote_name)``.
+
+    ``remote_name`` is the preferred remote alias (``origin`` if present, else the
+    first remote). When the repo has no remotes, ``remote_name`` is ``None``.
+    Never raises; silent w.r.t. ``--trace``.
+    """
+    repo_name = ""
+    try:
+        top = run_git("rev-parse", "--show-toplevel", cwd=cwd, trace=False)
+        if top.returncode == 0 and top.stdout.strip():
+            repo_name = Path(top.stdout.strip()).name
+    except GitError:
+        pass
+    if not repo_name:
+        base = Path(cwd) if cwd is not None else Path.cwd()
+        repo_name = base.resolve().name
+
+    try:
+        result = run_git("remote", cwd=cwd, trace=False)
+    except GitError:
+        return repo_name, None
+    if result.returncode != 0:
+        return repo_name, None
+    remotes = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    if not remotes:
+        return repo_name, None
+    if "origin" in remotes:
+        return repo_name, "origin"
+    return repo_name, remotes[0]
+
+
 def current_author_filter(cwd: Path | None = None) -> str:
     """Build --author filter for the current git user (email preferred)."""
     ensure_repo(cwd)
