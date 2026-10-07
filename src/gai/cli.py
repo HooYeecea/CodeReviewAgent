@@ -21,6 +21,7 @@ from gai.command_history import (
     load_command_records,
     maybe_record_command,
 )
+from gai.history_report import history_report_path, write_history_report
 from gai.completion_cmd import completion_app
 from gai.config import CONFIG_FILE, load_settings, save_settings, settings_summary
 from gai.errors import PeriodError, format_cli_error
@@ -1597,6 +1598,30 @@ def history_cmd(
         "--failed",
         help=H("Only show failed runs (non-zero exit).", "只显示失败的执行（非零退出码）。"),
     ),
+    report: bool = typer.Option(
+        False,
+        "--report",
+        help=H(
+            "Sync a fixed HTML dashboard to .gai/history-report.html from commands.jsonl.",
+            "根据 commands.jsonl 同步生成固定 HTML 报告：.gai/history-report.html。",
+        ),
+    ),
+    open_browser: bool = typer.Option(
+        False,
+        "--open",
+        help=H(
+            "Open the HTML dashboard in the default browser (implies --report).",
+            "用默认浏览器打开 HTML 报告（隐含 --report）。",
+        ),
+    ),
+    serve: bool = typer.Option(
+        False,
+        "--serve",
+        help=H(
+            "Serve .gai over local HTTP and open (implies --report; stable Refresh).",
+            "用本地 HTTP 打开 .gai（隐含 --report；刷新更稳定）。",
+        ),
+    ),
     as_json: bool = typer.Option(
         False,
         "--json",
@@ -1620,14 +1645,57 @@ def history_cmd(
     """Show locally recorded gai CLI invocations."""
     _start_trace(trace)
     try:
+        want_report = report or open_browser or serve
         since_dt = _parse_usage_since(since)
-        cap = None if limit <= 0 else limit
+        cap = None if want_report else (None if limit <= 0 else limit)
         records = load_command_records(
             limit=cap,
             since=since_dt,
             command=command,
             ok=False if failed else None,
         )
+        if want_report:
+            path = write_history_report(records, chinese=cn)
+            link = path_to_file_url(path)
+            msg = (
+                f"已同步命令执行报告：{path}"
+                if cn
+                else f"Synced command history report: {path}"
+            )
+            console.print(f"[green]{msg}[/green]")
+            if serve:
+                http_tip = (
+                    "正在本地 HTTP 服务中（Ctrl+C 结束）…"
+                    if cn
+                    else "Serving over local HTTP (Ctrl+C to stop)…"
+                )
+                console.print(f"[dim]{http_tip}[/dim]")
+                try:
+                    serve_gai_page(path, open_browser=True, hold_seconds=3600)
+                except KeyboardInterrupt:
+                    console.print("\n已停止服务。" if cn else "\nStopped server.")
+                    raise typer.Exit(code=130) from None
+            else:
+                label = "浏览器打开：" if cn else "Open in browser:"
+                console.print(
+                    f"{label} [link={link}][cyan underline]{link}[/cyan underline][/link]"
+                )
+                if open_browser:
+                    open_path(path, prefer_http=False)
+                tip = (
+                    "点击上方链接即可查看图表；日常 gai 调用会自动更新 history-data.js。"
+                    "刷新不稳时用：gai history --serve"
+                    if cn
+                    else (
+                        "Click the link to open the dashboard; gai runs refresh history-data.js. "
+                        "If Refresh fails under file://, use: gai history --serve"
+                    )
+                )
+                console.print(f"[dim]{tip}[/dim]")
+            if as_json:
+                console.print_json(data=[r.to_dict() for r in records])
+            return
+
         if as_json:
             console.print_json(data=[r.to_dict() for r in records])
         else:
@@ -1636,11 +1704,13 @@ def history_cmd(
                 tip = (
                     f"（写入位置：{command_log_path()}；"
                     "每次执行 gai 子命令后会自动追加一行。"
+                    f"可视化报告：gai history --report → {history_report_path()}；"
                     "可用环境变量 GAI_HISTORY=0 关闭。）"
                     if cn
                     else (
                         f"(log path: {command_log_path()}; "
                         "each gai invocation appends one line. "
+                        f"Dashboard: gai history --report → {history_report_path()}; "
                         "Disable with GAI_HISTORY=0.)"
                     )
                 )

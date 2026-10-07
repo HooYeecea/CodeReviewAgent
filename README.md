@@ -119,6 +119,7 @@ gai report --cn           # 最近 7 天工作总结
 gai balance --cn          # 查询 API Key 剩余额度（若厂商支持）
 gai usage --cn            # 查看本地记录的 token 用量历史
 gai history --cn          # 查看本地 gai 命令执行记录
+gai history --serve --cn  # 同步命令执行报告并以本地 HTTP 打开
 gai guide --cn --open     # 生成 .gai/guide.html 并用浏览器打开
 gai usage --serve --cn    # 同步用量报告并以本地 HTTP 打开（刷新更稳）
 gai add --cn -t           # 暂存并打印底层 git 链路
@@ -393,17 +394,29 @@ gai guide                # 首屏英文
 
 ```bash
 gai history --cn
+gai history --report --cn               # 固定写入 .gai/history-report.html（覆盖同步）
+gai history --open --cn                 # 同步并打开浏览器（隐含 --report）
+gai history --serve --cn                # 本地 HTTP 打开，刷新更稳定（隐含 --report）
 gai history --command commit --cn
 gai history --failed --since 7d --cn
 gai history -n 50 --json
 ```
 
+`--report` / `--open` / `--serve` 会读取 `.gai/commands.jsonl`，**覆盖写入** `.gai/history-report.html`，并同步 `.gai/history-data.js`。首次有命令记录写入时也会自动生成报告壳。报告页与用量报告交互一致：
+
+- **全部项目 / 单仓库**筛选（跨仓对比 vs 仓内详情）
+- **刷新**、**导出 CSV**、最近记录分页
+- **中 / 英**、**日间 / 夜间**（共用 `gai-ui-lang` / `gai-ui-theme`）
+
 | 参数 | 说明 |
 |------|------|
-| `-n` / `--limit` | 最多显示条数（默认 20；`0` 不限制） |
+| `-n` / `--limit` | 最多显示条数（默认 20；`0` 不限制；`--report` 忽略此限制） |
 | `-s` / `--since` | `7d` / `2w` / `YYYY-MM-DD` / `alltime` |
 | `-c` / `--command` | 按子命令名过滤（如 `commit`、`usage`） |
 | `--failed` | 只看失败（非零退出码） |
+| `--report` | 同步生成 `.gai/history-report.html` 可视化报告 |
+| `--open` | 打开浏览器（隐含 `--report`） |
+| `--serve` | 本地 HTTP 打开（隐含 `--report`；刷新更稳） |
 | `--json` | JSON 输出 |
 | `--cn` | 中文输出 |
 | `-t` / `--trace` | 打印链路（本命令通常无 git） |
@@ -450,7 +463,7 @@ gai balance
 - **余额查询**：`gai balance` 先确认 API Key；按 `base_url` 识别厂商查询（DeepSeek / 硅基流动 / Moonshot·Kimi / OpenRouter）；未接入的厂商会提示当前厂商与模型。
 - **Git**：非仓库、无 remote、鉴权失败、推送被拒、拉取冲突、脏工作区等有可读说明；`--trace` 时额外打印原始详情。
 - **用量**：黄色一行显示本次调用；有 token 合计时只显示接口返回值，**不估算**。历史用量见 `gai usage`（本地 JSONL）。
-- **命令记录**：每次 `gai …` 执行会写入 `.gai/commands.jsonl`；用 `gai history` 查看，`GAI_HISTORY=0` 可关闭。
+- **命令记录**：每次 `gai …` 执行会写入 `.gai/commands.jsonl`；用 `gai history` / `gai history --report` 查看，`GAI_HISTORY=0` 可关闭。
 
 ## 设计要点
 
@@ -469,6 +482,7 @@ CodeReviewAgent/
   src/gai/
     cli.py           # 入口：add / unadd / uncommit / review / commit / push / pull / report / usage / history / guide / balance / config / completion
     command_history.py # .gai/commands.jsonl 命令执行记录
+    history_report.py  # commands.jsonl → .gai/history-report.html
     guide.py         # .gai/guide.html 可视化使用指南（中英双语）
     completion_cmd.py # shell Tab 补全安装 / 查看
     cli_usage.py     # 子命令 / 参数拼写纠错

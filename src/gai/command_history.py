@@ -235,6 +235,13 @@ def append_command_record(record: CommandRecord, *, path: Path | None = None) ->
         _maybe_rotate(target)
     except OSError:
         return
+    # Keep the HTML dashboard's companion data file fresh for in-page Refresh.
+    try:
+        from gai.history_report import sync_history_data_file
+
+        sync_history_data_file(log_path=target)
+    except Exception:
+        return
 
 
 def load_command_records(

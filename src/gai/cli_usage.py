@@ -71,6 +71,8 @@ _COMMAND_EXAMPLES: dict[str, tuple[tuple[str, str, str], ...]] = {
     ),
     "history": (
         ("gai history --cn", "Show recent gai command runs", "查看近期 gai 命令执行记录"),
+        ("gai history --report --cn", "Sync HTML dashboard to .gai/history-report.html", "同步生成 .gai/history-report.html 可视化报告"),
+        ("gai history --serve --cn", "Sync and serve over local HTTP", "同步报告并以本地 HTTP 打开（可稳定刷新）"),
         ("gai history --command commit --cn", "Only commit-related runs", "只看 commit 相关执行"),
         ("gai history --failed --since 7d --cn", "Failed runs in the last 7 days", "最近 7 天失败的执行"),
         ("gai history -n 50 --json", "Last 50 rows as JSON", "最近 50 条以 JSON 输出"),
