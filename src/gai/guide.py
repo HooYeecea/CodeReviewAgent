@@ -326,6 +326,7 @@ def _i18n() -> dict[str, dict[str, str]]:
             "tagline": "本地 Git 提交与代码审查 Agent",
             "lang_cn": "中文",
             "lang_en": "EN",
+            "nav_menu": "目录",
             "nav_overview": "概览",
             "nav_flow": "日常流程",
             "nav_setup": "安装与配置",
@@ -374,6 +375,7 @@ def _i18n() -> dict[str, dict[str, str]]:
             "tagline": "Local Git commit & code review agent",
             "lang_cn": "中文",
             "lang_en": "EN",
+            "nav_menu": "Contents",
             "nav_overview": "Overview",
             "nav_flow": "Daily flow",
             "nav_setup": "Setup",
@@ -453,291 +455,534 @@ def _render_html(payload: dict[str, Any]) -> str:
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>gai guide</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Sora:wght@500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style>
     :root {{
-      --bg0: #0b1220;
-      --bg1: #121a2b;
-      --panel: linear-gradient(165deg, rgba(36, 48, 72, .96), rgba(18, 28, 46, .96));
-      --border: rgba(148, 163, 184, 0.22);
-      --text: #e8eef9;
-      --muted: #94a3b8;
-      --accent: #38bdf8;
-      --accent2: #a78bfa;
-      --ok: #4ade80;
-      --shadow: 0 10px 28px rgba(0,0,0,.35), 0 1px 0 rgba(255,255,255,.06) inset;
-      --radius: 16px;
-      --font: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-      --mono: ui-monospace, "Cascadia Code", "Consolas", monospace;
+      --ink: #10233f;
+      --ink-soft: #3d516c;
+      --muted: #6b7c93;
+      --line: #d7e0ec;
+      --paper: #f3f6fa;
+      --paper-2: #eaf0f7;
+      --surface: #ffffff;
+      --teal: #0f766e;
+      --teal-soft: #ccfbf1;
+      --amber: #b45309;
+      --radius: 14px;
+      --font: "Sora", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+      --mono: "IBM Plex Mono", "Cascadia Code", Consolas, monospace;
+      --shadow: 0 1px 0 rgba(16,35,63,.04), 0 18px 40px rgba(16,35,63,.07);
     }}
     * {{ box-sizing: border-box; }}
-    html, body {{ margin: 0; padding: 0; min-height: 100%; }}
+    html {{ scroll-behavior: smooth; }}
     body {{
+      margin: 0;
+      min-height: 100%;
+      color: var(--ink);
       font-family: var(--font);
-      color: var(--text);
       background:
-        radial-gradient(1200px 600px at 10% -10%, rgba(56,189,248,.18), transparent 55%),
-        radial-gradient(900px 500px at 90% 0%, rgba(167,139,250,.14), transparent 50%),
-        linear-gradient(180deg, var(--bg0), var(--bg1));
+        radial-gradient(900px 420px at 8% -8%, rgba(15,118,110,.10), transparent 55%),
+        radial-gradient(700px 380px at 92% 0%, rgba(180,83,9,.07), transparent 50%),
+        linear-gradient(180deg, #f7fafc 0%, var(--paper) 40%, var(--paper-2) 100%);
     }}
-    a {{ color: var(--accent); text-decoration: none; }}
+    a {{ color: var(--teal); text-decoration: none; }}
     a:hover {{ text-decoration: underline; }}
-    .shell {{
-      display: grid;
-      grid-template-columns: 240px minmax(0, 1fr);
-      gap: 0;
-      max-width: 1180px;
-      margin: 0 auto;
-      min-height: 100vh;
-    }}
-    .side {{
+
+    .top {{
       position: sticky;
       top: 0;
-      align-self: start;
-      height: 100vh;
-      padding: 22px 16px;
-      border-right: 1px solid var(--border);
-      background: rgba(10, 16, 28, .55);
-      backdrop-filter: blur(10px);
-      overflow: auto;
+      z-index: 20;
+      backdrop-filter: blur(14px);
+      background: rgba(247, 250, 252, .82);
+      border-bottom: 1px solid rgba(215, 224, 236, .9);
+    }}
+    .top-inner {{
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 14px 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }}
+    .brand-wrap {{
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
+      min-width: 0;
     }}
     .brand {{
       font-size: 1.55rem;
-      font-weight: 780;
-      letter-spacing: -.03em;
-      background: linear-gradient(90deg, #e0f2fe, #c4b5fd);
-      -webkit-background-clip: text;
-      background-clip: text;
-      color: transparent;
+      font-weight: 700;
+      letter-spacing: -.04em;
+      color: var(--ink);
+      line-height: 1;
+    }}
+    .brand span {{
+      color: var(--teal);
     }}
     .tagline {{
-      margin: 6px 0 16px;
       color: var(--muted);
-      font-size: .82rem;
-      line-height: 1.4;
+      font-size: .84rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }}
     .lang {{
       display: inline-flex;
-      gap: 4px;
-      padding: 4px;
-      border-radius: 999px;
-      border: 1px solid var(--border);
-      background: rgba(15, 23, 42, .7);
-      margin-bottom: 18px;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      border-radius: 10px;
+      overflow: hidden;
+      flex: 0 0 auto;
     }}
     .lang button {{
       border: 0;
       background: transparent;
       color: var(--muted);
-      padding: 6px 12px;
-      border-radius: 999px;
+      padding: 8px 14px;
       cursor: pointer;
+      font: inherit;
       font-size: .8rem;
       font-weight: 600;
     }}
     .lang button.active {{
-      background: linear-gradient(180deg, rgba(56,189,248,.28), rgba(56,189,248,.1));
-      color: #bae6fd;
-      box-shadow: 0 0 0 1px rgba(56,189,248,.35) inset;
+      background: var(--ink);
+      color: #fff;
+    }}
+
+    .shell {{
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 28px 28px 64px;
+      display: grid;
+      grid-template-columns: 188px minmax(0, 1fr);
+      gap: 36px;
+      align-items: start;
+    }}
+    .side {{
+      position: sticky;
+      top: 72px;
+      max-height: calc(100vh - 88px);
+      overflow: auto;
+      padding-right: 4px;
+    }}
+    .nav-label {{
+      font-size: .72rem;
+      font-weight: 600;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin: 0 0 10px 8px;
     }}
     .nav {{
       display: flex;
       flex-direction: column;
-      gap: 4px;
+      gap: 2px;
     }}
     .nav a {{
-      color: #cbd5e1;
+      color: var(--ink-soft);
       padding: 8px 10px;
       border-radius: 10px;
-      font-size: .88rem;
+      font-size: .9rem;
+      font-weight: 500;
       text-decoration: none;
+      border-left: 2px solid transparent;
     }}
-    .nav a:hover, .nav a.active {{
-      background: rgba(56,189,248,.12);
-      color: #e0f2fe;
+    .nav a:hover {{
+      background: rgba(15,118,110,.08);
+      color: var(--teal);
       text-decoration: none;
     }}
     .nav .cmd {{
       font-family: var(--mono);
-      font-size: .78rem;
-      color: #93c5fd;
-      padding-left: 18px;
+      font-size: .76rem;
+      color: var(--muted);
+      padding: 5px 10px 5px 18px;
+      font-weight: 500;
     }}
-    .main {{
-      padding: 28px 28px 48px;
+    .nav .cmd:hover {{ color: var(--teal); }}
+
+    .main {{ min-width: 0; }}
+    section {{
+      margin-bottom: 40px;
+      scroll-margin-top: 84px;
+      animation: rise .45s ease both;
     }}
+    section:nth-of-type(2) {{ animation-delay: .04s; }}
+    section:nth-of-type(3) {{ animation-delay: .08s; }}
+    section:nth-of-type(4) {{ animation-delay: .12s; }}
+    @keyframes rise {{
+      from {{ opacity: 0; transform: translateY(8px); }}
+      to {{ opacity: 1; transform: none; }}
+    }}
+
     .hero {{
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: space-between;
-      gap: 12px;
-      margin-bottom: 22px;
+      padding: 8px 0 8px;
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 36px;
+    }}
+    .hero-kicker {{
+      display: inline-block;
+      font-size: .75rem;
+      font-weight: 600;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      color: var(--teal);
+      margin-bottom: 10px;
     }}
     .hero h1 {{
+      margin: 0 0 12px;
+      font-size: clamp(1.8rem, 3.2vw, 2.4rem);
+      font-weight: 700;
+      letter-spacing: -.035em;
+      line-height: 1.15;
+      color: var(--ink);
+    }}
+    .hero p {{
       margin: 0;
-      font-size: 1.65rem;
-      font-weight: 760;
-      letter-spacing: -.02em;
+      max-width: 46rem;
+      color: var(--ink-soft);
+      font-size: 1.02rem;
+      line-height: 1.65;
     }}
     .meta {{
+      margin-top: 18px;
       color: var(--muted);
       font-size: .78rem;
-      align-self: center;
     }}
-    section {{
-      margin-bottom: 28px;
-      scroll-margin-top: 20px;
+
+    .sec-head {{
+      margin: 0 0 14px;
+      font-size: 1.2rem;
+      font-weight: 700;
+      letter-spacing: -.02em;
     }}
-    .card {{
-      position: relative;
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      box-shadow: var(--shadow);
-      padding: 18px 18px 16px;
-      margin-bottom: 12px;
-    }}
-    .card h2 {{
-      margin: 0 0 8px;
-      font-size: 1.05rem;
-    }}
-    .card p, .blurb {{
-      margin: 0;
+    .hint {{
+      margin: -6px 0 16px;
       color: var(--muted);
-      font-size: .9rem;
-      line-height: 1.55;
+      font-size: .88rem;
     }}
-    ol.flow {{
-      margin: 10px 0 0;
-      padding-left: 1.2rem;
-      color: #e2e8f0;
-      line-height: 1.7;
+    .blurb {{
+      margin: 0;
+      color: var(--ink-soft);
       font-size: .92rem;
+      line-height: 1.6;
     }}
-    pre.install {{
-      margin: 12px 0 0;
+
+    .steps {{
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+      counter-reset: step;
+    }}
+    .step {{
+      position: relative;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 14px 12px 14px;
+      box-shadow: var(--shadow);
+      min-height: 118px;
+    }}
+    .step .n {{
+      display: inline-flex;
+      width: 26px;
+      height: 26px;
+      align-items: center;
+      justify-content: center;
+      border-radius: 8px;
+      background: var(--teal-soft);
+      color: var(--teal);
+      font-family: var(--mono);
+      font-size: .78rem;
+      font-weight: 600;
+      margin-bottom: 10px;
+    }}
+    .step .cmd {{
+      font-family: var(--mono);
+      font-size: .78rem;
+      font-weight: 600;
+      color: var(--ink);
+      margin-bottom: 6px;
+      word-break: break-word;
+    }}
+    .step .desc {{
+      color: var(--muted);
+      font-size: .78rem;
+      line-height: 1.45;
+    }}
+
+    .setup-grid {{
+      display: grid;
+      grid-template-columns: 1.15fr .85fr;
+      gap: 16px;
+      align-items: stretch;
+    }}
+    .terminal {{
+      background: #142033;
+      color: #dbeafe;
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: var(--shadow);
+    }}
+    .terminal-bar {{
+      display: flex;
+      gap: 6px;
       padding: 12px 14px;
-      border-radius: 12px;
-      background: rgba(2, 8, 20, .55);
-      border: 1px solid rgba(148,163,184,.18);
+      background: rgba(255,255,255,.04);
+      border-bottom: 1px solid rgba(255,255,255,.06);
+    }}
+    .terminal-bar i {{
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #475569;
+      display: block;
+    }}
+    .terminal-bar i:nth-child(1) {{ background: #f87171; }}
+    .terminal-bar i:nth-child(2) {{ background: #fbbf24; }}
+    .terminal-bar i:nth-child(3) {{ background: #34d399; }}
+    pre.install {{
+      margin: 0;
+      padding: 16px 18px 18px;
       overflow: auto;
       font-family: var(--mono);
       font-size: .82rem;
-      color: #bae6fd;
+      line-height: 1.65;
+      white-space: pre-wrap;
     }}
+    .setup-notes {{
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }}
+    .note {{
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      box-shadow: var(--shadow);
+    }}
+    .note strong {{
+      display: block;
+      font-size: .82rem;
+      margin-bottom: 4px;
+      color: var(--ink);
+    }}
+
     .cmd-grid {{
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 12px;
     }}
     .cmd-card {{
+      display: block;
+      width: 100%;
+      text-align: left;
+      font: inherit;
+      color: inherit;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 16px 16px 14px;
       cursor: pointer;
-      transition: transform .15s ease, border-color .15s ease;
+      box-shadow: var(--shadow);
+      transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease;
+      border-top: 3px solid transparent;
     }}
     .cmd-card:hover {{
-      transform: translateY(-2px);
-      border-color: rgba(56,189,248,.45);
+      transform: translateY(-3px);
+      border-color: rgba(15,118,110,.35);
+      border-top-color: var(--teal);
+      box-shadow: 0 16px 36px rgba(16,35,63,.1);
+    }}
+    .cmd-card.active {{
+      border-color: rgba(15,118,110,.45);
+      border-top-color: var(--teal);
+      background: linear-gradient(180deg, #f0fdfa, #fff 48%);
     }}
     .cmd-card .name {{
       font-family: var(--mono);
-      font-size: .95rem;
-      font-weight: 700;
-      color: #7dd3fc;
+      font-size: .84rem;
+      font-weight: 600;
+      color: var(--teal);
     }}
     .cmd-card .title {{
-      margin-top: 4px;
+      margin-top: 8px;
+      font-size: .98rem;
       font-weight: 650;
+      color: var(--ink);
     }}
+    .cmd-card .blurb {{
+      margin-top: 6px;
+      font-size: .82rem;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }}
+
     .detail {{
       display: none;
+      margin-top: 16px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 20px 20px 16px;
+      box-shadow: var(--shadow);
     }}
-    .detail.open {{ display: block; }}
+    .detail.open {{ display: block; animation: rise .3s ease; }}
+    .detail h2 {{
+      margin: 0 0 8px;
+      font-size: 1.15rem;
+      letter-spacing: -.02em;
+    }}
+    .detail h3 {{
+      margin: 16px 0 8px;
+      font-size: .86rem;
+      color: var(--muted);
+      font-weight: 600;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }}
     .examples {{
-      margin: 12px 0 0;
       display: flex;
       flex-direction: column;
       gap: 8px;
     }}
     .ex {{
       display: grid;
-      grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
-      gap: 10px;
+      grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) auto;
+      gap: 12px;
       align-items: center;
-      padding: 10px 12px;
+      padding: 12px 14px;
       border-radius: 12px;
-      background: rgba(2, 8, 20, .45);
-      border: 1px solid rgba(148,163,184,.16);
+      background: #f8fafc;
+      border: 1px solid var(--line);
       cursor: pointer;
+      transition: border-color .15s ease, background .15s ease;
     }}
-    .ex:hover {{ border-color: rgba(56,189,248,.4); }}
+    .ex:hover {{
+      border-color: rgba(15,118,110,.4);
+      background: #f0fdfa;
+    }}
     .ex code {{
       font-family: var(--mono);
       font-size: .82rem;
-      color: #bae6fd;
+      color: var(--ink);
       word-break: break-all;
     }}
     .ex .desc {{
       color: var(--muted);
-      font-size: .8rem;
+      font-size: .82rem;
+      line-height: 1.4;
     }}
-    .hint {{
-      color: var(--muted);
-      font-size: .8rem;
-      margin: 0 0 12px;
+    .ex .copy {{
+      font-size: .72rem;
+      font-weight: 600;
+      color: var(--teal);
+      letter-spacing: .04em;
+      text-transform: uppercase;
     }}
-    ul.tips {{
-      margin: 8px 0 0;
-      padding-left: 1.15rem;
-      color: #e2e8f0;
-      line-height: 1.7;
+
+    .tips {{
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 8px;
+    }}
+    .tips li {{
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px 14px 12px 16px;
+      color: var(--ink-soft);
       font-size: .9rem;
+      line-height: 1.55;
+      box-shadow: var(--shadow);
+      border-left: 3px solid var(--teal);
     }}
+
     footer {{
-      margin-top: 28px;
+      margin-top: 8px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
       color: var(--muted);
       font-size: .78rem;
-      border-top: 1px solid var(--border);
-      padding-top: 14px;
     }}
     .toast {{
       position: fixed;
       bottom: 22px;
       right: 22px;
-      padding: 10px 14px;
-      border-radius: 999px;
-      background: rgba(34, 197, 94, .92);
-      color: #052e16;
-      font-weight: 700;
+      padding: 10px 16px;
+      border-radius: 10px;
+      background: var(--ink);
+      color: #fff;
+      font-weight: 600;
       font-size: .85rem;
       opacity: 0;
       pointer-events: none;
-      transition: opacity .2s ease;
-      box-shadow: 0 8px 24px rgba(0,0,0,.35);
+      transition: opacity .2s ease, transform .2s ease;
+      transform: translateY(6px);
     }}
-    .toast.show {{ opacity: 1; }}
-    @media (max-width: 860px) {{
-      .shell {{ grid-template-columns: 1fr; }}
+    .toast.show {{ opacity: 1; transform: none; }}
+
+    @media (max-width: 960px) {{
+      .steps {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+      .cmd-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+      .setup-grid {{ grid-template-columns: 1fr; }}
+    }}
+    @media (max-width: 780px) {{
+      .shell {{ grid-template-columns: 1fr; gap: 18px; padding: 18px 16px 48px; }}
       .side {{
         position: relative;
-        height: auto;
-        border-right: 0;
-        border-bottom: 1px solid var(--border);
+        top: 0;
+        max-height: none;
+        overflow: visible;
       }}
-      .nav {{ flex-direction: row; flex-wrap: wrap; }}
-      .nav .cmd {{ display: none; }}
+      .nav {{
+        flex-direction: row;
+        flex-wrap: wrap;
+        gap: 6px;
+      }}
+      .nav a {{
+        border: 1px solid var(--line);
+        background: var(--surface);
+        border-left: 0;
+        padding: 7px 10px;
+        font-size: .8rem;
+      }}
+      .nav .cmd, .nav-label {{ display: none; }}
+      .top-inner {{ padding: 12px 16px; }}
+      .tagline {{ display: none; }}
+      .steps {{ grid-template-columns: 1fr; }}
+      .cmd-grid {{ grid-template-columns: 1fr; }}
       .ex {{ grid-template-columns: 1fr; }}
-      .main {{ padding: 18px 16px 40px; }}
+      .ex .copy {{ display: none; }}
     }}
   </style>
 </head>
 <body>
-  <div class="shell">
-    <aside class="side">
-      <div class="brand" data-i="brand">gai</div>
-      <div class="tagline" data-i="tagline"></div>
+  <header class="top">
+    <div class="top-inner">
+      <div class="brand-wrap">
+        <div class="brand"><span data-i="brand">gai</span></div>
+        <div class="tagline" data-i="tagline"></div>
+      </div>
       <div class="lang" role="group" aria-label="Language">
         <button type="button" id="btn-cn" data-lang="cn">中文</button>
         <button type="button" id="btn-en" data-lang="en">EN</button>
       </div>
+    </div>
+  </header>
+
+  <div class="shell">
+    <aside class="side">
+      <div class="nav-label" data-i="nav_menu"></div>
       <nav class="nav" id="side-nav">
         <a href="#overview" data-i="nav_overview"></a>
         <a href="#flow" data-i="nav_flow"></a>
@@ -747,53 +992,67 @@ def _render_html(payload: dict[str, Any]) -> str:
         <a href="#tips" data-i="nav_tips"></a>
       </nav>
     </aside>
+
     <main class="main">
-      <div class="hero">
+      <section class="hero" id="overview">
+        <div class="hero-kicker" data-i="overview_h"></div>
         <h1 data-i="doc_title"></h1>
-        <div class="meta"><span data-i="generated"></span>: <span id="gen-time"></span></div>
-      </div>
-
-      <section id="overview" class="card">
-        <h2 data-i="overview_h"></h2>
         <p data-i="overview_p"></p>
+        <div class="meta"><span data-i="generated"></span>: <span id="gen-time"></span></div>
       </section>
 
-      <section id="flow" class="card">
-        <h2 data-i="flow_h"></h2>
-        <ol class="flow" id="flow-list"></ol>
+      <section id="flow">
+        <h2 class="sec-head" data-i="flow_h"></h2>
+        <div class="steps" id="flow-list"></div>
       </section>
 
-      <section id="setup" class="card">
-        <h2 data-i="setup_h"></h2>
-        <p class="blurb" data-i="setup_install"></p>
-        <pre class="install">python -m pip install -e ".[dev]"
+      <section id="setup">
+        <h2 class="sec-head" data-i="setup_h"></h2>
+        <div class="setup-grid">
+          <div class="terminal">
+            <div class="terminal-bar"><i></i><i></i><i></i></div>
+            <pre class="install">python -m pip install -e ".[dev]"
 gai --version
 gai config --api-key sk-xxx --base-url https://api.deepseek.com/v1 --model deepseek-chat</pre>
-        <p class="blurb" style="margin-top:12px" data-i="setup_config"></p>
-        <p class="blurb" style="margin-top:8px" data-i="setup_keys"></p>
-        <p class="blurb" style="margin-top:8px" data-i="setup_cn"></p>
+          </div>
+          <div class="setup-notes">
+            <div class="note">
+              <strong data-i="setup_install"></strong>
+              <p class="blurb" data-i="setup_config"></p>
+            </div>
+            <div class="note">
+              <strong>API</strong>
+              <p class="blurb" data-i="setup_keys"></p>
+            </div>
+            <div class="note">
+              <strong>--cn</strong>
+              <p class="blurb" data-i="setup_cn"></p>
+            </div>
+          </div>
+        </div>
       </section>
 
       <section id="commands">
-        <h2 data-i="commands_h" style="margin:0 0 6px;font-size:1.05rem"></h2>
+        <h2 class="sec-head" data-i="commands_h"></h2>
         <p class="hint" data-i="commands_hint"></p>
         <div class="cmd-grid" id="cmd-grid"></div>
-        <div class="card detail" id="cmd-detail">
+        <div class="detail" id="cmd-detail">
           <h2 id="detail-title"></h2>
           <p class="blurb" id="detail-blurb"></p>
-          <h3 style="margin:14px 0 0;font-size:.92rem" data-i="examples_h"></h3>
+          <h3 data-i="examples_h"></h3>
           <div class="examples" id="detail-examples"></div>
         </div>
       </section>
 
-      <section id="tips" class="card">
-        <h2 data-i="tips_h"></h2>
+      <section id="tips">
+        <h2 class="sec-head" data-i="tips_h"></h2>
         <ul class="tips" id="tips-list"></ul>
       </section>
 
       <footer data-i="footer"></footer>
     </main>
   </div>
+
   <div class="toast" id="toast"></div>
   <script id="guide-data" type="application/json">{data_json}</script>
   <script>
@@ -802,6 +1061,7 @@ gai config --api-key sk-xxx --base-url https://api.deepseek.com/v1 --model deeps
   let lang = DATA.initialLang === 'cn' ? 'cn' : 'en';
   const toast = document.getElementById('toast');
   let toastTimer = null;
+  const copyLabel = {{ cn: '复制', en: 'Copy' }};
 
   function t() {{ return DATA.i18n[lang]; }}
 
@@ -825,6 +1085,14 @@ gai config --api-key sk-xxx --base-url https://api.deepseek.com/v1 --model deeps
     return Promise.resolve();
   }}
 
+  function splitFlow(step) {{
+    const parts = step.split(/\\s*[—–-]\\s*/);
+    if (parts.length >= 2) {{
+      return {{ cmd: parts[0].trim(), desc: parts.slice(1).join(' — ').trim() }};
+    }}
+    return {{ cmd: step, desc: '' }};
+  }}
+
   function setLang(next) {{
     lang = next === 'cn' ? 'cn' : 'en';
     document.documentElement.setAttribute('data-lang', lang);
@@ -841,10 +1109,16 @@ gai config --api-key sk-xxx --base-url https://api.deepseek.com/v1 --model deeps
 
     const flow = document.getElementById('flow-list');
     flow.innerHTML = '';
-    (t().flow_steps || []).forEach((step) => {{
-      const li = document.createElement('li');
-      li.textContent = step;
-      flow.appendChild(li);
+    (t().flow_steps || []).forEach((step, idx) => {{
+      const parts = splitFlow(step);
+      const el = document.createElement('div');
+      el.className = 'step';
+      el.innerHTML =
+        '<div class="n"></div><div class="cmd"></div><div class="desc"></div>';
+      el.querySelector('.n').textContent = String(idx + 1);
+      el.querySelector('.cmd').textContent = parts.cmd;
+      el.querySelector('.desc').textContent = parts.desc;
+      flow.appendChild(el);
     }});
 
     const tips = document.getElementById('tips-list');
@@ -867,16 +1141,20 @@ gai config --api-key sk-xxx --base-url https://api.deepseek.com/v1 --model deeps
   function renderCommands() {{
     const grid = document.getElementById('cmd-grid');
     const nav = document.getElementById('cmd-nav');
+    const openId = document.getElementById('cmd-detail').dataset.openId;
     grid.innerHTML = '';
     nav.innerHTML = '';
     DATA.commands.forEach((cmd) => {{
       const loc = cmdLocale(cmd);
-      const card = document.createElement('div');
-      card.className = 'card cmd-card';
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'cmd-card' + (openId === cmd.id ? ' active' : '');
       card.innerHTML =
         '<div class="name">gai ' + cmd.name + '</div>' +
-        '<div class="title">' + loc.title + '</div>' +
-        '<p class="blurb" style="margin-top:6px">' + loc.blurb + '</p>';
+        '<div class="title"></div>' +
+        '<p class="blurb"></p>';
+      card.querySelector('.title').textContent = loc.title;
+      card.querySelector('.blurb').textContent = loc.blurb;
       card.addEventListener('click', () => openCommand(cmd.id, true));
       grid.appendChild(card);
 
@@ -899,6 +1177,9 @@ gai config --api-key sk-xxx --base-url https://api.deepseek.com/v1 --model deeps
     const detail = document.getElementById('cmd-detail');
     detail.classList.add('open');
     detail.dataset.openId = id;
+    document.querySelectorAll('.cmd-card').forEach((el, i) => {{
+      el.classList.toggle('active', DATA.commands[i] && DATA.commands[i].id === id);
+    }});
     document.getElementById('detail-title').textContent = 'gai ' + cmd.name + ' — ' + loc.title;
     document.getElementById('detail-blurb').textContent = loc.blurb;
     const box = document.getElementById('detail-examples');
@@ -908,10 +1189,10 @@ gai config --api-key sk-xxx --base-url https://api.deepseek.com/v1 --model deeps
       const desc = pair[1];
       const row = document.createElement('div');
       row.className = 'ex';
-      row.innerHTML = '<code></code><div class="desc"></div>';
+      row.innerHTML = '<code></code><div class="desc"></div><div class="copy"></div>';
       row.querySelector('code').textContent = cmdText;
       row.querySelector('.desc').textContent = desc;
-      row.title = t().copied;
+      row.querySelector('.copy').textContent = copyLabel[lang];
       row.addEventListener('click', () => {{
         copyText(cmdText).then(() => showToast(t().copied));
       }});
