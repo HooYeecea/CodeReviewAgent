@@ -43,6 +43,7 @@ from gai.llm.history import (
     load_usage_records,
     usage_log_path,
 )
+from gai.llm.usage_report import usage_report_path, write_usage_report
 from gai.llm.usage import (
     clear_llm_usage,
     get_llm_calls,
@@ -1330,6 +1331,14 @@ def usage_cmd(
         "--json",
         help=H("Print records as JSON.", "以 JSON 输出记录。"),
     ),
+    report: bool = typer.Option(
+        False,
+        "--report",
+        help=H(
+            "Sync a fixed HTML dashboard to .gai/usage-report.html from usage.jsonl.",
+            "根据 usage.jsonl 同步生成固定 HTML 报告：.gai/usage-report.html。",
+        ),
+    ),
     cn: bool = typer.Option(
         False,
         "--cn",
@@ -1358,8 +1367,11 @@ def usage_cmd(
             raise typer.Exit(code=1)
 
         since_dt = _parse_usage_since(since)
-        # limit<=0 means no cap (show all matching)
-        cap = None if limit <= 0 else limit
+        # Report always uses the full filtered set; console view respects --limit.
+        if report:
+            cap = None
+        else:
+            cap = None if limit <= 0 else limit
         records = load_usage_records(
             limit=cap,
             since=since_dt,
@@ -1367,6 +1379,24 @@ def usage_cmd(
             provider=provider,
             git_user=user,
         )
+        if report:
+            path = write_usage_report(records, chinese=cn)
+            msg = (
+                f"已同步用量报告：{path}"
+                if cn
+                else f"Synced usage report: {path}"
+            )
+            console.print(f"[green]{msg}[/green]")
+            tip = (
+                "用浏览器打开该文件即可查看图表；再次执行会覆盖同步最新 usage.jsonl。"
+                if cn
+                else "Open it in a browser for charts; re-run overwrites with latest usage.jsonl."
+            )
+            console.print(f"[dim]{tip}[/dim]")
+            if as_json:
+                console.print_json(data=[r.to_dict() for r in records])
+            return
+
         if as_json:
             console.print_json(data=[r.to_dict() for r in records])
         else:
@@ -1375,15 +1405,20 @@ def usage_cmd(
             if not records:
                 tip = (
                     f"（写入位置：{usage_log_path()}；"
-                    "每次成功调用大模型后会自动追加一行。）"
+                    "每次成功调用大模型后会自动追加一行。"
+                    f"可视化报告：gai usage --report → {usage_report_path()}）"
                     if cn
                     else (
                         f"(log path: {usage_log_path()}; "
-                        "each successful LLM call appends one line.)"
+                        "each successful LLM call appends one line. "
+                        f"Dashboard: gai usage --report → {usage_report_path()})"
                     )
                 )
                 console.print(f"[dim]{tip}[/dim]")
     except PeriodError as exc:
+        _print_error(exc, chinese=cn, trace=trace)
+        raise typer.Exit(code=1) from exc
+    except OSError as exc:
         _print_error(exc, chinese=cn, trace=trace)
         raise typer.Exit(code=1) from exc
     except typer.Exit:

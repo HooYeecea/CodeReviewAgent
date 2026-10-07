@@ -63,6 +63,7 @@ _COMMAND_EXAMPLES: dict[str, tuple[tuple[str, str, str], ...]] = {
     ),
     "usage": (
         ("gai usage --cn", "Show recent local LLM token usage", "查看近期本地 token 用量"),
+        ("gai usage --report --cn", "Sync HTML dashboard to .gai/usage-report.html", "同步生成 .gai/usage-report.html 可视化报告"),
         ("gai usage --since 7d --group action --cn", "Last 7 days, grouped by action", "最近 7 天并按动作汇总"),
         ("gai usage --action commit -n 50 --cn", "Commit-related usage, last 50 rows", "只看 commit，最近 50 条"),
     ),

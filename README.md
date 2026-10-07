@@ -82,6 +82,7 @@ gai uncommit --cn         # 撤销最近一次提交（soft，需确认）
 gai report --cn           # 最近 7 天工作总结
 gai balance --cn          # 查询 API Key 剩余额度（若厂商支持）
 gai usage --cn            # 查看本地记录的 token 用量历史
+gai usage --report --cn   # 同步生成 .gai/usage-report.html 可视化报告
 gai add --cn -t           # 暂存并打印底层 git 链路
 ```
 
@@ -291,19 +292,24 @@ gai report --since 2026-09-01 --until 2026-09-23 --json
 
 ```bash
 gai usage --cn
+gai usage --report --cn                 # 固定写入 .gai/usage-report.html（覆盖同步）
+gai usage --report --since 7d --cn      # 只把近 7 天数据同步进报告
 gai usage --since 7d --group action --cn
 gai usage --action commit -n 50 --cn
 gai usage --user alice --json
 ```
 
+`--report` 会读取当前项目的 `.gai/usage.jsonl`，**覆盖写入**固定文件 `.gai/usage-report.html`（图表：按日 / 动作 / 厂商 / 模型 / 用户）。用浏览器打开即可；再次执行会与最新日志同步。
+
 | 参数 | 说明 |
 |------|------|
-| `-n` / `--limit` | 最多显示条数（默认 20；`0` 表示不限制） |
+| `-n` / `--limit` | 控制台最多显示条数（默认 20；`0` 不限制；`--report` 忽略此限制） |
 | `-s` / `--since` | `7d` / `2w` / `YYYY-MM-DD` / `alltime` |
 | `-a` / `--action` | 过滤动作：`review` / `commit` / `report` |
 | `--provider` | 按厂商 id 过滤（如 `deepseek`） |
 | `-u` / `--user` | 按 git 用户名或邮箱子串过滤 |
 | `-g` / `--group` | 额外汇总：`action` / `provider` / `model` / `user` |
+| `--report` | 同步生成 `.gai/usage-report.html` 可视化报告 |
 | `--json` | JSON 输出 |
 | `--cn` | 中文输出 |
 | `-t` / `--trace` | 打印链路（本命令通常无 git） |
@@ -379,6 +385,7 @@ CodeReviewAgent/
       balance.py     # 厂商余额查询
       usage.py       # 本次调用与 token 统计
       history.py     # 本地用量 JSONL 持久化
+      usage_report.py # usage.jsonl → .gai/usage-report.html
       prompts.py     # Prompt 模板
   tests/
 ```
