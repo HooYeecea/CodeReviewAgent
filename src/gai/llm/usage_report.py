@@ -289,12 +289,27 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
     avg_display = "—" if avg_ms is None else f"{avg_ms} ms"
     prompt = totals.get("prompt_tokens", 0)
     completion = totals.get("completion_tokens", 0)
-    project_options = ['<option value="__all__">' + html.escape(t["project_all"]) + "</option>"]
+    dd_items = [
+        (
+            "__all__",
+            t["project_all"],
+            '<span class="dd-dot all"></span>',
+        )
+    ]
     for item in datasets.get("projects") or []:
-        pid = html.escape(str(item.get("id") or ""))
-        label = html.escape(str(item.get("label") or pid))
-        project_options.append(f'<option value="{pid}">{label}</option>')
-    project_options_html = "\n".join(project_options)
+        pid = str(item.get("id") or "")
+        label = str(item.get("label") or pid)
+        dd_items.append((pid, label, '<span class="dd-dot repo"></span>'))
+    project_dd_items_html = "\n".join(
+        (
+            f'<button type="button" class="dd-item{" active" if pid == "__all__" else ""}" '
+            f'data-value="{html.escape(pid)}" role="option">'
+            f"{mark}<span class=\"dd-item-text\">{html.escape(label)}</span>"
+            f'<span class="dd-check">✓</span></button>'
+        )
+        for pid, label, mark in dd_items
+    )
+    project_dd_label = html.escape(t["project_all"])
 
     return f"""<!DOCTYPE html>
 <html lang="{'zh-CN' if chinese else 'en'}" class="view-all">
@@ -305,10 +320,12 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
 <style>
   :root {{
-    --bg0: #0b1220;
-    --bg1: #121a2b;
-    --panel: rgba(22, 32, 51, 0.92);
-    --panel-border: rgba(148, 163, 184, 0.14);
+    --bg0: #07101d;
+    --bg1: #101a2c;
+    --panel: linear-gradient(165deg, rgba(36, 48, 72, .96), rgba(18, 28, 46, .96));
+    --panel-flat: rgba(22, 32, 51, 0.94);
+    --panel-border: rgba(148, 163, 184, 0.22);
+    --panel-shine: rgba(255, 255, 255, 0.08);
     --text: #e8eef8;
     --muted: #94a3b8;
     --accent: #38bdf8;
@@ -316,7 +333,8 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
     --ok: #34d399;
     --fail: #f87171;
     --warn: #fbbf24;
-    --shadow: 0 18px 50px rgba(0,0,0,.35);
+    --shadow-deep: 0 22px 48px rgba(0, 0, 0, .45), 0 2px 0 rgba(255,255,255,.04) inset;
+    --shadow-lift: 0 10px 28px rgba(0, 0, 0, .35), 0 1px 0 rgba(255,255,255,.06) inset, 0 -1px 0 rgba(0,0,0,.35) inset;
   }}
   * {{ box-sizing: border-box; }}
   body {{
@@ -365,7 +383,8 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
     padding: 8px 12px;
     border-radius: 999px;
     border: 1px solid rgba(56,189,248,.35);
-    background: rgba(56,189,248,.08);
+    background: linear-gradient(180deg, rgba(56,189,248,.16), rgba(56,189,248,.06));
+    box-shadow: 0 8px 20px rgba(0,0,0,.25), 0 1px 0 rgba(255,255,255,.08) inset;
     color: #bae6fd;
     font-size: .82rem;
     white-space: nowrap;
@@ -376,13 +395,25 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
     gap: 12px;
     margin-bottom: 16px;
   }}
-  .kpi {{
+  .kpi, .card, .filters {{
+    position: relative;
     background: var(--panel);
     border: 1px solid var(--panel-border);
-    border-radius: 16px;
+    border-radius: 18px;
+    box-shadow: var(--shadow-lift);
+    backdrop-filter: blur(10px);
+  }}
+  .kpi::before, .card::before, .filters::before {{
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    background: linear-gradient(180deg, var(--panel-shine), transparent 42%);
+    opacity: .9;
+  }}
+  .kpi {{
     padding: 16px 16px 14px;
-    box-shadow: var(--shadow);
-    backdrop-filter: blur(8px);
   }}
   .kpi .label {{
     color: var(--muted);
@@ -407,11 +438,7 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
     gap: 14px;
   }}
   .card {{
-    background: var(--panel);
-    border: 1px solid var(--panel-border);
-    border-radius: 18px;
-    padding: 16px 16px 10px;
-    box-shadow: var(--shadow);
+    padding: 16px 16px 12px;
     min-width: 0;
   }}
   .card.full {{ grid-column: 1 / -1; }}
@@ -440,45 +467,163 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
     gap: 6px;
   }}
   .seg button {{
-    border: 1px solid rgba(148,163,184,.22);
-    background: rgba(15, 23, 42, .55);
+    border: 1px solid rgba(148,163,184,.28);
+    background: linear-gradient(180deg, rgba(40, 54, 78, .95), rgba(18, 28, 46, .95));
     color: #cbd5e1;
     border-radius: 999px;
-    padding: 5px 10px;
+    padding: 6px 11px;
     font-size: .75rem;
     cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0,0,0,.25), 0 1px 0 rgba(255,255,255,.06) inset;
   }}
-  .seg button:hover {{ border-color: rgba(56,189,248,.45); color: #e0f2fe; }}
-  .seg button.active {{
-    background: rgba(56,189,248,.16);
+  .seg button:hover {{
     border-color: rgba(56,189,248,.55);
+    color: #e0f2fe;
+    transform: translateY(-1px);
+  }}
+  .seg button.active {{
+    background: linear-gradient(180deg, rgba(56,189,248,.28), rgba(56,189,248,.1));
+    border-color: rgba(56,189,248,.65);
     color: #bae6fd;
     font-weight: 650;
+    box-shadow: 0 6px 16px rgba(56,189,248,.18), 0 1px 0 rgba(255,255,255,.1) inset;
   }}
   .filters {{
     display: flex;
     flex-wrap: wrap;
-    gap: 12px;
+    gap: 14px;
     align-items: center;
     margin: 0 0 16px;
-    padding: 12px 14px;
-    background: var(--panel);
-    border: 1px solid var(--panel-border);
+    padding: 14px 16px;
+  }}
+  .filters > label {{
+    color: #cbd5e1;
+    font-size: .84rem;
+    font-weight: 600;
+  }}
+  .filters > .meta {{
+    margin: 0;
+    flex: 1 1 220px;
+  }}
+  .dd {{
+    position: relative;
+    min-width: min(320px, 100%);
+    z-index: 20;
+  }}
+  .dd-trigger {{
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border: 1px solid rgba(125, 211, 252, .28);
     border-radius: 14px;
-  }}
-  .filters label {{
-    color: var(--muted);
-    font-size: .82rem;
-  }}
-  .filters select {{
-    min-width: 220px;
-    border-radius: 10px;
-    border: 1px solid rgba(148,163,184,.28);
-    background: rgba(15, 23, 42, .7);
+    padding: 11px 12px;
     color: var(--text);
-    padding: 8px 10px;
-    font-size: .86rem;
+    cursor: pointer;
+    text-align: left;
+    background:
+      linear-gradient(180deg, rgba(45, 62, 92, .98), rgba(22, 34, 54, .98));
+    box-shadow:
+      0 10px 24px rgba(0,0,0,.35),
+      0 1px 0 rgba(255,255,255,.08) inset,
+      0 -1px 0 rgba(0,0,0,.35) inset;
   }}
+  .dd-trigger:hover {{
+    border-color: rgba(56,189,248,.55);
+  }}
+  .dd.open .dd-trigger {{
+    border-color: rgba(56,189,248,.7);
+    box-shadow:
+      0 0 0 3px rgba(56,189,248,.14),
+      0 12px 28px rgba(0,0,0,.4),
+      0 1px 0 rgba(255,255,255,.1) inset;
+  }}
+  .dd-ico {{
+    width: 28px;
+    height: 28px;
+    border-radius: 9px;
+    display: grid;
+    place-items: center;
+    background: linear-gradient(160deg, rgba(56,189,248,.28), rgba(167,139,250,.18));
+    border: 1px solid rgba(125,211,252,.3);
+    box-shadow: 0 1px 0 rgba(255,255,255,.12) inset;
+    color: #bae6fd;
+    font-size: .85rem;
+    flex: 0 0 auto;
+  }}
+  .dd-label {{
+    flex: 1 1 auto;
+    font-size: .9rem;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }}
+  .dd-caret {{
+    width: 8px;
+    height: 8px;
+    border-right: 2px solid #94a3b8;
+    border-bottom: 2px solid #94a3b8;
+    transform: rotate(45deg);
+    margin: -4px 4px 0 0;
+    transition: transform .18s ease;
+  }}
+  .dd.open .dd-caret {{
+    transform: rotate(225deg);
+    margin-top: 2px;
+  }}
+  .dd-menu {{
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: calc(100% + 8px);
+    display: none;
+    padding: 8px;
+    border-radius: 14px;
+    border: 1px solid rgba(125, 211, 252, .25);
+    background: linear-gradient(180deg, rgba(28, 40, 62, .98), rgba(14, 22, 38, .98));
+    box-shadow: var(--shadow-deep);
+    max-height: 280px;
+    overflow: auto;
+  }}
+  .dd.open .dd-menu {{ display: block; }}
+  .dd-item {{
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    color: #e2e8f0;
+    padding: 10px 10px;
+    cursor: pointer;
+    text-align: left;
+    font-size: .88rem;
+  }}
+  .dd-item:hover {{
+    background: rgba(56,189,248,.12);
+  }}
+  .dd-item.active {{
+    background: linear-gradient(90deg, rgba(56,189,248,.2), rgba(167,139,250,.12));
+    box-shadow: 0 0 0 1px rgba(56,189,248,.25) inset;
+  }}
+  .dd-item-text {{ flex: 1 1 auto; }}
+  .dd-check {{
+    opacity: 0;
+    color: #7dd3fc;
+    font-size: .85rem;
+  }}
+  .dd-item.active .dd-check {{ opacity: 1; }}
+  .dd-dot {{
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex: 0 0 auto;
+    box-shadow: 0 0 0 3px rgba(255,255,255,.04);
+  }}
+  .dd-dot.all {{ background: #a78bfa; }}
+  .dd-dot.repo {{ background: #38bdf8; }}
   /* all = overview across repos; repo = single-repo detail */
   html.view-all .scope-repo,
   html.view-repo .scope-all {{
@@ -487,9 +632,21 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
   .chart {{
     width: 100%;
     height: 300px;
+    border-radius: 12px;
+    border: 1px solid rgba(148,163,184,.12);
+    background:
+      linear-gradient(180deg, rgba(8,14,26,.35), rgba(8,14,26,.12));
+    box-shadow: 0 1px 0 rgba(255,255,255,.04) inset, 0 10px 24px rgba(0,0,0,.2) inset;
   }}
   .chart.tall {{ height: 340px; }}
-  .table-wrap {{ overflow-x: auto; margin-top: 6px; }}
+  .table-wrap {{
+    overflow-x: auto;
+    margin-top: 8px;
+    border-radius: 12px;
+    border: 1px solid rgba(148,163,184,.14);
+    background: rgba(8, 14, 26, .28);
+    box-shadow: 0 1px 0 rgba(255,255,255,.04) inset;
+  }}
   table {{
     width: 100%;
     border-collapse: collapse;
@@ -526,6 +683,7 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
     background: var(--panel);
     border: 1px dashed var(--panel-border);
     border-radius: 18px;
+    box-shadow: var(--shadow-lift);
   }}
   footer {{
     margin-top: 22px;
@@ -535,6 +693,7 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
   @media (max-width: 920px) {{
     .grid {{ grid-template-columns: 1fr; }}
     .chart, .chart.tall {{ height: 280px; }}
+    .dd {{ min-width: 100%; }}
   }}
 </style>
 </head>
@@ -550,10 +709,19 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
     </header>
 
     <div class="filters">
-      <label for="project-filter">{t['project_filter']}</label>
-      <select id="project-filter">
-        {project_options_html}
-      </select>
+      <label id="project-filter-label">{t['project_filter']}</label>
+      <div class="dd" id="project-dd">
+        <button type="button" class="dd-trigger" id="project-dd-btn"
+                aria-haspopup="listbox" aria-expanded="false"
+                aria-labelledby="project-filter-label project-dd-label">
+          <span class="dd-ico" aria-hidden="true">⌘</span>
+          <span class="dd-label" id="project-dd-label">{project_dd_label}</span>
+          <span class="dd-caret" aria-hidden="true"></span>
+        </button>
+        <div class="dd-menu" id="project-dd-menu" role="listbox" aria-labelledby="project-filter-label">
+          {project_dd_items_html}
+        </div>
+      </div>
       <span class="meta" id="project-hint">{html.escape(t['hint_project'])}</span>
     </div>
 
@@ -1129,15 +1297,62 @@ function renderDashboard() {{
   fillTable();
 }}
 
-(function main() {{
-  const filter = document.getElementById('project-filter');
-  if (filter) {{
-    filter.value = currentProject;
-    filter.addEventListener('change', () => {{
-      currentProject = filter.value || '__all__';
+function syncProjectDropdown() {{
+  const labelEl = document.getElementById('project-dd-label');
+  const menu = document.getElementById('project-dd-menu');
+  if (!menu) return;
+  let activeLabel = I18N.project_all;
+  menu.querySelectorAll('.dd-item').forEach(btn => {{
+    const on = btn.dataset.value === currentProject;
+    btn.classList.toggle('active', on);
+    if (on) {{
+      const text = btn.querySelector('.dd-item-text');
+      activeLabel = text ? text.textContent : btn.dataset.value;
+    }}
+  }});
+  if (labelEl) labelEl.textContent = activeLabel || I18N.project_all;
+}}
+
+function initProjectDropdown() {{
+  const root = document.getElementById('project-dd');
+  const btn = document.getElementById('project-dd-btn');
+  const menu = document.getElementById('project-dd-menu');
+  if (!root || !btn || !menu) return;
+
+  const close = () => {{
+    root.classList.remove('open');
+    btn.setAttribute('aria-expanded', 'false');
+  }};
+  const open = () => {{
+    root.classList.add('open');
+    btn.setAttribute('aria-expanded', 'true');
+  }};
+
+  btn.addEventListener('click', (e) => {{
+    e.stopPropagation();
+    if (root.classList.contains('open')) close();
+    else open();
+  }});
+  menu.querySelectorAll('.dd-item').forEach(item => {{
+    item.addEventListener('click', (e) => {{
+      e.stopPropagation();
+      currentProject = item.dataset.value || '__all__';
+      syncProjectDropdown();
+      close();
       renderDashboard();
     }});
-  }}
+  }});
+  document.addEventListener('click', (e) => {{
+    if (!root.contains(e.target)) close();
+  }});
+  document.addEventListener('keydown', (e) => {{
+    if (e.key === 'Escape') close();
+  }});
+  syncProjectDropdown();
+}}
+
+(function main() {{
+  initProjectDropdown();
   renderDashboard();
   window.addEventListener('resize', () => chartHandles.forEach(c => c.resize()));
 }})();

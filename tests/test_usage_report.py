@@ -104,7 +104,8 @@ def test_write_usage_report_fixed_path(tmp_path: Path, monkeypatch) -> None:
     assert 'class="card scope-all"' in text or "scope-all" in text
     assert "scope-repo" in text
     assert "view-all" in text
-    assert "project-filter" in text
+    assert "project-dd" in text
+    assert "dd-trigger" in text
     assert "trend-seg" in text
     assert "data-mode=\"today\"" in text
     assert "CodeReviewAgent" in analytics["by_repo"]["labels"]
