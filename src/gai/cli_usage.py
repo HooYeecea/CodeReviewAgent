@@ -61,6 +61,10 @@ _COMMAND_EXAMPLES: dict[str, tuple[tuple[str, str, str], ...]] = {
             "当前用户的全部历史提交总结",
         ),
     ),
+    "balance": (
+        ("gai balance --cn", "Query remaining API credit/balance", "查询 API Key 剩余额度"),
+        ("gai balance", "Same in English", "英文输出余额查询结果"),
+    ),
     "config": (
         ("gai config --show --cn", "Show effective config (secrets masked)", "查看当前生效配置（密钥已掩码）"),
         ("gai config --api-key <key>", "Save API key to ~/.gai/config.toml", "把 API Key 写入 ~/.gai/config.toml"),

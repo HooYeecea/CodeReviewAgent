@@ -34,11 +34,11 @@ from gai.git_ops import (
     uncommit as git_uncommit,
 )
 from gai.help_i18n import H
+from gai.llm.balance import fetch_balance, format_balance_result
 from gai.llm.client import LLMError
 from gai.llm.usage import clear_llm_usage, get_llm_calls, usage_totals
 from gai.report import export_report, render_report, run_report
 from gai.review import render_review, run_review
-
 app = typer.Typer(
     name="gai",
     help=H(
@@ -1217,6 +1217,55 @@ def report_cmd(
     except (GitError, LLMError, PeriodError, RuntimeError, ValueError, OSError) as exc:
         _print_error(exc, chinese=cn, trace=trace)
         raise typer.Exit(code=1) from exc
+    finally:
+        _print_footer(trace=trace, chinese=cn)
+
+
+@app.command(
+    "balance",
+    help=H(
+        "Show remaining API credit/balance when the provider supports it.",
+        "查询 API Key 剩余额度（若当前厂商提供余额接口）。",
+    ),
+)
+def balance_cmd(
+    cn: bool = typer.Option(
+        False,
+        "--cn",
+        help=H(
+            "Use Simplified Chinese output.",
+            "使用简体中文输出；与 -h 联用时显示中文帮助。",
+        ),
+    ),
+    trace: bool = typer.Option(
+        False,
+        "--trace",
+        "-t",
+        help=_TRACE_OPT_HELP,
+    ),
+) -> None:
+    """Query provider balance; requires a configured API key."""
+    _start_trace(trace)
+    try:
+        settings = load_settings()
+        status = (
+            "正在查询余额..."
+            if cn
+            else "Checking balance..."
+        )
+        with console.status(f"[bold]{status}[/bold]"):
+            result = fetch_balance(settings)
+        text = format_balance_result(result, chinese=cn)
+        style = "yellow" if not result.supported else "green"
+        console.print(f"[{style}]{text}[/{style}]")
+    except (LLMError, RuntimeError) as exc:
+        _print_error(exc, chinese=cn, trace=trace)
+        raise typer.Exit(code=1) from exc
+    except typer.Exit:
+        raise
+    except KeyboardInterrupt:
+        console.print("\n已取消。" if cn else "\nAborted.")
+        raise typer.Exit(code=130) from None
     finally:
         _print_footer(trace=trace, chinese=cn)
 

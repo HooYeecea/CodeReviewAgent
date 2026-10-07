@@ -22,6 +22,7 @@ gai commit -h --cn
 gai report -h --cn
 gai push -h --cn
 gai pull -h --cn
+gai balance -h --cn
 gai config -h --cn
 ```
 
@@ -79,6 +80,7 @@ gai pull --rebase --cn    # 用 rebase 拉取
 gai unadd --cn            # 撤销暂存（需确认）
 gai uncommit --cn         # 撤销最近一次提交（soft，需确认）
 gai report --cn           # 最近 7 天工作总结
+gai balance --cn          # 查询 API Key 剩余额度（若厂商支持）
 gai add --cn -t           # 暂存并打印底层 git 链路
 ```
 
@@ -116,6 +118,7 @@ gai report --cn -o .\reports\                # 目录不存在则自动创建
 | `gai push` | 推送当前分支（先检查是否有可推送内容） |
 | `gai pull` | 拉取远程（先检查；分叉可选 merge / rebase） |
 | `gai report` | 根据提交记录写工作总结 |
+| `gai balance` | 查询 API Key 剩余额度（厂商支持时） |
 | `gai config` | 查看 / 写入 `~/.gai/config.toml` |
 
 ## 命令参考
@@ -270,6 +273,25 @@ gai report --cn --per -o 周报.md
 gai report --since 2026-09-01 --until 2026-09-23 --json
 ```
 
+### `gai balance`
+
+查询当前配置的 API Key **剩余额度**。
+
+1. **先检查是否已配置 API Key**；未配置则提示去设置
+2. 根据 `base_url` 识别厂商：
+   - **DeepSeek**、**硅基流动**：调用其余额接口并展示
+   - **其他厂商**（如 OpenAI）：说明当前厂商与模型，并提示暂不支持查询
+
+```bash
+gai balance --cn
+gai balance
+```
+
+| 参数 | 说明 |
+|------|------|
+| `--cn` | 中文输出 |
+| `-t` / `--trace` | 打印链路（本命令通常无 git） |
+
 ### `gai config`
 
 查看或写入 `~/.gai/config.toml`。
@@ -290,6 +312,7 @@ gai report --since 2026-09-01 --until 2026-09-23 --json
 - **用法纠错**：子命令 / 参数拼写错误、少写 `-` / `--` 时，提示相近命令并给出带说明的正确示例（随 `--cn` 中英文切换）。
 - **时间范围**：`--since` 晚于 `--until`、非法 `YYYY-MM-DD` 会报错，并附正确格式示例。
 - **大模型**：未配置 Key、鉴权失败、欠费 / 配额、限流、超时、网络失败等有分类提示。超时 / 429 / 5xx **自动重试最多 3 次**。
+- **余额查询**：`gai balance` 先确认 API Key；DeepSeek / 硅基流动可查余额，其他厂商提示不支持并显示当前模型。
 - **Git**：非仓库、无 remote、鉴权失败、推送被拒、拉取冲突、脏工作区等有可读说明；`--trace` 时额外打印原始详情。
 - **用量**：黄色一行。有 token 合计时只显示接口返回值，**不估算**。
 
@@ -308,7 +331,7 @@ CodeReviewAgent/
   pyproject.toml
   README.md
   src/gai/
-    cli.py           # 入口：add / unadd / uncommit / review / commit / push / pull / report / config
+    cli.py           # 入口：add / unadd / uncommit / review / commit / push / pull / report / balance / config
     cli_usage.py     # 子命令 / 参数拼写纠错
     errors.py        # 友好错误文案
     help_i18n.py     # -h --cn 帮助语言
@@ -318,6 +341,7 @@ CodeReviewAgent/
     report.py        # 提交记录 → 工作总结
     llm/
       client.py      # OpenAI 兼容客户端（含重试）
+      balance.py     # 厂商余额查询
       usage.py       # 本次调用与 token 统计
       prompts.py     # Prompt 模板
   tests/
