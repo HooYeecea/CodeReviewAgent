@@ -10,13 +10,55 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from gai.llm.history import UsageRecord, project_root, summarize_records, usage_log_path
+from gai.llm.history import (
+    UsageRecord,
+    load_usage_records,
+    project_root,
+    summarize_records,
+    usage_log_path,
+)
 
 _REPORT_RELATIVE = Path(".gai") / "usage-report.html"
+_DATA_RELATIVE = Path(".gai") / "usage-data.js"
 
 
 def usage_report_path(cwd: Path | None = None) -> Path:
     return project_root(cwd) / _REPORT_RELATIVE
+
+
+def usage_data_path(cwd: Path | None = None) -> Path:
+    """Companion datasets file loaded by the HTML report (refreshable)."""
+    return project_root(cwd) / _DATA_RELATIVE
+
+
+def write_usage_data_js(
+    datasets: dict[str, Any],
+    *,
+    path: Path | None = None,
+) -> Path:
+    """Write ``window.__GAI_USAGE_DATASETS__ = ...`` for the HTML dashboard."""
+    target = path or usage_data_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(datasets, ensure_ascii=False)
+    # Keep as one assignment so the report can reload with a cache-busting query.
+    target.write_text(
+        "window.__GAI_USAGE_DATASETS__ = " + payload + ";\n",
+        encoding="utf-8",
+    )
+    return target
+
+
+def sync_usage_data_file(*, log_path: Path | None = None) -> Path | None:
+    """Rebuild usage-data.js from usage.jsonl (best-effort; never raises)."""
+    try:
+        records = load_usage_records(path=log_path)
+        datasets = build_report_datasets(records)
+        data_path = (
+            log_path.parent / "usage-data.js" if log_path is not None else usage_data_path()
+        )
+        return write_usage_data_js(datasets, path=data_path)
+    except Exception:
+        return None
 
 
 def path_to_file_url(path: Path) -> str:
@@ -263,6 +305,7 @@ def write_usage_report(
     target = path or usage_report_path()
     datasets = build_report_datasets(records)
     target.parent.mkdir(parents=True, exist_ok=True)
+    write_usage_data_js(datasets, path=target.parent / "usage-data.js")
     target.write_text(
         render_usage_report_html(datasets, chinese=chinese),
         encoding="utf-8",
@@ -271,55 +314,38 @@ def write_usage_report(
 
 
 def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False) -> str:
-    """Self-contained HTML dashboard powered by ECharts (CDN)."""
+    """HTML dashboard powered by ECharts; datasets load from usage-data.js."""
     t = _i18n(chinese)
-    analytics = datasets.get("all") or {}
-    payload = json.dumps(datasets, ensure_ascii=False)
-    payload_js = json.dumps(payload)
-    i18n_js = json.dumps(t, ensure_ascii=False)
+    i18n_bundle = {"cn": _i18n(True), "en": _i18n(False)}
+    i18n_js = json.dumps(i18n_bundle, ensure_ascii=False)
+    initial_lang = "cn" if chinese else "en"
     title = html.escape(t["title"])
-    generated = html.escape(str(analytics.get("generated_at") or ""))
-    source = html.escape(str(analytics.get("source") or ""))
-    totals = analytics.get("totals") or {}
-    calls = totals.get("calls", 0)
-    tokens = totals.get("tokens", 0)
-    ok = totals.get("ok", 0)
-    fail = totals.get("fail", 0)
-    avg_ms = totals.get("avg_duration_ms")
-    avg_display = "—" if avg_ms is None else f"{avg_ms} ms"
-    prompt = totals.get("prompt_tokens", 0)
-    completion = totals.get("completion_tokens", 0)
-    dd_items = [
-        (
-            "__all__",
-            t["project_all"],
-            '<span class="dd-dot all"></span>',
-        )
-    ]
-    for item in datasets.get("projects") or []:
-        pid = str(item.get("id") or "")
-        label = str(item.get("label") or pid)
-        dd_items.append((pid, label, '<span class="dd-dot repo"></span>'))
-    project_dd_items_html = "\n".join(
-        (
-            f'<button type="button" class="dd-item{" active" if pid == "__all__" else ""}" '
-            f'data-value="{html.escape(pid)}" role="option">'
-            f"{mark}<span class=\"dd-item-text\">{html.escape(label)}</span>"
-            f'<span class="dd-check">✓</span></button>'
-        )
-        for pid, label, mark in dd_items
-    )
+    # Initial KPI placeholders; JS fills from usage-data.js on load/refresh.
     project_dd_label = html.escape(t["project_all"])
 
     return f"""<!DOCTYPE html>
-<html lang="{'zh-CN' if chinese else 'en'}" class="view-all">
+<html lang="{'zh-CN' if chinese else 'en'}" class="view-all" data-lang="{initial_lang}" data-theme="dark">
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>{title}</title>
+<script>
+(function(){{
+  try {{
+    var th = localStorage.getItem('gai-usage-theme');
+    if (th === 'light' || th === 'dark') document.documentElement.setAttribute('data-theme', th);
+    var lg = localStorage.getItem('gai-usage-lang');
+    if (lg === 'cn' || lg === 'en') {{
+      document.documentElement.setAttribute('data-lang', lg);
+      document.documentElement.lang = lg === 'cn' ? 'zh-CN' : 'en';
+    }}
+  }} catch (e) {{}}
+}})();
+</script>
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
+<script src="usage-data.js"></script>
 <style>
-  :root {{
+  :root, html[data-theme="dark"] {{
     --bg0: #07101d;
     --bg1: #101a2c;
     --panel: linear-gradient(165deg, rgba(36, 48, 72, .96), rgba(18, 28, 46, .96));
@@ -333,8 +359,41 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
     --ok: #34d399;
     --fail: #f87171;
     --warn: #fbbf24;
+    --top-bg: rgba(7, 16, 29, .72);
+    --seg-bg: rgba(15, 23, 42, .7);
+    --on-ink: #0b1220;
+    --chart-muted: #94a3b8;
+    --chart-label: #cbd5e1;
+    --chart-line: #334155;
     --shadow-deep: 0 22px 48px rgba(0, 0, 0, .45), 0 2px 0 rgba(255,255,255,.04) inset;
     --shadow-lift: 0 10px 28px rgba(0, 0, 0, .35), 0 1px 0 rgba(255,255,255,.06) inset, 0 -1px 0 rgba(0,0,0,.35) inset;
+    --glow-a: rgba(56,189,248,.18);
+    --glow-b: rgba(167,139,250,.16);
+  }}
+  html[data-theme="light"] {{
+    --bg0: #eef3f8;
+    --bg1: #f7fafc;
+    --panel: linear-gradient(165deg, #ffffff, #f3f7fb);
+    --panel-flat: rgba(255, 255, 255, 0.96);
+    --panel-border: #d7e0ec;
+    --panel-shine: rgba(255, 255, 255, 0.65);
+    --text: #10233f;
+    --muted: #6b7c93;
+    --accent: #0284c7;
+    --accent2: #7c3aed;
+    --ok: #059669;
+    --fail: #dc2626;
+    --warn: #d97706;
+    --top-bg: rgba(247, 250, 252, .86);
+    --seg-bg: #ffffff;
+    --on-ink: #ffffff;
+    --chart-muted: #64748b;
+    --chart-label: #334155;
+    --chart-line: #cbd5e1;
+    --shadow-deep: 0 18px 40px rgba(16,35,63,.08), 0 1px 0 rgba(255,255,255,.8) inset;
+    --shadow-lift: 0 10px 24px rgba(16,35,63,.07), 0 1px 0 rgba(255,255,255,.9) inset;
+    --glow-a: rgba(2,132,199,.10);
+    --glow-b: rgba(15,118,110,.08);
   }}
   * {{ box-sizing: border-box; }}
   body {{
@@ -343,9 +402,26 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
     color: var(--text);
     font-family: "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
     background:
-      radial-gradient(900px 420px at 8% -8%, rgba(56,189,248,.18), transparent 55%),
-      radial-gradient(800px 380px at 92% 0%, rgba(167,139,250,.16), transparent 50%),
+      radial-gradient(900px 420px at 8% -8%, var(--glow-a), transparent 55%),
+      radial-gradient(800px 380px at 92% 0%, var(--glow-b), transparent 50%),
       linear-gradient(180deg, var(--bg1), var(--bg0));
+  }}
+  @media (prefers-reduced-motion: no-preference) {{
+    html.theme-ready body,
+    html.theme-ready .kpi,
+    html.theme-ready .card,
+    html.theme-ready .filters,
+    html.theme-ready .toolbar .seg,
+    html.theme-ready .toolbar .seg button,
+    html.theme-ready .dd-trigger,
+    html.theme-ready .dd-menu {{
+      transition: background .4s cubic-bezier(.22,1,.36,1), color .4s cubic-bezier(.22,1,.36,1),
+        border-color .4s cubic-bezier(.22,1,.36,1), box-shadow .4s cubic-bezier(.22,1,.36,1);
+    }}
+    ::view-transition-old(root), ::view-transition-new(root) {{
+      animation-duration: .4s;
+      animation-timing-function: cubic-bezier(.22,1,.36,1);
+    }}
   }}
   .shell {{
     max-width: 1240px;
@@ -493,6 +569,79 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
     font-weight: 650;
     box-shadow: 0 6px 16px rgba(56,189,248,.18), 0 1px 0 rgba(255,255,255,.1) inset;
   }}
+  .toolbar {{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    justify-content: flex-end;
+    margin: 0 0 12px;
+  }}
+  .toolbar .seg {{
+    border: 1px solid var(--panel-border);
+    background: var(--seg-bg);
+    border-radius: 10px;
+    overflow: hidden;
+    gap: 0;
+    box-shadow: var(--shadow-lift);
+  }}
+  .toolbar .seg button {{
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--muted);
+    box-shadow: none;
+    padding: 8px 12px;
+    font-size: .78rem;
+    font-weight: 600;
+    transform: none;
+  }}
+  .toolbar .seg button:hover {{
+    color: var(--accent);
+    transform: none;
+  }}
+  .toolbar .seg button.active {{
+    background: var(--text);
+    color: var(--on-ink);
+    border-color: transparent;
+    box-shadow: none;
+  }}
+  .toolbar .btn-refresh {{
+    border: 1px solid var(--panel-border);
+    background: var(--seg-bg);
+    color: var(--text);
+    border-radius: 10px;
+    padding: 8px 14px;
+    font-size: .78rem;
+    font-weight: 650;
+    cursor: pointer;
+    box-shadow: var(--shadow-lift);
+  }}
+  .toolbar .btn-refresh:hover {{
+    border-color: var(--accent);
+    color: var(--accent);
+  }}
+  .toolbar .btn-refresh:disabled {{
+    opacity: .6;
+    cursor: wait;
+  }}
+  .toast {{
+    position: fixed;
+    bottom: 22px;
+    right: 22px;
+    z-index: 80;
+    padding: 10px 16px;
+    border-radius: 10px;
+    background: var(--text);
+    color: var(--on-ink);
+    font-weight: 650;
+    font-size: .85rem;
+    opacity: 0;
+    transform: translateY(6px);
+    pointer-events: none;
+    transition: opacity .2s ease, transform .2s ease;
+  }}
+  .toast.show {{ opacity: 1; transform: none; }}
   .filters {{
     display: flex;
     flex-wrap: wrap;
@@ -713,14 +862,26 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
     <header class="hero">
       <div>
         <div class="brand">GAI USAGE</div>
-        <h1>{title}</h1>
-        <div class="meta">{t['generated']}: {generated}<br/>{t['source']}: {source}</div>
+        <h1 data-i="title">{title}</h1>
+        <div class="meta" id="meta-line"></div>
       </div>
       <div class="badge">ECharts · .gai/usage-report.html</div>
     </header>
 
+    <div class="toolbar">
+      <button type="button" class="btn-refresh" id="btn-refresh" data-i="refresh">刷新</button>
+      <div class="seg" role="group" aria-label="Theme">
+        <button type="button" id="btn-theme-light" data-i="theme_light">日间</button>
+        <button type="button" id="btn-theme-dark" data-i="theme_dark">夜间</button>
+      </div>
+      <div class="seg" role="group" aria-label="Language">
+        <button type="button" id="btn-lang-cn">中文</button>
+        <button type="button" id="btn-lang-en">EN</button>
+      </div>
+    </div>
+
     <div class="filters">
-      <label id="project-filter-label">{t['project_filter']}</label>
+      <label id="project-filter-label" data-i="project_filter">{t['project_filter']}</label>
       <div class="dd" id="project-dd">
         <button type="button" class="dd-trigger" id="project-dd-btn"
                 aria-haspopup="listbox" aria-expanded="false"
@@ -730,36 +891,35 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
           <span class="dd-caret" aria-hidden="true"></span>
         </button>
         <div class="dd-menu" id="project-dd-menu" role="listbox" aria-labelledby="project-filter-label">
-          {project_dd_items_html}
         </div>
       </div>
-      <span class="meta" id="project-hint">{html.escape(t['hint_project'])}</span>
+      <span class="meta" id="project-hint" data-i="hint_project">{html.escape(t['hint_project'])}</span>
     </div>
 
-    <div class="empty" id="empty">{html.escape(t['empty'])}</div>
+    <div class="empty" id="empty" data-i="empty">{html.escape(t['empty'])}</div>
 
     <div id="content">
       <section class="kpis">
         <div class="kpi">
-          <div class="label">{t['calls']}</div>
-          <div class="value" id="kpi-calls">{calls}</div>
+          <div class="label" data-i="calls">{t['calls']}</div>
+          <div class="value" id="kpi-calls">0</div>
         </div>
         <div class="kpi">
-          <div class="label">{t['tokens']}</div>
-          <div class="value" id="kpi-tokens">{tokens}</div>
-          <div class="sub" id="kpi-token-sub">{t['prompt']}: {prompt} · {t['completion']}: {completion}</div>
+          <div class="label" data-i="tokens">{t['tokens']}</div>
+          <div class="value" id="kpi-tokens">0</div>
+          <div class="sub" id="kpi-token-sub"></div>
         </div>
         <div class="kpi">
-          <div class="label">{t['ok']}</div>
-          <div class="value ok" id="kpi-ok">{ok}</div>
+          <div class="label" data-i="ok">{t['ok']}</div>
+          <div class="value ok" id="kpi-ok">0</div>
         </div>
         <div class="kpi">
-          <div class="label">{t['fail']}</div>
-          <div class="value fail" id="kpi-fail">{fail}</div>
+          <div class="label" data-i="fail">{t['fail']}</div>
+          <div class="value fail" id="kpi-fail">0</div>
         </div>
         <div class="kpi">
-          <div class="label">{t['avg_ms']}</div>
-          <div class="value" id="kpi-ms">{avg_display}</div>
+          <div class="label" data-i="avg_ms">{t['avg_ms']}</div>
+          <div class="value" id="kpi-ms">—</div>
         </div>
       </section>
 
@@ -767,92 +927,92 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
         <div class="card full">
           <div class="card-head">
             <div>
-              <h2 id="trend-title">{t['trend_title']}</h2>
-              <div class="hint" id="trend-hint">{t['hint_today']}</div>
+              <h2 id="trend-title" data-i="trend_title">{t['trend_title']}</h2>
+              <div class="hint" id="trend-hint" data-i="hint_today">{t['hint_today']}</div>
             </div>
             <div class="seg" id="trend-seg" role="tablist">
-              <button type="button" data-mode="today" class="active">{t['seg_today']}</button>
-              <button type="button" data-mode="last7">{t['seg_last7']}</button>
-              <button type="button" data-mode="last15">{t['seg_last15']}</button>
-              <button type="button" data-mode="week">{t['seg_week']}</button>
-              <button type="button" data-mode="month">{t['seg_month']}</button>
-              <button type="button" data-mode="year">{t['seg_year']}</button>
-              <button type="button" data-mode="all_days">{t['seg_all_days']}</button>
+              <button type="button" data-mode="today" class="active" data-i="seg_today">{t['seg_today']}</button>
+              <button type="button" data-mode="last7" data-i="seg_last7">{t['seg_last7']}</button>
+              <button type="button" data-mode="last15" data-i="seg_last15">{t['seg_last15']}</button>
+              <button type="button" data-mode="week" data-i="seg_week">{t['seg_week']}</button>
+              <button type="button" data-mode="month" data-i="seg_month">{t['seg_month']}</button>
+              <button type="button" data-mode="year" data-i="seg_year">{t['seg_year']}</button>
+              <button type="button" data-mode="all_days" data-i="seg_all_days">{t['seg_all_days']}</button>
             </div>
           </div>
           <div id="chart-day" class="chart tall"></div>
         </div>
         <div class="card scope-all">
-          <h2>{t['by_repo']}</h2>
-          <div class="hint">{t['hint_repo']}</div>
+          <h2 data-i="by_repo">{t['by_repo']}</h2>
+          <div class="hint" data-i="hint_repo">{t['hint_repo']}</div>
           <div id="chart-repo" class="chart"></div>
         </div>
         <div class="card scope-repo">
-          <h2>{t['by_branch']}</h2>
-          <div class="hint">{t['hint_branch_repo']}</div>
+          <h2 data-i="by_branch">{t['by_branch']}</h2>
+          <div class="hint" data-i="hint_branch_repo">{t['hint_branch_repo']}</div>
           <div id="chart-branch" class="chart"></div>
         </div>
         <div class="card">
-          <h2>{t['by_status']}</h2>
-          <div class="hint">{t['hint_status']}</div>
+          <h2 data-i="by_status">{t['by_status']}</h2>
+          <div class="hint" data-i="hint_status">{t['hint_status']}</div>
           <div id="chart-status" class="chart"></div>
         </div>
         <div class="card">
-          <h2>{t['token_split']}</h2>
-          <div class="hint">{t['hint_split']}</div>
+          <h2 data-i="token_split">{t['token_split']}</h2>
+          <div class="hint" data-i="hint_split">{t['hint_split']}</div>
           <div id="chart-split" class="chart"></div>
         </div>
         <div class="card">
-          <h2>{t['duration_by_model']}</h2>
-          <div class="hint">{t['hint_duration']}</div>
+          <h2 data-i="duration_by_model">{t['duration_by_model']}</h2>
+          <div class="hint" data-i="hint_duration">{t['hint_duration']}</div>
           <div id="chart-duration" class="chart"></div>
         </div>
         <div class="card">
-          <h2>{t['by_action']}</h2>
-          <div class="hint">{t['hint_pie']}</div>
+          <h2 data-i="by_action">{t['by_action']}</h2>
+          <div class="hint" data-i="hint_pie">{t['hint_pie']}</div>
           <div id="chart-action" class="chart"></div>
         </div>
         <div class="card">
-          <h2>{t['by_provider']}</h2>
-          <div class="hint">{t['hint_pie']}</div>
+          <h2 data-i="by_provider">{t['by_provider']}</h2>
+          <div class="hint" data-i="hint_pie">{t['hint_pie']}</div>
           <div id="chart-provider" class="chart"></div>
         </div>
         <div class="card">
-          <h2>{t['by_model']}</h2>
-          <div class="hint">{t['hint_bar']}</div>
+          <h2 data-i="by_model">{t['by_model']}</h2>
+          <div class="hint" data-i="hint_bar">{t['hint_bar']}</div>
           <div id="chart-model" class="chart"></div>
         </div>
         <div class="card">
-          <h2>{t['by_user']}</h2>
-          <div class="hint">{t['hint_bar']}</div>
+          <h2 data-i="by_user">{t['by_user']}</h2>
+          <div class="hint" data-i="hint_bar">{t['hint_bar']}</div>
           <div id="chart-user" class="chart"></div>
         </div>
         <div class="card full scope-all">
-          <h2>{t['heatmap_repo']}</h2>
-          <div class="hint">{t['hint_heat_repo']}</div>
+          <h2 data-i="heatmap_repo">{t['heatmap_repo']}</h2>
+          <div class="hint" data-i="hint_heat_repo">{t['hint_heat_repo']}</div>
           <div id="chart-heat-repo" class="chart tall"></div>
         </div>
         <div class="card full scope-repo">
-          <h2>{t['heatmap']}</h2>
-          <div class="hint">{t['hint_heat']}</div>
+          <h2 data-i="heatmap">{t['heatmap']}</h2>
+          <div class="hint" data-i="hint_heat">{t['hint_heat']}</div>
           <div id="chart-heat" class="chart tall"></div>
         </div>
         <div class="card full">
-          <h2>{t['recent']}</h2>
+          <h2 data-i="recent">{t['recent']}</h2>
           <div class="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>{t['col_time']}</th>
-                  <th>{t['col_user']}</th>
-                  <th>{t['col_repo']}</th>
-                  <th>{t['col_remote']}</th>
-                  <th>{t['col_provider']}</th>
-                  <th>{t['col_model']}</th>
-                  <th>{t['col_action']}</th>
-                  <th>{t['col_tokens']}</th>
-                  <th>{t['col_meta']}</th>
-                  <th>{t['col_status']}</th>
+                  <th data-i="col_time">{t['col_time']}</th>
+                  <th data-i="col_user">{t['col_user']}</th>
+                  <th data-i="col_repo">{t['col_repo']}</th>
+                  <th data-i="col_remote">{t['col_remote']}</th>
+                  <th data-i="col_provider">{t['col_provider']}</th>
+                  <th data-i="col_model">{t['col_model']}</th>
+                  <th data-i="col_action">{t['col_action']}</th>
+                  <th data-i="col_tokens">{t['col_tokens']}</th>
+                  <th data-i="col_meta">{t['col_meta']}</th>
+                  <th data-i="col_status">{t['col_status']}</th>
                 </tr>
               </thead>
               <tbody id="recent-body"></tbody>
@@ -862,17 +1022,27 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
       </section>
     </div>
 
-    <footer>{html.escape(t['footer'])}</footer>
+    <footer data-i="footer">{html.escape(t['footer'])}</footer>
   </div>
+  <div class="toast" id="toast"></div>
 
 <script>
-const DATASETS = JSON.parse({payload_js});
-const I18N = {i18n_js};
+const I18N_ALL = {i18n_js};
 const COLORS = ['#38bdf8', '#a78bfa', '#34d399', '#fbbf24', '#f472b6', '#60a5fa', '#fb7185', '#2dd4bf'];
+let lang = document.documentElement.getAttribute('data-lang') === 'cn' ? 'cn' : 'en';
+let I18N = I18N_ALL[lang] || I18N_ALL.en;
+let DATASETS = window.__GAI_USAGE_DATASETS__ || {{ all: {{}}, projects: [], by_project: {{}}, default_project: '__all__' }};
 let A = DATASETS.all || {{}};
 let currentProject = DATASETS.default_project || '__all__';
 let currentTrend = (A && A.default_trend) || 'today';
 let chartHandles = [];
+let toastTimer = null;
+let dropdownBound = false;
+
+function cssVar(name, fallback) {{
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return v || fallback;
+}}
 
 function activeAnalytics() {{
   if (currentProject === '__all__') return DATASETS.all || {{}};
@@ -895,7 +1065,7 @@ function localizedStatus(name) {{
 }}
 
 function baseText() {{
-  return {{ color: '#94a3b8', fontSize: 11 }};
+  return {{ color: cssVar('--chart-muted', '#94a3b8'), fontSize: 11 }};
 }}
 
 function trendHints() {{
@@ -937,7 +1107,7 @@ function applyTrend(chart, mode) {{
     tooltip: {{ trigger: 'axis' }},
     legend: {{
       data: [I18N.tokens, I18N.calls],
-      textStyle: {{ color: '#cbd5e1' }},
+      textStyle: {{ color: cssVar('--chart-label', '#cbd5e1') }},
       top: 0
     }},
     grid: {{ left: 48, right: 48, top: 42, bottom: 48 }},
@@ -946,12 +1116,12 @@ function applyTrend(chart, mode) {{
       data: series.labels || [],
       boundaryGap: false,
       axisLabel: {{
-        color: '#94a3b8',
+        color: cssVar('--chart-muted', '#94a3b8'),
         fontSize: 11,
         hideOverlap: true,
         rotate: (series.labels || []).length > 12 ? 30 : 0
       }},
-      axisLine: {{ lineStyle: {{ color: '#334155' }} }}
+      axisLine: {{ lineStyle: {{ color: cssVar('--chart-line', '#334155') }} }}
     }},
     yAxis: [
       {{
@@ -1308,6 +1478,76 @@ function renderDashboard() {{
   fillTable();
 }}
 
+function showToast(msg) {{
+  const el = document.getElementById('toast');
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 1600);
+}}
+
+function updateMetaLine() {{
+  const el = document.getElementById('meta-line');
+  if (!el) return;
+  const a = DATASETS.all || {{}};
+  el.innerHTML =
+    I18N.generated + ': ' + esc(String(a.generated_at || '—')) +
+    '<br/>' + I18N.source + ': ' + esc(String(a.source || 'usage.jsonl'));
+}}
+
+function applyStaticI18n() {{
+  document.querySelectorAll('[data-i]').forEach((el) => {{
+    const key = el.getAttribute('data-i');
+    if (key && typeof I18N[key] === 'string') el.textContent = I18N[key];
+  }});
+  document.title = I18N.title || document.title;
+  const refresh = document.getElementById('btn-refresh');
+  if (refresh && !refresh.disabled) refresh.textContent = I18N.refresh;
+  updateMetaLine();
+}}
+
+function rebuildProjectMenu() {{
+  const menu = document.getElementById('project-dd-menu');
+  if (!menu) return;
+  const ids = new Set((DATASETS.projects || []).map((p) => p.id));
+  if (currentProject !== '__all__' && !ids.has(currentProject)) {{
+    currentProject = DATASETS.default_project || '__all__';
+  }}
+  const items = [{{ id: '__all__', label: I18N.project_all }}].concat(DATASETS.projects || []);
+  menu.innerHTML = '';
+  items.forEach((item) => {{
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'dd-item' + (item.id === currentProject ? ' active' : '');
+    btn.dataset.value = item.id;
+    btn.setAttribute('role', 'option');
+    const mark = document.createElement('span');
+    mark.className = 'dd-dot ' + (item.id === '__all__' ? 'all' : 'repo');
+    const text = document.createElement('span');
+    text.className = 'dd-item-text';
+    text.textContent = item.label || item.id;
+    const check = document.createElement('span');
+    check.className = 'dd-check';
+    check.textContent = '✓';
+    btn.appendChild(mark);
+    btn.appendChild(text);
+    btn.appendChild(check);
+    btn.addEventListener('click', (e) => {{
+      e.stopPropagation();
+      currentProject = item.id || '__all__';
+      syncProjectDropdown();
+      const root = document.getElementById('project-dd');
+      const trigger = document.getElementById('project-dd-btn');
+      if (root) root.classList.remove('open');
+      if (trigger) trigger.setAttribute('aria-expanded', 'false');
+      renderDashboard();
+    }});
+    menu.appendChild(btn);
+  }});
+  syncProjectDropdown();
+}}
+
 function syncProjectDropdown() {{
   const labelEl = document.getElementById('project-dd-label');
   const menu = document.getElementById('project-dd-menu');
@@ -1328,7 +1568,11 @@ function initProjectDropdown() {{
   const root = document.getElementById('project-dd');
   const btn = document.getElementById('project-dd-btn');
   const menu = document.getElementById('project-dd-menu');
-  if (!root || !btn || !menu) return;
+  if (!root || !btn || !menu || dropdownBound) {{
+    rebuildProjectMenu();
+    return;
+  }}
+  dropdownBound = true;
 
   const close = () => {{
     root.classList.remove('open');
@@ -1344,28 +1588,112 @@ function initProjectDropdown() {{
     if (root.classList.contains('open')) close();
     else open();
   }});
-  menu.querySelectorAll('.dd-item').forEach(item => {{
-    item.addEventListener('click', (e) => {{
-      e.stopPropagation();
-      currentProject = item.dataset.value || '__all__';
-      syncProjectDropdown();
-      close();
-      renderDashboard();
-    }});
-  }});
   document.addEventListener('click', (e) => {{
     if (!root.contains(e.target)) close();
   }});
   document.addEventListener('keydown', (e) => {{
     if (e.key === 'Escape') close();
   }});
-  syncProjectDropdown();
+  rebuildProjectMenu();
+}}
+
+function applyDatasets(next) {{
+  DATASETS = next || window.__GAI_USAGE_DATASETS__ || DATASETS;
+  window.__GAI_USAGE_DATASETS__ = DATASETS;
+  A = DATASETS.all || {{}};
+  if (!currentTrend) currentTrend = A.default_trend || 'today';
+  rebuildProjectMenu();
+  updateMetaLine();
+  renderDashboard();
+}}
+
+function refreshData() {{
+  const btn = document.getElementById('btn-refresh');
+  if (btn) {{
+    btn.disabled = true;
+    btn.textContent = I18N.refreshing || '...';
+  }}
+  const old = document.getElementById('usage-data-loader');
+  if (old) old.remove();
+  const s = document.createElement('script');
+  s.id = 'usage-data-loader';
+  s.src = 'usage-data.js?t=' + Date.now();
+  s.onload = () => {{
+    applyDatasets(window.__GAI_USAGE_DATASETS__);
+    showToast(I18N.refresh_ok || 'OK');
+    if (btn) {{
+      btn.disabled = false;
+      btn.textContent = I18N.refresh;
+    }}
+  }};
+  s.onerror = () => {{
+    showToast(I18N.refresh_fail || 'Failed');
+    if (btn) {{
+      btn.disabled = false;
+      btn.textContent = I18N.refresh;
+    }}
+  }};
+  document.head.appendChild(s);
+}}
+
+function currentTheme() {{
+  return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+}}
+
+function applyTheme(theme) {{
+  document.documentElement.setAttribute('data-theme', theme);
+  try {{ localStorage.setItem('gai-usage-theme', theme); }} catch (e) {{}}
+  document.getElementById('btn-theme-light').classList.toggle('active', theme === 'light');
+  document.getElementById('btn-theme-dark').classList.toggle('active', theme === 'dark');
+}}
+
+function setTheme(next, animate) {{
+  const theme = next === 'light' ? 'light' : 'dark';
+  if (theme === currentTheme()) {{
+    applyTheme(theme);
+    renderDashboard();
+    return;
+  }}
+  const run = () => {{
+    applyTheme(theme);
+    renderDashboard();
+  }};
+  if (
+    animate !== false &&
+    document.startViewTransition &&
+    !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  ) {{
+    document.startViewTransition(run);
+    return;
+  }}
+  run();
+}}
+
+function setLang(next) {{
+  lang = next === 'cn' ? 'cn' : 'en';
+  I18N = I18N_ALL[lang] || I18N_ALL.en;
+  document.documentElement.setAttribute('data-lang', lang);
+  document.documentElement.lang = lang === 'cn' ? 'zh-CN' : 'en';
+  try {{ localStorage.setItem('gai-usage-lang', lang); }} catch (e) {{}}
+  document.getElementById('btn-lang-cn').classList.toggle('active', lang === 'cn');
+  document.getElementById('btn-lang-en').classList.toggle('active', lang === 'en');
+  applyStaticI18n();
+  rebuildProjectMenu();
+  renderDashboard();
 }}
 
 (function main() {{
+  document.getElementById('btn-refresh').addEventListener('click', refreshData);
+  document.getElementById('btn-theme-light').addEventListener('click', () => setTheme('light'));
+  document.getElementById('btn-theme-dark').addEventListener('click', () => setTheme('dark'));
+  document.getElementById('btn-lang-cn').addEventListener('click', () => setLang('cn'));
+  document.getElementById('btn-lang-en').addEventListener('click', () => setLang('en'));
+  setTheme(currentTheme(), false);
+  setLang(lang);
   initProjectDropdown();
-  renderDashboard();
+  applyDatasets(window.__GAI_USAGE_DATASETS__);
   window.addEventListener('resize', () => chartHandles.forEach(c => c.resize()));
+  requestAnimationFrame(() => document.documentElement.classList.add('theme-ready'));
 }})();
 </script>
 </body>
@@ -1552,7 +1880,13 @@ def _i18n(chinese: bool) -> dict[str, str]:
             "col_tokens": "Token",
             "col_meta": "上下文",
             "col_status": "状态",
-            "footer": "由 gai usage --report 根据 .gai/usage.jsonl 生成；再次运行会覆盖同步本文件。",
+            "refresh": "刷新",
+            "refreshing": "刷新中…",
+            "refresh_ok": "已更新到最新用量数据",
+            "refresh_fail": "刷新失败：找不到 usage-data.js（请先运行 gai usage --report）",
+            "theme_light": "日间",
+            "theme_dark": "夜间",
+            "footer": "数据来自 .gai/usage.jsonl（同步为 usage-data.js）。点「刷新」可加载最新数据；日常 gai 调用也会自动更新数据文件。",
         }
     return {
         "title": "gai Token Usage Report",
@@ -1627,5 +1961,11 @@ def _i18n(chinese: bool) -> dict[str, str]:
         "col_tokens": "Tokens",
         "col_meta": "Context",
         "col_status": "Status",
-        "footer": "Generated by gai usage --report from .gai/usage.jsonl; re-run overwrites this file.",
+        "refresh": "Refresh",
+        "refreshing": "Refreshing…",
+        "refresh_ok": "Usage data updated",
+        "refresh_fail": "Refresh failed: usage-data.js missing (run gai usage --report first)",
+        "theme_light": "Light",
+        "theme_dark": "Dark",
+        "footer": "Data from .gai/usage.jsonl (synced to usage-data.js). Click Refresh for the latest snapshot; normal gai LLM calls also update the data file.",
     }

@@ -336,7 +336,12 @@ gai usage --action commit -n 50 --cn
 gai usage --user alice --json
 ```
 
-`--report` 会读取当前项目的 `.gai/usage.jsonl`，**覆盖写入**固定文件 `.gai/usage-report.html`。可按仓库筛选：
+`--report` 会读取当前项目的 `.gai/usage.jsonl`，**覆盖写入** `.gai/usage-report.html`，并同步 `.gai/usage-data.js`。报告页支持：
+
+- **刷新**：加载最新 `usage-data.js`（日常 `gai` 调用大模型时也会自动更新该文件，一般不必反复跑 `--report`）
+- **中 / 英**、**日间 / 夜间**主题切换（本地记住选择）
+
+可按仓库筛选：
 
 - **全部项目**：总览图（按仓库用量、仓库×动作热力图等）
 - **某个仓库**：仓内详情（按分支用量、动作×分支热力图等）

@@ -146,6 +146,13 @@ def append_usage_record(record: UsageRecord, *, path: Path | None = None) -> Non
         _maybe_rotate(target)
     except OSError:
         return
+    # Keep the HTML dashboard's companion data file fresh for in-page Refresh.
+    try:
+        from gai.llm.usage_report import sync_usage_data_file
+
+        sync_usage_data_file(log_path=target)
+    except Exception:
+        return
 
 
 def load_usage_records(

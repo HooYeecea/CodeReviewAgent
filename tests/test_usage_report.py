@@ -76,10 +76,16 @@ def test_write_usage_report_fixed_path(tmp_path: Path, monkeypatch) -> None:
     assert out == tmp_path / ".gai" / "usage-report.html"
     assert out == usage_report_path()
     text = out.read_text(encoding="utf-8")
+    data_js = (tmp_path / ".gai" / "usage-data.js").read_text(encoding="utf-8")
     assert "gai Token 用量报告" in text
     assert "echarts" in text.lower()
-    assert "DeepSeek" in text or "deepseek" in text.lower()
-    assert "review+message" in text or "DATASETS" in text
+    assert "btn-refresh" in text
+    assert "btn-theme-dark" in text
+    assert "btn-lang-cn" in text
+    assert "usage-data.js" in text
+    assert "window.__GAI_USAGE_DATASETS__" in data_js
+    assert "DeepSeek" in data_js or "deepseek" in data_js.lower()
+    assert "review+message" in data_js
     url = path_to_file_url(out)
     assert url.startswith("file://")
     assert "usage-report.html" in url
