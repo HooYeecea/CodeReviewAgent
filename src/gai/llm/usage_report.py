@@ -361,39 +361,81 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
     --warn: #fbbf24;
     --top-bg: rgba(7, 16, 29, .72);
     --seg-bg: rgba(15, 23, 42, .7);
+    --seg-btn: linear-gradient(180deg, rgba(40, 54, 78, .95), rgba(18, 28, 46, .95));
+    --seg-btn-text: #cbd5e1;
+    --seg-active-bg: linear-gradient(180deg, rgba(56,189,248,.28), rgba(56,189,248,.1));
+    --seg-active-text: #bae6fd;
     --on-ink: #0b1220;
+    --chart-well: linear-gradient(180deg, rgba(8,14,26,.45), rgba(8,14,26,.18));
+    --chart-well-border: rgba(148,163,184,.16);
+    --chart-well-shadow: 0 1px 0 rgba(255,255,255,.05) inset, 0 12px 28px rgba(0,0,0,.28) inset, 0 -1px 0 rgba(0,0,0,.35) inset;
     --chart-muted: #94a3b8;
-    --chart-label: #cbd5e1;
-    --chart-line: #334155;
+    --chart-label: #e2e8f0;
+    --chart-line: #475569;
+    --chart-split: rgba(148,163,184,.14);
+    --chart-pie-border: #121a2b;
+    --chart-symbol-stroke: #0b1220;
+    --table-bg: rgba(8, 14, 26, .28);
+    --table-head: rgba(18, 26, 43, .95);
+    --badge-bg: linear-gradient(180deg, rgba(56,189,248,.16), rgba(56,189,248,.06));
+    --badge-border: rgba(56,189,248,.35);
+    --badge-text: #bae6fd;
     --shadow-deep: 0 22px 48px rgba(0, 0, 0, .45), 0 2px 0 rgba(255,255,255,.04) inset;
     --shadow-lift: 0 10px 28px rgba(0, 0, 0, .35), 0 1px 0 rgba(255,255,255,.06) inset, 0 -1px 0 rgba(0,0,0,.35) inset;
     --glow-a: rgba(56,189,248,.18);
     --glow-b: rgba(167,139,250,.16);
+    --heat-0: #0f172a;
+    --heat-1: #1d4ed8;
+    --heat-2: #38bdf8;
+    --heat-3: #fbbf24;
   }}
   html[data-theme="light"] {{
-    --bg0: #eef3f8;
+    --bg0: #eaf0f7;
     --bg1: #f7fafc;
-    --panel: linear-gradient(165deg, #ffffff, #f3f7fb);
-    --panel-flat: rgba(255, 255, 255, 0.96);
+    --panel: linear-gradient(165deg, #ffffff, #f4f8fc);
+    --panel-flat: #ffffff;
     --panel-border: #d7e0ec;
-    --panel-shine: rgba(255, 255, 255, 0.65);
+    --panel-shine: rgba(255, 255, 255, 0.92);
     --text: #10233f;
-    --muted: #6b7c93;
-    --accent: #0284c7;
-    --accent2: #7c3aed;
+    --muted: #5b6b82;
+    --accent: #0f766e;
+    --accent2: #0284c7;
     --ok: #059669;
     --fail: #dc2626;
     --warn: #d97706;
-    --top-bg: rgba(247, 250, 252, .86);
+    --top-bg: rgba(247, 250, 252, .88);
     --seg-bg: #ffffff;
+    --seg-btn: linear-gradient(180deg, #ffffff, #eef3f8);
+    --seg-btn-text: #3d516c;
+    --seg-active-bg: linear-gradient(180deg, #ccfbf1, #e6fffa);
+    --seg-active-text: #0f766e;
     --on-ink: #ffffff;
-    --chart-muted: #64748b;
-    --chart-label: #334155;
-    --chart-line: #cbd5e1;
-    --shadow-deep: 0 18px 40px rgba(16,35,63,.08), 0 1px 0 rgba(255,255,255,.8) inset;
-    --shadow-lift: 0 10px 24px rgba(16,35,63,.07), 0 1px 0 rgba(255,255,255,.9) inset;
-    --glow-a: rgba(2,132,199,.10);
-    --glow-b: rgba(15,118,110,.08);
+    --chart-well: linear-gradient(180deg, #ffffff, #f3f7fb);
+    --chart-well-border: #cfd9e6;
+    --chart-well-shadow:
+      0 1px 0 rgba(255,255,255,.95) inset,
+      0 -1px 0 rgba(16,35,63,.06) inset,
+      0 10px 22px rgba(16,35,63,.06) inset,
+      0 8px 18px rgba(16,35,63,.06);
+    --chart-muted: #4b5d73;
+    --chart-label: #1e3350;
+    --chart-line: #94a3b8;
+    --chart-split: rgba(15,35,63,.08);
+    --chart-pie-border: #ffffff;
+    --chart-symbol-stroke: #ffffff;
+    --table-bg: #f8fafc;
+    --table-head: #eef3f8;
+    --badge-bg: linear-gradient(180deg, #ccfbf1, #e6fffa);
+    --badge-border: rgba(15,118,110,.28);
+    --badge-text: #0f766e;
+    --shadow-deep: 0 18px 40px rgba(16,35,63,.08), 0 1px 0 rgba(255,255,255,.9) inset, 0 -1px 0 rgba(16,35,63,.05) inset;
+    --shadow-lift: 0 12px 28px rgba(16,35,63,.08), 0 1px 0 rgba(255,255,255,.95) inset, 0 -1px 0 rgba(16,35,63,.06) inset;
+    --glow-a: rgba(15,118,110,.10);
+    --glow-b: rgba(2,132,199,.08);
+    --heat-0: #eef2ff;
+    --heat-1: #93c5fd;
+    --heat-2: #0ea5e9;
+    --heat-3: #f59e0b;
   }}
   * {{ box-sizing: border-box; }}
   body {{
@@ -457,12 +499,13 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
   .badge {{
     align-self: flex-start;
     padding: 8px 12px;
-    border-radius: 999px;
-    border: 1px solid rgba(56,189,248,.35);
-    background: linear-gradient(180deg, rgba(56,189,248,.16), rgba(56,189,248,.06));
-    box-shadow: 0 8px 20px rgba(0,0,0,.25), 0 1px 0 rgba(255,255,255,.08) inset;
-    color: #bae6fd;
+    border-radius: 12px;
+    border: 1px solid var(--badge-border);
+    background: var(--badge-bg);
+    box-shadow: var(--shadow-lift);
+    color: var(--badge-text);
     font-size: .82rem;
+    font-weight: 650;
     white-space: nowrap;
   }}
   .kpis {{
@@ -548,26 +591,26 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
     gap: 6px;
   }}
   .seg button {{
-    border: 1px solid rgba(148,163,184,.28);
-    background: linear-gradient(180deg, rgba(40, 54, 78, .95), rgba(18, 28, 46, .95));
-    color: #cbd5e1;
+    border: 1px solid var(--panel-border);
+    background: var(--seg-btn);
+    color: var(--seg-btn-text);
     border-radius: 999px;
     padding: 6px 11px;
     font-size: .75rem;
     cursor: pointer;
-    box-shadow: 0 4px 12px rgba(0,0,0,.25), 0 1px 0 rgba(255,255,255,.06) inset;
+    box-shadow: var(--shadow-lift);
   }}
   .seg button:hover {{
-    border-color: rgba(56,189,248,.55);
-    color: #e0f2fe;
+    border-color: var(--accent);
+    color: var(--accent);
     transform: translateY(-1px);
   }}
   .seg button.active {{
-    background: linear-gradient(180deg, rgba(56,189,248,.28), rgba(56,189,248,.1));
-    border-color: rgba(56,189,248,.65);
-    color: #bae6fd;
+    background: var(--seg-active-bg);
+    border-color: var(--accent);
+    color: var(--seg-active-text);
     font-weight: 650;
-    box-shadow: 0 6px 16px rgba(56,189,248,.18), 0 1px 0 rgba(255,255,255,.1) inset;
+    box-shadow: var(--shadow-lift);
   }}
   .toolbar {{
     display: flex;
@@ -674,28 +717,23 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
     display: flex;
     align-items: center;
     gap: 10px;
-    border: 1px solid rgba(125, 211, 252, .28);
+    border: 1px solid var(--panel-border);
     border-radius: 14px;
     padding: 11px 12px;
     color: var(--text);
     cursor: pointer;
     text-align: left;
-    background:
-      linear-gradient(180deg, rgba(45, 62, 92, .98), rgba(22, 34, 54, .98));
-    box-shadow:
-      0 10px 24px rgba(0,0,0,.35),
-      0 1px 0 rgba(255,255,255,.08) inset,
-      0 -1px 0 rgba(0,0,0,.35) inset;
+    background: var(--seg-btn);
+    box-shadow: var(--shadow-lift);
   }}
   .dd-trigger:hover {{
-    border-color: rgba(56,189,248,.55);
+    border-color: var(--accent);
   }}
   .dd.open .dd-trigger {{
-    border-color: rgba(56,189,248,.7);
+    border-color: var(--accent);
     box-shadow:
-      0 0 0 3px rgba(56,189,248,.14),
-      0 12px 28px rgba(0,0,0,.4),
-      0 1px 0 rgba(255,255,255,.1) inset;
+      0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent),
+      var(--shadow-lift);
   }}
   .dd-ico {{
     width: 28px;
@@ -703,10 +741,10 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
     border-radius: 9px;
     display: grid;
     place-items: center;
-    background: linear-gradient(160deg, rgba(56,189,248,.28), rgba(167,139,250,.18));
-    border: 1px solid rgba(125,211,252,.3);
-    box-shadow: 0 1px 0 rgba(255,255,255,.12) inset;
-    color: #bae6fd;
+    background: var(--seg-active-bg);
+    border: 1px solid var(--badge-border);
+    box-shadow: 0 1px 0 rgba(255,255,255,.35) inset;
+    color: var(--badge-text);
     font-size: .85rem;
     flex: 0 0 auto;
   }}
@@ -740,8 +778,8 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
     display: none;
     padding: 8px;
     border-radius: 14px;
-    border: 1px solid rgba(125, 211, 252, .25);
-    background: linear-gradient(180deg, rgba(28, 40, 62, .98), rgba(14, 22, 38, .98));
+    border: 1px solid var(--panel-border);
+    background: var(--panel);
     box-shadow: var(--shadow-deep);
     max-height: 280px;
     overflow: auto;
@@ -755,18 +793,18 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
     border: 0;
     border-radius: 10px;
     background: transparent;
-    color: #e2e8f0;
+    color: var(--text);
     padding: 10px 10px;
     cursor: pointer;
     text-align: left;
     font-size: .88rem;
   }}
   .dd-item:hover {{
-    background: rgba(56,189,248,.12);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
   }}
   .dd-item.active {{
-    background: linear-gradient(90deg, rgba(56,189,248,.2), rgba(167,139,250,.12));
-    box-shadow: 0 0 0 1px rgba(56,189,248,.25) inset;
+    background: var(--seg-active-bg);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent) inset;
   }}
   .dd-item-text {{ flex: 1 1 auto; }}
   .dd-check {{
@@ -792,20 +830,19 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
   .chart {{
     width: 100%;
     height: 300px;
-    border-radius: 12px;
-    border: 1px solid rgba(148,163,184,.12);
-    background:
-      linear-gradient(180deg, rgba(8,14,26,.35), rgba(8,14,26,.12));
-    box-shadow: 0 1px 0 rgba(255,255,255,.04) inset, 0 10px 24px rgba(0,0,0,.2) inset;
+    border-radius: 14px;
+    border: 1px solid var(--chart-well-border);
+    background: var(--chart-well);
+    box-shadow: var(--chart-well-shadow);
   }}
   .chart.tall {{ height: 340px; }}
   .table-wrap {{
     overflow-x: auto;
     margin-top: 8px;
-    border-radius: 12px;
-    border: 1px solid rgba(148,163,184,.14);
-    background: rgba(8, 14, 26, .28);
-    box-shadow: 0 1px 0 rgba(255,255,255,.04) inset;
+    border-radius: 14px;
+    border: 1px solid var(--chart-well-border);
+    background: var(--table-bg);
+    box-shadow: var(--chart-well-shadow);
   }}
   table {{
     width: 100%;
@@ -815,7 +852,7 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
   th, td {{
     text-align: left;
     padding: 10px 8px;
-    border-bottom: 1px solid rgba(148,163,184,.12);
+    border-bottom: 1px solid var(--panel-border);
     vertical-align: top;
   }}
   th {{
@@ -823,9 +860,9 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
     font-weight: 600;
     position: sticky;
     top: 0;
-    background: rgba(18, 26, 43, .95);
+    background: var(--table-head);
   }}
-  tr:hover td {{ background: rgba(56,189,248,.05); }}
+  tr:hover td {{ background: color-mix(in srgb, var(--accent) 8%, transparent); }}
   .pill {{
     display: inline-block;
     padding: 2px 8px;
@@ -1028,9 +1065,15 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
 
 <script>
 const I18N_ALL = {i18n_js};
-const COLORS = ['#38bdf8', '#a78bfa', '#34d399', '#fbbf24', '#f472b6', '#60a5fa', '#fb7185', '#2dd4bf'];
 let lang = document.documentElement.getAttribute('data-lang') === 'cn' ? 'cn' : 'en';
 let I18N = I18N_ALL[lang] || I18N_ALL.en;
+
+function themeColors() {{
+  const light = document.documentElement.getAttribute('data-theme') === 'light';
+  return light
+    ? ['#0284c7', '#0f766e', '#7c3aed', '#d97706', '#db2777', '#2563eb', '#e11d48', '#0d9488']
+    : ['#38bdf8', '#a78bfa', '#34d399', '#fbbf24', '#f472b6', '#60a5fa', '#fb7185', '#2dd4bf'];
+}}
 let DATASETS = window.__GAI_USAGE_DATASETS__ || {{ all: {{}}, projects: [], by_project: {{}}, default_project: '__all__' }};
 let A = DATASETS.all || {{}};
 let currentProject = DATASETS.default_project || '__all__';
@@ -1102,12 +1145,16 @@ function applyTrend(chart, mode) {{
   const hintEl = document.getElementById('trend-hint');
   if (titleEl) titleEl.textContent = titles[mode] || I18N.trend_title;
   if (hintEl) hintEl.textContent = hints[mode] || I18N.hint_day;
+  const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+  const tokenColor = isLight ? '#0284c7' : '#38bdf8';
+  const callColor = isLight ? '#0f766e' : '#34d399';
+  const symbolStroke = cssVar('--chart-symbol-stroke', '#ffffff');
   chart.setOption({{
-    color: ['#38bdf8', '#34d399'],
+    color: [tokenColor, callColor],
     tooltip: {{ trigger: 'axis' }},
     legend: {{
       data: [I18N.tokens, I18N.calls],
-      textStyle: {{ color: cssVar('--chart-label', '#cbd5e1') }},
+      textStyle: {{ color: cssVar('--chart-label', '#cbd5e1'), fontWeight: 600 }},
       top: 0
     }},
     grid: {{ left: 48, right: 48, top: 42, bottom: 48 }},
@@ -1118,10 +1165,12 @@ function applyTrend(chart, mode) {{
       axisLabel: {{
         color: cssVar('--chart-muted', '#94a3b8'),
         fontSize: 11,
+        fontWeight: 500,
         hideOverlap: true,
         rotate: (series.labels || []).length > 12 ? 30 : 0
       }},
-      axisLine: {{ lineStyle: {{ color: cssVar('--chart-line', '#334155') }} }}
+      axisLine: {{ lineStyle: {{ color: cssVar('--chart-line', '#334155'), width: 1.5 }} }},
+      axisTick: {{ lineStyle: {{ color: cssVar('--chart-line', '#334155') }} }}
     }},
     yAxis: [
       {{
@@ -1129,7 +1178,7 @@ function applyTrend(chart, mode) {{
         name: I18N.tokens,
         nameTextStyle: baseText(),
         axisLabel: baseText(),
-        splitLine: {{ lineStyle: {{ color: 'rgba(148,163,184,.12)' }} }}
+        splitLine: {{ lineStyle: {{ color: cssVar('--chart-split', 'rgba(148,163,184,.12)'), type: 'dashed' }} }}
       }},
       {{
         type: 'value',
@@ -1144,13 +1193,21 @@ function applyTrend(chart, mode) {{
         name: I18N.tokens,
         type: 'line',
         smooth: true,
-        showSymbol: (series.labels || []).length <= 24,
+        showSymbol: true,
         symbol: 'circle',
-        symbolSize: 7,
+        symbolSize: 9,
+        lineStyle: {{ width: 3, shadowBlur: 8, shadowColor: 'rgba(2,132,199,.28)' }},
+        itemStyle: {{
+          color: tokenColor,
+          borderColor: symbolStroke,
+          borderWidth: 2,
+          shadowBlur: 6,
+          shadowColor: 'rgba(2,132,199,.35)'
+        }},
         areaStyle: {{
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            {{ offset: 0, color: 'rgba(56,189,248,.35)' }},
-            {{ offset: 1, color: 'rgba(56,189,248,.02)' }}
+            {{ offset: 0, color: isLight ? 'rgba(2,132,199,.22)' : 'rgba(56,189,248,.35)' }},
+            {{ offset: 1, color: isLight ? 'rgba(2,132,199,.02)' : 'rgba(56,189,248,.02)' }}
           ])
         }},
         data: series.tokens || []
@@ -1160,9 +1217,17 @@ function applyTrend(chart, mode) {{
         type: 'line',
         smooth: true,
         yAxisIndex: 1,
-        showSymbol: (series.labels || []).length <= 24,
+        showSymbol: true,
         symbol: 'circle',
-        symbolSize: 7,
+        symbolSize: 9,
+        lineStyle: {{ width: 3, shadowBlur: 8, shadowColor: 'rgba(15,118,110,.25)' }},
+        itemStyle: {{
+          color: callColor,
+          borderColor: symbolStroke,
+          borderWidth: 2,
+          shadowBlur: 6,
+          shadowColor: 'rgba(15,118,110,.3)'
+        }},
         data: series.calls || []
       }}
     ]
@@ -1191,12 +1256,13 @@ function initPie(id, series, opts) {{
   opts = opts || {{}};
   const valueKey = opts.valueKey || 'tokens';
   const unit = opts.unit || I18N.tokens;
-  const colors = opts.colors || COLORS;
+  const colors = opts.colors || themeColors();
   const data = pieData(series, valueKey).map(d => ({{
     name: opts.localize ? localizedStatus(d.name) : d.name,
     value: d.value
   }}));
   const chart = echarts.init(document.getElementById(id));
+  const isLight = document.documentElement.getAttribute('data-theme') === 'light';
   chart.setOption({{
     color: colors,
     tooltip: {{
@@ -1210,7 +1276,7 @@ function initPie(id, series, opts) {{
       orient: 'vertical',
       right: 0,
       top: 'middle',
-      textStyle: {{ color: '#cbd5e1', fontSize: 11 }}
+      textStyle: {{ color: cssVar('--chart-label', '#cbd5e1'), fontSize: 11, fontWeight: 600 }}
     }},
     series: [{{
       type: 'pie',
@@ -1219,10 +1285,19 @@ function initPie(id, series, opts) {{
       avoidLabelOverlap: true,
       itemStyle: {{
         borderRadius: 8,
-        borderColor: '#121a2b',
-        borderWidth: 2
+        borderColor: cssVar('--chart-pie-border', '#121a2b'),
+        borderWidth: isLight ? 3 : 2,
+        shadowBlur: isLight ? 8 : 4,
+        shadowColor: isLight ? 'rgba(16,35,63,.12)' : 'rgba(0,0,0,.35)'
       }},
-      label: {{ color: '#e2e8f0', formatter: '{{b}}' }},
+      label: {{
+        color: cssVar('--chart-label', '#e2e8f0'),
+        fontWeight: 600,
+        formatter: '{{b}}'
+      }},
+      labelLine: {{
+        lineStyle: {{ color: cssVar('--chart-line', '#94a3b8'), width: 1.5 }}
+      }},
       data
     }}]
   }});
@@ -1236,6 +1311,7 @@ function initBar(id, series, opts) {{
   const chart = echarts.init(document.getElementById(id));
   const labels = (series.labels || []).slice();
   const values = (series[valueKey] || []).slice();
+  const isLight = document.documentElement.getAttribute('data-theme') === 'light';
   chart.setOption({{
     color: ['#a78bfa'],
     tooltip: {{
@@ -1250,23 +1326,34 @@ function initBar(id, series, opts) {{
     xAxis: {{
       type: 'value',
       axisLabel: baseText(),
-      splitLine: {{ lineStyle: {{ color: 'rgba(148,163,184,.12)' }} }}
+      axisLine: {{ lineStyle: {{ color: cssVar('--chart-line', '#334155'), width: 1.5 }} }},
+      splitLine: {{ lineStyle: {{ color: cssVar('--chart-split', 'rgba(148,163,184,.12)'), type: 'dashed' }} }}
     }},
     yAxis: {{
       type: 'category',
       data: labels,
-      axisLabel: {{ color: '#94a3b8', fontSize: 11, width: 120, overflow: 'truncate' }},
-      axisLine: {{ lineStyle: {{ color: '#334155' }} }}
+      axisLabel: {{
+        color: cssVar('--chart-muted', '#94a3b8'),
+        fontSize: 11,
+        fontWeight: 500,
+        width: 120,
+        overflow: 'truncate'
+      }},
+      axisLine: {{ lineStyle: {{ color: cssVar('--chart-line', '#334155'), width: 1.5 }} }}
     }},
     series: [{{
       type: 'bar',
       data: values,
       barMaxWidth: 22,
       itemStyle: {{
-        borderRadius: [0, 8, 8, 0],
+        borderRadius: [0, 10, 10, 0],
+        borderColor: isLight ? 'rgba(255,255,255,.85)' : 'rgba(255,255,255,.12)',
+        borderWidth: 1,
+        shadowBlur: isLight ? 8 : 6,
+        shadowColor: isLight ? 'rgba(16,35,63,.14)' : 'rgba(0,0,0,.35)',
         color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
-          {{ offset: 0, color: opts.from || '#6366f1' }},
-          {{ offset: 1, color: opts.to || '#38bdf8' }}
+          {{ offset: 0, color: opts.from || (isLight ? '#0f766e' : '#6366f1') }},
+          {{ offset: 1, color: opts.to || (isLight ? '#38bdf8' : '#38bdf8') }}
         ])
       }}
     }}]
@@ -1277,6 +1364,7 @@ function initBar(id, series, opts) {{
 function initHeatmapGeneric(elId, yKey, yLabels, actions, raw) {{
   const chart = echarts.init(document.getElementById(elId));
   const maxVal = raw.reduce((m, d) => Math.max(m, d[2] || 0), 0) || 1;
+  const isLight = document.documentElement.getAttribute('data-theme') === 'light';
   chart.setOption({{
     tooltip: {{
       position: 'top',
@@ -1291,13 +1379,26 @@ function initHeatmapGeneric(elId, yKey, yLabels, actions, raw) {{
       type: 'category',
       data: actions,
       splitArea: {{ show: true }},
-      axisLabel: {{ color: '#94a3b8', fontSize: 11, rotate: actions.length > 5 ? 25 : 0 }}
+      axisLabel: {{
+        color: cssVar('--chart-muted', '#94a3b8'),
+        fontSize: 11,
+        fontWeight: 500,
+        rotate: actions.length > 5 ? 25 : 0
+      }},
+      axisLine: {{ lineStyle: {{ color: cssVar('--chart-line', '#334155'), width: 1.5 }} }}
     }},
     yAxis: {{
       type: 'category',
       data: yLabels,
       splitArea: {{ show: true }},
-      axisLabel: {{ color: '#94a3b8', fontSize: 11, width: 80, overflow: 'truncate' }}
+      axisLabel: {{
+        color: cssVar('--chart-muted', '#94a3b8'),
+        fontSize: 11,
+        fontWeight: 500,
+        width: 80,
+        overflow: 'truncate'
+      }},
+      axisLine: {{ lineStyle: {{ color: cssVar('--chart-line', '#334155'), width: 1.5 }} }}
     }},
     visualMap: {{
       min: 0,
@@ -1306,14 +1407,32 @@ function initHeatmapGeneric(elId, yKey, yLabels, actions, raw) {{
       orient: 'horizontal',
       left: 'center',
       bottom: 0,
-      textStyle: {{ color: '#94a3b8' }},
-      inRange: {{ color: ['#0f172a', '#1d4ed8', '#38bdf8', '#fbbf24'] }}
+      textStyle: {{ color: cssVar('--chart-muted', '#94a3b8'), fontWeight: 600 }},
+      inRange: {{
+        color: [
+          cssVar('--heat-0', '#0f172a'),
+          cssVar('--heat-1', '#1d4ed8'),
+          cssVar('--heat-2', '#38bdf8'),
+          cssVar('--heat-3', '#fbbf24')
+        ]
+      }}
     }},
     series: [{{
       name: yKey,
       type: 'heatmap',
       data: raw,
-      label: {{ show: true, color: '#e2e8f0', fontSize: 10 }},
+      label: {{
+        show: true,
+        color: isLight ? '#10233f' : '#e2e8f0',
+        fontSize: 10,
+        fontWeight: 600
+      }},
+      itemStyle: {{
+        borderColor: isLight ? '#ffffff' : 'rgba(15,23,42,.55)',
+        borderWidth: 2,
+        shadowBlur: isLight ? 4 : 0,
+        shadowColor: 'rgba(16,35,63,.12)'
+      }},
       emphasis: {{
         itemStyle: {{ shadowBlur: 10, shadowColor: 'rgba(0,0,0,.45)' }}
       }}
