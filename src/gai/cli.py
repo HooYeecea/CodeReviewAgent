@@ -14,6 +14,7 @@ from rich.prompt import Confirm, Prompt
 
 from gai import __version__
 from gai.cli_usage import format_usage_error, want_chinese
+from gai.completion_cmd import completion_app
 from gai.config import CONFIG_FILE, load_settings, save_settings, settings_summary
 from gai.errors import PeriodError, format_cli_error
 from gai.git_ops import (
@@ -63,9 +64,10 @@ app = typer.Typer(
         "本地 Git 提交与代码审查 Agent。",
     ),
     no_args_is_help=True,
-    add_completion=False,
+    add_completion=True,
     context_settings={"help_option_names": ["-h", "--help"]},
 )
+app.add_typer(completion_app, name="completion")
 console = Console()
 err_console = Console(stderr=True)
 
@@ -1623,9 +1625,16 @@ def run(argv: list[str] | None = None) -> int:
             return False
 
     try:
-        root.main(args=args, prog_name="gai", standalone_mode=False)
-        return 0
+        rv = root.main(args=args, prog_name="gai", standalone_mode=False)
+        return int(rv) if isinstance(rv, int) else 0
     except BaseException as exc:
+        if isinstance(exc, SystemExit):
+            code = exc.code
+            if code is None:
+                return 0
+            if isinstance(code, int):
+                return code
+            return 1
         code = _exit_code(exc)
         if code is not None:
             return code

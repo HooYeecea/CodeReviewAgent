@@ -75,6 +75,23 @@ _COMMAND_EXAMPLES: dict[str, tuple[tuple[str, str, str], ...]] = {
         ("gai config --show --cn", "Show effective config (secrets masked)", "查看当前生效配置（密钥已掩码）"),
         ("gai config --api-key <key>", "Save API key to ~/.gai/config.toml", "把 API Key 写入 ~/.gai/config.toml"),
     ),
+    "completion": (
+        (
+            "gai completion install --cn",
+            "Install Tab-completion for the current shell",
+            "为当前 shell 安装 Tab 自动补全",
+        ),
+        (
+            "gai completion install --shell powershell --cn",
+            "Install PowerShell Tab-completion into $PROFILE",
+            "把 PowerShell Tab 补全写入 $PROFILE",
+        ),
+        (
+            "gai completion show --shell powershell",
+            "Print the PowerShell completion script",
+            "打印 PowerShell 补全脚本",
+        ),
+    ),
 }
 
 

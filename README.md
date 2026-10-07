@@ -32,6 +32,34 @@ gai config -h --cn
 
 安装后会在当前 Python 的 `Scripts` 目录生成 `gai` 启动器。该目录在 PATH 中即可在任意 git 仓库使用（不必每个项目再装一次）。
 
+### Tab 自动补全（推荐）
+
+安装一次后，在终端里输入 `gai ` / `gai r` 再按 **Tab**，可补全或轮询子命令与选项。
+
+PowerShell：
+
+```powershell
+gai completion install --shell powershell --cn
+# 或：gai --install-completion
+```
+
+然后**重新打开**终端。试用：
+
+```powershell
+gai <Tab>          # 列出 / 轮询子命令
+gai r<Tab>         # 补全为 review / report 等
+gai commit --<Tab> # 补全选项
+```
+
+bash / zsh / fish：
+
+```bash
+gai completion install --cn
+# 或指定：gai completion install --shell zsh --cn
+```
+
+查看脚本（不写入配置）：`gai completion show --shell powershell`
+
 ## 配置
 
 支持 OpenAI 兼容接口（OpenAI / DeepSeek / 通义兼容模式 / 硅基流动等）。
@@ -377,7 +405,8 @@ CodeReviewAgent/
   pyproject.toml
   README.md
   src/gai/
-    cli.py           # 入口：add / unadd / uncommit / review / commit / push / pull / report / usage / balance / config
+    cli.py           # 入口：add / unadd / uncommit / review / commit / push / pull / report / usage / balance / config / completion
+    completion_cmd.py # shell Tab 补全安装 / 查看
     cli_usage.py     # 子命令 / 参数拼写纠错
     errors.py        # 友好错误文案
     help_i18n.py     # -h --cn 帮助语言
