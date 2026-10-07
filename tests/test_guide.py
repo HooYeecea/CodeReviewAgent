@@ -19,6 +19,8 @@ def test_write_guide_html_chinese_initial(tmp_path: Path):
     assert "initialLang" in text
     assert '"cn"' in text and '"en"' in text
     assert "btn-cn" in text and "btn-en" in text
+    assert "drawer-root" in text
+    assert "drawer-switch" in text
     assert "gai commit" in text
     assert "completion" in text
     assert "Register-ArgumentCompleter" not in text  # not the PS script

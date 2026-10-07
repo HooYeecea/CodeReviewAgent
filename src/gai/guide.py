@@ -355,8 +355,10 @@ def _i18n() -> dict[str, dict[str, str]]:
             ),
             "setup_cn": "几乎所有命令支持 --cn：中文运行时文案；与 -h 联用显示中文帮助。",
             "commands_h": "命令一览",
-            "commands_hint": "点击左侧或下方卡片查看示例。示例可点击复制。",
+            "commands_hint": "点击卡片在右侧抽屉查看详情；抽屉内可直接切换其他命令，无需回到上方。",
             "examples_h": "示例",
+            "drawer_switch": "切换命令",
+            "drawer_close": "关闭",
             "copied": "已复制",
             "tips_h": "提示与约定",
             "tips": [
@@ -407,8 +409,10 @@ def _i18n() -> dict[str, dict[str, str]]:
                 "combine with -h for Chinese help."
             ),
             "commands_h": "Commands",
-            "commands_hint": "Use the nav or cards below. Click an example to copy.",
+            "commands_hint": "Click a card to open the side drawer. Switch commands inside the drawer — no need to scroll back up.",
             "examples_h": "Examples",
+            "drawer_switch": "Switch command",
+            "drawer_close": "Close",
             "copied": "Copied",
             "tips_h": "Tips & conventions",
             "tips": [
@@ -825,22 +829,115 @@ def _render_html(payload: dict[str, Any]) -> str:
       overflow: hidden;
     }}
 
-    .detail {{
-      display: none;
-      margin-top: 16px;
-      background: var(--surface);
-      border: 1px solid var(--line);
-      border-radius: 18px;
-      padding: 20px 20px 16px;
-      box-shadow: var(--shadow);
+    .drawer-root {{
+      position: fixed;
+      inset: 0;
+      z-index: 40;
+      pointer-events: none;
     }}
-    .detail.open {{ display: block; animation: rise .3s ease; }}
-    .detail h2 {{
-      margin: 0 0 8px;
+    .drawer-root.open {{ pointer-events: auto; }}
+    .drawer-mask {{
+      position: absolute;
+      inset: 0;
+      background: rgba(16, 35, 63, .42);
+      opacity: 0;
+      transition: opacity .22s ease;
+    }}
+    .drawer-root.open .drawer-mask {{ opacity: 1; }}
+    .drawer {{
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: min(440px, 100%);
+      height: 100%;
+      background: var(--surface);
+      border-left: 1px solid var(--line);
+      box-shadow: -18px 0 50px rgba(16,35,63,.16);
+      transform: translateX(104%);
+      transition: transform .24s ease;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }}
+    .drawer-root.open .drawer {{ transform: none; }}
+    .drawer-head {{
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 18px 18px 12px;
+      border-bottom: 1px solid var(--line);
+      flex: 0 0 auto;
+    }}
+    .drawer-head h2 {{
+      margin: 0;
       font-size: 1.15rem;
       letter-spacing: -.02em;
+      line-height: 1.25;
     }}
-    .detail h3 {{
+    .drawer-close {{
+      border: 1px solid var(--line);
+      background: #f8fafc;
+      color: var(--ink-soft);
+      border-radius: 10px;
+      padding: 8px 12px;
+      cursor: pointer;
+      font: inherit;
+      font-size: .8rem;
+      font-weight: 600;
+      flex: 0 0 auto;
+    }}
+    .drawer-close:hover {{ border-color: rgba(15,118,110,.4); color: var(--teal); }}
+    .drawer-switch-label {{
+      margin: 0;
+      padding: 12px 18px 8px;
+      font-size: .72rem;
+      font-weight: 600;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      color: var(--muted);
+      flex: 0 0 auto;
+    }}
+    .drawer-switch {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 0 18px 12px;
+      border-bottom: 1px solid var(--line);
+      flex: 0 0 auto;
+      max-height: 140px;
+      overflow: auto;
+    }}
+    .drawer-switch button {{
+      border: 1px solid var(--line);
+      background: #f8fafc;
+      color: var(--ink-soft);
+      border-radius: 8px;
+      padding: 6px 10px;
+      cursor: pointer;
+      font-family: var(--mono);
+      font-size: .74rem;
+      font-weight: 500;
+    }}
+    .drawer-switch button:hover {{
+      border-color: rgba(15,118,110,.35);
+      color: var(--teal);
+    }}
+    .drawer-switch button.active {{
+      background: var(--ink);
+      border-color: var(--ink);
+      color: #fff;
+    }}
+    .drawer-body {{
+      padding: 16px 18px 28px;
+      overflow: auto;
+      flex: 1 1 auto;
+      min-height: 0;
+    }}
+    .drawer-body .blurb {{
+      margin: 0 0 4px;
+    }}
+    .drawer-body h3 {{
       margin: 16px 0 8px;
       font-size: .86rem;
       color: var(--muted);
@@ -855,9 +952,9 @@ def _render_html(payload: dict[str, Any]) -> str:
     }}
     .ex {{
       display: grid;
-      grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) auto;
-      gap: 12px;
-      align-items: center;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px 12px;
+      align-items: start;
       padding: 12px 14px;
       border-radius: 12px;
       background: #f8fafc;
@@ -874,19 +971,25 @@ def _render_html(payload: dict[str, Any]) -> str:
       font-size: .82rem;
       color: var(--ink);
       word-break: break-all;
+      grid-column: 1 / 2;
     }}
     .ex .desc {{
       color: var(--muted);
       font-size: .82rem;
       line-height: 1.4;
+      grid-column: 1 / 2;
     }}
     .ex .copy {{
+      grid-column: 2 / 3;
+      grid-row: 1 / 3;
+      align-self: center;
       font-size: .72rem;
       font-weight: 600;
       color: var(--teal);
       letter-spacing: .04em;
       text-transform: uppercase;
     }}
+    body.drawer-open {{ overflow: hidden; }}
 
     .tips {{
       list-style: none;
@@ -956,12 +1059,12 @@ def _render_html(payload: dict[str, Any]) -> str:
         padding: 7px 10px;
         font-size: .8rem;
       }}
-      .nav .cmd, .nav-label {{ display: none; }}
+      .nav-label {{ display: none; }}
       .top-inner {{ padding: 12px 16px; }}
       .tagline {{ display: none; }}
       .steps {{ grid-template-columns: 1fr; }}
       .cmd-grid {{ grid-template-columns: 1fr; }}
-      .ex {{ grid-template-columns: 1fr; }}
+      .drawer {{ width: 100%; }}
       .ex .copy {{ display: none; }}
     }}
   </style>
@@ -988,7 +1091,6 @@ def _render_html(payload: dict[str, Any]) -> str:
         <a href="#flow" data-i="nav_flow"></a>
         <a href="#setup" data-i="nav_setup"></a>
         <a href="#commands" data-i="nav_commands"></a>
-        <div id="cmd-nav"></div>
         <a href="#tips" data-i="nav_tips"></a>
       </nav>
     </aside>
@@ -1036,12 +1138,6 @@ gai config --api-key sk-xxx --base-url https://api.deepseek.com/v1 --model deeps
         <h2 class="sec-head" data-i="commands_h"></h2>
         <p class="hint" data-i="commands_hint"></p>
         <div class="cmd-grid" id="cmd-grid"></div>
-        <div class="detail" id="cmd-detail">
-          <h2 id="detail-title"></h2>
-          <p class="blurb" id="detail-blurb"></p>
-          <h3 data-i="examples_h"></h3>
-          <div class="examples" id="detail-examples"></div>
-        </div>
       </section>
 
       <section id="tips">
@@ -1053,13 +1149,32 @@ gai config --api-key sk-xxx --base-url https://api.deepseek.com/v1 --model deeps
     </main>
   </div>
 
+  <div class="drawer-root" id="drawer-root" aria-hidden="true">
+    <div class="drawer-mask" id="drawer-mask"></div>
+    <aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="detail-title">
+      <div class="drawer-head">
+        <h2 id="detail-title"></h2>
+        <button type="button" class="drawer-close" id="drawer-close" data-i="drawer_close">关闭</button>
+      </div>
+      <p class="drawer-switch-label" data-i="drawer_switch"></p>
+      <div class="drawer-switch" id="drawer-switch"></div>
+      <div class="drawer-body">
+        <p class="blurb" id="detail-blurb"></p>
+        <h3 data-i="examples_h"></h3>
+        <div class="examples" id="detail-examples"></div>
+      </div>
+    </aside>
+  </div>
+
   <div class="toast" id="toast"></div>
   <script id="guide-data" type="application/json">{data_json}</script>
   <script>
 (function () {{
   const DATA = JSON.parse(document.getElementById('guide-data').textContent);
   let lang = DATA.initialLang === 'cn' ? 'cn' : 'en';
+  let openId = '';
   const toast = document.getElementById('toast');
+  const drawerRoot = document.getElementById('drawer-root');
   let toastTimer = null;
   const copyLabel = {{ cn: '复制', en: 'Copy' }};
 
@@ -1091,6 +1206,14 @@ gai config --api-key sk-xxx --base-url https://api.deepseek.com/v1 --model deeps
       return {{ cmd: parts[0].trim(), desc: parts.slice(1).join(' — ').trim() }};
     }}
     return {{ cmd: step, desc: '' }};
+  }}
+
+  function closeDrawer() {{
+    drawerRoot.classList.remove('open');
+    drawerRoot.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('drawer-open');
+    openId = '';
+    document.querySelectorAll('.cmd-card').forEach((el) => el.classList.remove('active'));
   }}
 
   function setLang(next) {{
@@ -1130,20 +1253,30 @@ gai config --api-key sk-xxx --base-url https://api.deepseek.com/v1 --model deeps
     }});
 
     renderCommands();
-    const openId = document.getElementById('cmd-detail').dataset.openId;
-    if (openId) openCommand(openId, false);
+    renderDrawerSwitch();
+    if (openId) openCommand(openId);
   }}
 
   function cmdLocale(cmd) {{
     return lang === 'cn' ? cmd.cn : cmd.en;
   }}
 
+  function renderDrawerSwitch() {{
+    const box = document.getElementById('drawer-switch');
+    box.innerHTML = '';
+    DATA.commands.forEach((cmd) => {{
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = cmd.name;
+      btn.className = openId === cmd.id ? 'active' : '';
+      btn.addEventListener('click', () => openCommand(cmd.id));
+      box.appendChild(btn);
+    }});
+  }}
+
   function renderCommands() {{
     const grid = document.getElementById('cmd-grid');
-    const nav = document.getElementById('cmd-nav');
-    const openId = document.getElementById('cmd-detail').dataset.openId;
     grid.innerHTML = '';
-    nav.innerHTML = '';
     DATA.commands.forEach((cmd) => {{
       const loc = cmdLocale(cmd);
       const card = document.createElement('button');
@@ -1155,30 +1288,24 @@ gai config --api-key sk-xxx --base-url https://api.deepseek.com/v1 --model deeps
         '<p class="blurb"></p>';
       card.querySelector('.title').textContent = loc.title;
       card.querySelector('.blurb').textContent = loc.blurb;
-      card.addEventListener('click', () => openCommand(cmd.id, true));
+      card.addEventListener('click', () => openCommand(cmd.id));
       grid.appendChild(card);
-
-      const a = document.createElement('a');
-      a.href = '#' + cmd.id;
-      a.className = 'cmd';
-      a.textContent = cmd.name;
-      a.addEventListener('click', (e) => {{
-        e.preventDefault();
-        openCommand(cmd.id, true);
-      }});
-      nav.appendChild(a);
     }});
   }}
 
-  function openCommand(id, scroll) {{
+  function openCommand(id) {{
     const cmd = DATA.commands.find((c) => c.id === id);
     if (!cmd) return;
     const loc = cmdLocale(cmd);
-    const detail = document.getElementById('cmd-detail');
-    detail.classList.add('open');
-    detail.dataset.openId = id;
+    openId = id;
+    drawerRoot.classList.add('open');
+    drawerRoot.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('drawer-open');
     document.querySelectorAll('.cmd-card').forEach((el, i) => {{
       el.classList.toggle('active', DATA.commands[i] && DATA.commands[i].id === id);
+    }});
+    document.querySelectorAll('#drawer-switch button').forEach((btn) => {{
+      btn.classList.toggle('active', btn.textContent === cmd.name);
     }});
     document.getElementById('detail-title').textContent = 'gai ' + cmd.name + ' — ' + loc.title;
     document.getElementById('detail-blurb').textContent = loc.blurb;
@@ -1198,11 +1325,15 @@ gai config --api-key sk-xxx --base-url https://api.deepseek.com/v1 --model deeps
       }});
       box.appendChild(row);
     }});
-    if (scroll) detail.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
   }}
 
   document.getElementById('btn-cn').addEventListener('click', () => setLang('cn'));
   document.getElementById('btn-en').addEventListener('click', () => setLang('en'));
+  document.getElementById('drawer-close').addEventListener('click', closeDrawer);
+  document.getElementById('drawer-mask').addEventListener('click', closeDrawer);
+  document.addEventListener('keydown', (e) => {{
+    if (e.key === 'Escape' && drawerRoot.classList.contains('open')) closeDrawer();
+  }});
   setLang(lang);
 }})();
   </script>
