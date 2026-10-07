@@ -22,7 +22,14 @@ from gai.command_history import (
     maybe_record_command,
 )
 from gai.completion_cmd import completion_app
-from gai.config import CONFIG_FILE, load_settings, save_settings, settings_summary
+from gai.config import (
+    CONFIG_FILE,
+    list_profiles,
+    load_settings,
+    profiles_summary,
+    save_settings,
+    settings_summary,
+)
 from gai.devflow import (
     normalize_path_input,
     stageable_paths_summary,
@@ -2135,6 +2142,31 @@ def config_cmd(
             "显示当前生效配置（密钥已掩码）。",
         ),
     ),
+    list_profiles_flag: bool = typer.Option(
+        False,
+        "--list",
+        "-l",
+        help=H(
+            "List all LLM profiles from env and config (secrets masked).",
+            "列出环境变量与配置文件中的全部 LLM 配置档（密钥已掩码）。",
+        ),
+    ),
+    use_profile: Optional[str] = typer.Option(
+        None,
+        "--use",
+        help=H(
+            "Switch active profile written to config (e.g. 0, 1, deepseek).",
+            "切换并写入当前配置档（如 0、1、deepseek）。",
+        ),
+    ),
+    profile_name: Optional[str] = typer.Option(
+        None,
+        "--name",
+        help=H(
+            "Target profile id when saving --api-key/--base-url/--model.",
+            "与 --api-key/--base-url/--model 联用时写入指定配置档。",
+        ),
+    ),
     api_key: Optional[str] = typer.Option(
         None,
         "--api-key",
@@ -2192,27 +2224,72 @@ def config_cmd(
             "timeout": timeout,
             "max_diff_chars": max_diff_chars,
         }
-        if any(v is not None for v in updates.values()):
+        has_updates = any(v is not None for v in updates.values())
+        if use_profile is not None and not str(use_profile).strip():
+            console.print(
+                "[red]错误：--use 需要配置档名称。[/red]"
+                if cn
+                else "[red]Error: --use requires a profile name.[/red]"
+            )
+            raise typer.Exit(code=2)
+        if profile_name is not None and not str(profile_name).strip():
+            console.print(
+                "[red]错误：--name 需要配置档名称。[/red]"
+                if cn
+                else "[red]Error: --name requires a profile name.[/red]"
+            )
+            raise typer.Exit(code=2)
+        if profile_name and not has_updates and use_profile is None:
+            console.print(
+                "[red]错误：--name 需与 --api-key/--base-url/--model 等一起使用。[/red]"
+                if cn
+                else "[red]Error: --name must be used with --api-key/--base-url/--model.[/red]"
+            )
+            raise typer.Exit(code=2)
+
+        if has_updates or use_profile is not None:
             path = save_settings(
                 api_key=api_key,
                 base_url=base_url,
                 model=model,
                 timeout=timeout,
                 max_diff_chars=max_diff_chars,
+                profile=profile_name.strip() if profile_name else None,
+                set_current=use_profile.strip() if use_profile else None,
             )
             console.print(f"[green]Saved[/green] {path}")
+            if use_profile is not None:
+                console.print(
+                    f"[green]当前配置档 → {use_profile.strip()}[/green]"
+                    if cn
+                    else f"[green]Active profile → {use_profile.strip()}[/green]"
+                )
 
-        if show or all(v is None for v in updates.values()):
+        if list_profiles_flag:
+            rows = profiles_summary(chinese=cn)
+            if not rows:
+                console.print(
+                    "（尚无配置档）" if cn else "(no profiles yet)"
+                )
+            else:
+                console.print(json.dumps(rows, indent=2, ensure_ascii=False))
+            # Avoid dumping --show by default when user only asked for --list.
+            if not show and not has_updates and use_profile is None:
+                return
+
+        if show or (not list_profiles_flag and not has_updates and use_profile is None):
             settings = load_settings()
             summary = settings_summary(settings)
             console.print(json.dumps(summary, indent=2, ensure_ascii=False))
-            if not CONFIG_FILE.is_file() and not settings.api_key:
+            if not CONFIG_FILE.is_file() and not settings.api_key and not list_profiles():
                 tip = (
-                    "\n[dim]提示：可通过环境变量 GAI_API_KEY / OPENAI_API_KEY "
-                    "或 `gai config --api-key <key>` 设置密钥。[/dim]"
+                    "\n[dim]提示：可通过 GAI_API_KEY（档 0）/ GAI_API_KEY1（档 1）… "
+                    "或 `gai config --api-key <key>` 设置密钥；"
+                    "`gai config --list` 查看全部配置档。[/dim]"
                     if cn
-                    else "\n[dim]Tip: set key via env GAI_API_KEY / OPENAI_API_KEY "
-                    "or `gai config --api-key <key>`.[/dim]"
+                    else "\n[dim]Tip: set GAI_API_KEY (profile 0) / GAI_API_KEY1 "
+                    "(profile 1)… or `gai config --api-key <key>`; "
+                    "`gai config --list` lists profiles.[/dim]"
                 )
                 console.print(tip)
     finally:

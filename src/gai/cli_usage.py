@@ -100,7 +100,14 @@ _COMMAND_EXAMPLES: dict[str, tuple[tuple[str, str, str], ...]] = {
     ),
     "config": (
         ("gai config --show --cn", "Show effective config (secrets masked)", "查看当前生效配置（密钥已掩码）"),
+        ("gai config --list --cn", "List all LLM profiles from env and file", "列出环境变量与文件中的全部配置档"),
+        ("gai config --use 1 --cn", "Switch active profile to 1", "切换当前配置档为 1"),
         ("gai config --api-key <key>", "Save API key to ~/.gai/config.toml", "把 API Key 写入 ~/.gai/config.toml"),
+        (
+            "gai config --api-key <key> --name 1 --base-url <url> --model <name>",
+            "Save credentials into profile 1",
+            "把密钥写入配置档 1",
+        ),
     ),
     "completion": (
         (

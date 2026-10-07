@@ -76,32 +76,43 @@ Remove-Item Env:_GAI_COMPLETE, Env:_TYPER_COMPLETE_ARGS, Env:_TYPER_COMPLETE_WOR
 
 ### 环境变量（推荐）
 
+支持**多套 API Key**：未编号变量为配置档 **`0`**；编号 `1`、`2`… 为其它档。
+
 | 变量 | 含义 | 默认 |
 |------|------|------|
-| `GAI_API_KEY` 或 `OPENAI_API_KEY` | API Key | （调用大模型时必填） |
-| `GAI_BASE_URL` 或 `OPENAI_BASE_URL` | API Base URL | `https://api.openai.com/v1` |
-| `GAI_MODEL` | 模型名 | `gpt-4o-mini` |
-| `GAI_TIMEOUT` | 请求超时（秒） | `60` |
-| `GAI_MAX_DIFF_CHARS` | 送入模型的文本最大字符数 | `80000` |
+| `GAI_API_KEY` / `OPENAI_API_KEY` | 配置档 **0** 的 API Key | （调用大模型时必填） |
+| `GAI_BASE_URL` / `OPENAI_BASE_URL` | 配置档 **0** 的 Base URL | `https://api.openai.com/v1` |
+| `GAI_MODEL` | 配置档 **0** 的模型名 | `gpt-4o-mini` |
+| `GAI_API_KEY1`、`GAI_BASE_URL1`、`GAI_MODEL1`… | 配置档 **1**、**2**…（数字后缀） | — |
+| `GAI_PROFILE` | 当前使用的配置档 id（覆盖文件中的 `current`） | `0` |
+| `GAI_TIMEOUT` | 请求超时（秒，全局） | `60` |
+| `GAI_MAX_DIFF_CHARS` | 送入模型的文本最大字符数（全局） | `80000` |
 
 Windows：在「系统属性 → 环境变量 → 用户变量」中设置。修改后需**重新打开**终端 / IDE。
 
 PowerShell 临时设置（仅当前窗口）：
 
 ```powershell
-$env:GAI_API_KEY = "sk-xxx"
+$env:GAI_API_KEY = "sk-xxx"                          # 档 0
 $env:GAI_BASE_URL = "https://api.deepseek.com/v1"
 $env:GAI_MODEL = "deepseek-chat"
+$env:GAI_API_KEY1 = "sk-yyy"                         # 档 1
+$env:GAI_BASE_URL1 = "https://api.openai.com/v1"
+$env:GAI_MODEL1 = "gpt-4o-mini"
+$env:GAI_PROFILE = "1"                               # 本次会话用档 1
 ```
 
 ### 配置文件
 
 ```bash
 gai config --api-key sk-xxx --base-url https://api.deepseek.com/v1 --model deepseek-chat
-gai config --show --cn
+gai config --api-key sk-yyy --name 1 --base-url https://api.openai.com/v1 --model gpt-4o-mini
+gai config --list --cn          # 列出全部配置档（密钥已掩码）
+gai config --use 1 --cn         # 切换当前配置档（写入 llm.current）
+gai config --show --cn          # 当前生效配置（含 profile）
 ```
 
-写入：`~/.gai/config.toml`。
+写入：`~/.gai/config.toml`（`[llm.profiles."<id>"]`）。旧版扁平 `api_key` 字段仍可作为档 `0` 读取。
 
 ## 日常用法
 
@@ -465,11 +476,14 @@ gai balance
 
 ### `gai config`
 
-查看或写入 `~/.gai/config.toml`。
+查看或写入 `~/.gai/config.toml`；支持多配置档列出与切换。
 
 | 参数 | 说明 |
 |------|------|
-| `--show` | 显示当前生效配置（密钥已掩码） |
+| `--show` | 显示当前生效配置（含 `profile`，密钥已掩码） |
+| `--list` / `-l` | 列出环境变量与文件中的全部配置档 |
+| `--use <id>` | 切换当前配置档（写入 `llm.current`） |
+| `--name <id>` | 与 `--api-key` 等联用，写入指定配置档 |
 | `--api-key` | 设置 API Key |
 | `--base-url` | 设置 API Base URL |
 | `--model` | 设置模型名 |

@@ -238,8 +238,9 @@ def _i18n() -> dict[str, dict[str, str]]:
             "setup_install": "安装（开发模式）",
             "setup_config": "配置优先级：环境变量 > ~/.gai/config.toml > 默认值",
             "setup_keys": (
-                "常用环境变量：GAI_API_KEY / OPENAI_API_KEY、GAI_BASE_URL、GAI_MODEL。"
-                "也可用 gai config --api-key … 写入配置文件。"
+                "多配置档：GAI_API_KEY（档 0）、GAI_API_KEY1（档 1）…；"
+                "GAI_PROFILE 或 gai config --use 切换；gai config --list 查看。"
+                "也可用 gai config --api-key … [--name <id>] 写入配置文件。"
             ),
             "setup_cn": "几乎所有命令支持 --cn：中文运行时文案；与 -h 联用显示中文帮助。",
             "commands_h": "命令一览",
@@ -296,8 +297,9 @@ def _i18n() -> dict[str, dict[str, str]]:
             "setup_install": "Install (editable)",
             "setup_config": "Config priority: env vars > ~/.gai/config.toml > defaults",
             "setup_keys": (
-                "Common env vars: GAI_API_KEY / OPENAI_API_KEY, GAI_BASE_URL, GAI_MODEL. "
-                "Or save via gai config --api-key …"
+                "Multi-profile: GAI_API_KEY (profile 0), GAI_API_KEY1 (profile 1)…; "
+                "switch with GAI_PROFILE or gai config --use; list with gai config --list. "
+                "Or save via gai config --api-key … [--name <id>]."
             ),
             "setup_cn": (
                 "Most commands accept --cn for Chinese runtime text; "
@@ -1147,7 +1149,9 @@ def _render_html(payload: dict[str, Any]) -> str:
             <div class="terminal-bar"><i></i><i></i><i></i></div>
             <pre class="install">python -m pip install -e ".[dev]"
 gai --version
-gai config --api-key sk-xxx --base-url https://api.deepseek.com/v1 --model deepseek-chat</pre>
+gai config --api-key sk-xxx --base-url https://api.deepseek.com/v1 --model deepseek-chat
+gai config --list --cn
+gai config --use 0 --cn</pre>
           </div>
           <div class="setup-notes">
             <div class="note">
