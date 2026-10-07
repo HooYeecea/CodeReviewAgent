@@ -16,10 +16,13 @@ from gai.llm.balance import (
 from gai.llm.client import LLMError
 
 
-def test_detect_deepseek_and_siliconflow():
+def test_detect_supported_providers():
     assert detect_provider("https://api.deepseek.com/v1").id == "deepseek"
     assert detect_provider("https://api.deepseek.com/v1").supports_balance is True
     assert detect_provider("https://api.siliconflow.cn/v1").id == "siliconflow"
+    assert detect_provider("https://api.moonshot.cn/v1").id == "moonshot"
+    assert detect_provider("https://api.moonshot.cn/v1").supports_balance is True
+    assert detect_provider("https://openrouter.ai/api/v1").id == "openrouter"
     assert detect_provider("https://api.openai.com/v1").supports_balance is False
 
 
@@ -41,7 +44,8 @@ def test_unsupported_provider_message_cn():
     text = format_balance_result(result, chinese=True)
     assert "OpenAI" in text
     assert "gpt-4o-mini" in text
-    assert "不支持查询余额" in text
+    assert "未提供" in text or "余额查询" in text
+    assert "DeepSeek" in text
 
 
 def test_deepseek_balance_ok(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -137,3 +141,88 @@ def test_siliconflow_balance_ok(monkeypatch: pytest.MonkeyPatch) -> None:
     text = format_balance_result(result, chinese=True)
     assert "硅基流动" in text
     assert "88.00" in text
+
+
+def test_moonshot_balance_ok(monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = {
+        "code": 0,
+        "status": True,
+        "data": {
+            "available_balance": 49.5,
+            "voucher_balance": 10.0,
+            "cash_balance": 39.5,
+        },
+    }
+
+    class _FakeResponse:
+        status_code = 200
+        text = ""
+
+        def json(self) -> dict[str, Any]:
+            return payload
+
+    class _FakeClient:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def __enter__(self) -> _FakeClient:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def get(self, url: str, headers: dict[str, str] | None = None) -> _FakeResponse:
+            assert url.endswith("/users/me/balance")
+            return _FakeResponse()
+
+    monkeypatch.setattr(httpx, "Client", _FakeClient)
+    settings = Settings(
+        api_key="sk-test",
+        base_url="https://api.moonshot.cn/v1",
+        model="moonshot-v1-8k",
+    )
+    result = fetch_balance(settings)
+    assert result.supported is True
+    assert result.available is True
+    assert result.items[0].total == "49.5"
+    text = format_balance_result(result, chinese=True)
+    assert "Moonshot" in text or "月之暗面" in text
+    assert "49.5" in text
+
+
+def test_openrouter_balance_ok(monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = {"data": {"total_credits": 100.5, "total_usage": 25.75}}
+
+    class _FakeResponse:
+        status_code = 200
+        text = ""
+
+        def json(self) -> dict[str, Any]:
+            return payload
+
+    class _FakeClient:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def __enter__(self) -> _FakeClient:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def get(self, url: str, headers: dict[str, str] | None = None) -> _FakeResponse:
+            assert url.endswith("/credits")
+            return _FakeResponse()
+
+    monkeypatch.setattr(httpx, "Client", _FakeClient)
+    settings = Settings(
+        api_key="sk-or-test",
+        base_url="https://openrouter.ai/api/v1",
+        model="openai/gpt-4o-mini",
+    )
+    result = fetch_balance(settings)
+    assert result.supported is True
+    assert result.items[0].remaining == "74.75"
+    text = format_balance_result(result, chinese=True)
+    assert "OpenRouter" in text
+    assert "74.75" in text
