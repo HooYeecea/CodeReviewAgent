@@ -276,6 +276,86 @@ def short_status(cwd: Path | None = None) -> str:
     return result.stdout.strip()
 
 
+def porcelain_status(cwd: Path | None = None) -> str:
+    """Raw ``git status --porcelain`` (includes untracked)."""
+    ensure_repo(cwd)
+    result = run_git("status", "--porcelain", "-u", cwd=cwd)
+    if result.returncode != 0:
+        raise GitError(result.stderr.strip() or "git status --porcelain failed")
+    return result.stdout
+
+
+@dataclass(frozen=True)
+class ChangeEntry:
+    """One path from ``git status --porcelain``."""
+
+    path: str
+    index: str
+    worktree: str
+
+    @property
+    def staged(self) -> bool:
+        return bool(self.index.strip()) and self.index != "?"
+
+    @property
+    def unstaged(self) -> bool:
+        return bool(self.worktree.strip()) and self.worktree != "?"
+
+    @property
+    def untracked(self) -> bool:
+        return self.index == "?" and self.worktree == "?"
+
+
+def list_change_entries(cwd: Path | None = None) -> list[ChangeEntry]:
+    """Parse porcelain status into path entries (rename uses the new path)."""
+    raw = porcelain_status(cwd)
+    entries: list[ChangeEntry] = []
+    for line in raw.splitlines():
+        if not line:
+            continue
+        if len(line) < 3:
+            continue
+        index, worktree, rest = line[0], line[1], line[2:]
+        path = rest.lstrip()
+        # Rename / copy in porcelain: "R  old -> new"
+        if " -> " in path and (index in {"R", "C"} or worktree in {"R", "C"}):
+            path = path.split(" -> ", 1)[1].strip()
+        path = path.strip().strip('"')
+        if not path:
+            continue
+        entries.append(ChangeEntry(path=path, index=index, worktree=worktree))
+    return entries
+
+
+def get_unstaged_diff(
+    cwd: Path | None = None,
+    *,
+    ignore_patterns: tuple[str, ...] | list[str] | None = None,
+    max_chars: int | None = None,
+) -> tuple[str, bool]:
+    """Return unstaged worktree diff (+ untracked file list), optionally truncated."""
+    ensure_repo(cwd)
+    result = run_git("diff", "--no-color", cwd=cwd)
+    if result.returncode != 0:
+        raise GitError(result.stderr.strip() or "failed to get unstaged diff")
+    diff = result.stdout or ""
+    untracked = run_git("ls-files", "--others", "--exclude-standard", cwd=cwd)
+    if untracked.returncode == 0 and untracked.stdout.strip():
+        names = [ln.strip() for ln in untracked.stdout.splitlines() if ln.strip()]
+        if names:
+            diff += "\n\n# Untracked files:\n" + "\n".join(f"+ {n}" for n in names) + "\n"
+    if ignore_patterns:
+        diff = filter_diff_by_ignore(diff, ignore_patterns)
+    truncated = False
+    if max_chars is not None and len(diff) > max_chars:
+        diff = (
+            diff[:max_chars]
+            + "\n\n... [diff truncated by gai due to size limit] ...\n"
+        )
+        truncated = True
+    return diff, truncated
+
+
 def is_worktree_dirty(cwd: Path | None = None) -> bool:
     """True when there are uncommitted (staged or unstaged) changes."""
     return bool(short_status(cwd))

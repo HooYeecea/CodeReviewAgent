@@ -37,6 +37,23 @@ _COMMAND_EXAMPLES: dict[str, tuple[tuple[str, str, str], ...]] = {
             "使用指定信息提交，跳过 AI",
         ),
     ),
+    "devflow": (
+        (
+            "gai devflow --cn",
+            "Guided add→review→commit→push; UI in Chinese, pick EN/CN commit message",
+            "引导式 add→review→commit→push；界面中文，提交词中英自选",
+        ),
+        (
+            "gai devflow",
+            "Same flow with English UI; at add step use y / . / n (.=stage all)",
+            "同上流程，英文界面；暂存步骤可用 y / . / n（.=全部暂存）",
+        ),
+        (
+            "gai devflow --cn -r origin",
+            "Run the flow and push to origin at the end",
+            "跑完整流程，最后推送到 origin",
+        ),
+    ),
     "push": (
         ("gai push --cn", "Push current branch (checks there is something to push)", "推送当前分支（先检查是否有可推送内容）"),
         ("gai push -y --cn", "Push without interactive confirmation", "推送并跳过交互确认"),

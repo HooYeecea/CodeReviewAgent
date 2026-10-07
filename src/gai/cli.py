@@ -21,9 +21,14 @@ from gai.command_history import (
     load_command_records,
     maybe_record_command,
 )
-from gai.history_report import history_report_path, write_history_report
 from gai.completion_cmd import completion_app
 from gai.config import CONFIG_FILE, load_settings, save_settings, settings_summary
+from gai.devflow import (
+    normalize_path_input,
+    stageable_paths_summary,
+    suggest_bilingual_messages,
+    suggest_stage_paths,
+)
 from gai.errors import PeriodError, format_cli_error
 from gai.git_ops import (
     GitError,
@@ -36,6 +41,7 @@ from gai.git_ops import (
     has_staged_changes,
     is_worktree_dirty,
     last_commit_subject,
+    list_change_entries,
     plan_push,
     pull as git_pull,
     push as git_push,
@@ -44,6 +50,7 @@ from gai.git_ops import (
     unadd as git_unadd,
     uncommit as git_uncommit,
 )
+from gai.history_report import history_report_path, write_history_report
 from gai.help_i18n import H
 from gai.llm.balance import fetch_balance, format_balance_result
 from gai.llm.client import LLMError
@@ -728,6 +735,282 @@ def commit_cmd(
         raise typer.Exit(code=130) from None
     finally:
         _print_footer(trace=trace, chinese=cn)
+
+
+@app.command(
+    "devflow",
+    help=H(
+        "Guided flow: AI stage suggest → review → bilingual commit message → push.",
+        "引导式流程：AI 暂存建议 → 审查 → 中英提交词自选 → 推送。",
+    ),
+)
+def devflow_cmd(
+    cn: bool = typer.Option(
+        False,
+        "--cn",
+        help=H(
+            "Use Simplified Chinese for UI/review text. Commit still offers EN+CN choices.",
+            "界面与审查文案用简体中文；提交词仍提供中英两种供选择。",
+        ),
+    ),
+    remote: Optional[str] = typer.Option(
+        None,
+        "--remote",
+        "-r",
+        help=H(
+            "Remote name for the final push step (default: origin if present).",
+            "最后一步 push 的远程名（默认优先 origin）。",
+        ),
+    ),
+    trace: bool = typer.Option(
+        False,
+        "--trace",
+        "-t",
+        help=_TRACE_OPT_HELP,
+    ),
+) -> None:
+    """Run add → review → commit → push with interactive decisions at each step."""
+    _start_trace(trace, action="devflow")
+    try:
+        _run_devflow(chinese=cn, remote=remote)
+    except (GitError, LLMError, RuntimeError) as exc:
+        _print_error(exc, chinese=cn, trace=trace)
+        raise typer.Exit(code=1) from exc
+    except typer.Exit:
+        raise
+    except KeyboardInterrupt:
+        console.print("\n已取消。" if cn else "\nAborted.")
+        raise typer.Exit(code=130) from None
+    finally:
+        _print_footer(trace=trace, chinese=cn)
+
+
+def _run_devflow(*, chinese: bool, remote: str | None) -> None:
+    """Interactive add → review → commit → push pipeline."""
+    step = (
+        (lambda n, title: console.print(f"\n[bold cyan]━━ {n}. {title} ━━[/bold cyan]"))
+        if chinese
+        else (lambda n, title: console.print(f"\n[bold cyan]━━ {n}. {title} ━━[/bold cyan]"))
+    )
+
+    # ----- 1) ADD (AI suggest) -----
+    step(1, "暂存 (add)" if chinese else "Stage (add)")
+    if not is_worktree_dirty():
+        tip = (
+            "工作区干净，没有可暂存或可提交的变更。"
+            if chinese
+            else "Working tree is clean; nothing to stage or commit."
+        )
+        err_console.print(f"[yellow]{tip}[/yellow]")
+        raise typer.Exit(code=1)
+
+    entries = list_change_entries()
+    groups = stageable_paths_summary(entries)
+    status = short_status()
+    if status:
+        console.print("[dim]" + status + "[/dim]")
+
+    need_stage = bool(groups["untracked"] or groups["unstaged"])
+    if need_stage:
+        status_text = (
+            "正在让 AI 建议暂存路径..."
+            if chinese
+            else "Asking AI which paths to stage..."
+        )
+        with console.status(f"[bold]{status_text}[/bold]"):
+            suggestion = suggest_stage_paths(chinese=chinese)
+
+        reason_label = "建议理由：" if chinese else "Why:"
+        paths_label = "建议暂存：" if chinese else "Suggested paths:"
+        console.print(f"[bold]{paths_label}[/bold] {' '.join(suggestion.paths)}")
+        if suggestion.reason:
+            console.print(f"[dim]{reason_label} {suggestion.reason}[/dim]")
+        hint = (
+            "快捷键：y=采纳 AI 建议 · .=全部暂存 · n=手输路径"
+            if chinese
+            else "Shortcuts: y=accept AI · .=stage all · n=edit paths"
+        )
+        console.print(f"[dim]{hint}[/dim]")
+
+        choice = Prompt.ask(
+            (
+                "暂存方式 [y / . / n]"
+                if chinese
+                else "Stage how? [y / . / n]"
+            ),
+            default="y",
+        ).strip().lower()
+        if choice in {"y", "yes"}:
+            targets = suggestion.paths
+        elif choice in {".", "all", "*"}:
+            targets = ["."]
+        elif choice in {"n", "no", "e", "edit"}:
+            manual = Prompt.ask(
+                (
+                    "请输入要暂存的路径（空格/逗号分隔；输入 . 表示全部）"
+                    if chinese
+                    else "Paths to stage (space/comma separated; . for all)"
+                ),
+                default=" ".join(suggestion.paths),
+            ).strip()
+            targets = normalize_path_input(manual) or suggestion.paths
+        else:
+            # Allow typing paths / "." directly at the first prompt.
+            targets = normalize_path_input(choice) or suggestion.paths
+        if not targets:
+            tip = "未选择任何路径，已取消。" if chinese else "No paths selected; aborted."
+            err_console.print(f"[red]{tip}[/red]")
+            raise typer.Exit(code=1)
+
+        git_add(targets)
+        msg = (
+            f"已暂存：{' '.join(targets)}"
+            if chinese
+            else f"Staged: {' '.join(targets)}"
+        )
+        console.print(f"[green]{msg}[/green]")
+        status = short_status()
+        if status:
+            console.print("[dim]" + status + "[/dim]")
+    else:
+        tip = (
+            "没有未暂存变更，将使用当前暂存区继续。"
+            if chinese
+            else "Nothing new to stage; continuing with the current index."
+        )
+        console.print(f"[dim]{tip}[/dim]")
+
+    if not has_staged_changes():
+        tip = (
+            "暂存区仍为空，无法继续审查/提交。"
+            if chinese
+            else "Nothing staged; cannot continue to review/commit."
+        )
+        err_console.print(f"[red]{tip}[/red]")
+        raise typer.Exit(code=1)
+
+    # ----- 2) REVIEW -----
+    step(2, "代码审查 (review)" if chinese else "Code review")
+    if chinese:
+        review_cn = True
+    else:
+        lang = Prompt.ask(
+            "Review language [cn/en]",
+            default="en",
+        ).strip().lower()
+        review_cn = lang in {"cn", "zh", "chinese", "中文"}
+
+    status_text = "正在调用大模型审查..." if chinese else "Calling LLM for code review..."
+    with console.status(f"[bold]{status_text}[/bold]"):
+        result = run_review(review_only=True, chinese=review_cn)
+    render_review(result, console, chinese=review_cn)
+
+    cont = Confirm.ask(
+        "审查完成，继续选择提交信息？"
+        if chinese
+        else "Review done. Continue to commit message?",
+        default=True,
+    )
+    if not cont:
+        console.print("已取消。" if chinese else "Aborted.")
+        raise typer.Exit(code=0)
+
+    # ----- 3) COMMIT (bilingual choice) -----
+    step(3, "提交 (commit)" if chinese else "Commit")
+    status_text = (
+        "正在生成中英提交信息..."
+        if chinese
+        else "Generating English + Chinese commit messages..."
+    )
+    with console.status(f"[bold]{status_text}[/bold]"):
+        messages = suggest_bilingual_messages()
+
+    options: list[tuple[str, str]] = []
+    if messages.message_en:
+        options.append(("en", messages.message_en))
+    if messages.message_cn:
+        options.append(("cn", messages.message_cn))
+    if not options:
+        tip = (
+            "未能解析中英提交信息，请手动输入。"
+            if chinese
+            else "Could not parse bilingual messages; enter one manually."
+        )
+        err_console.print(f"[yellow]{tip}[/yellow]")
+        commit_message = Prompt.ask(
+            "请输入提交信息" if chinese else "Enter commit message"
+        ).strip()
+    else:
+        console.print(
+            "[bold]可选提交信息：[/bold]" if chinese else "[bold]Commit message choices:[/bold]"
+        )
+        for idx, (lang, text) in enumerate(options, start=1):
+            tag = "英文" if lang == "en" else "中文"
+            if not chinese:
+                tag = "EN" if lang == "en" else "CN"
+            console.print(f"  [cyan]{idx}[/cyan]) [{tag}] {text}")
+        custom_n = len(options) + 1
+        console.print(
+            f"  [cyan]{custom_n}[/cyan]) "
+            + ("手动输入" if chinese else "Type a custom message")
+        )
+        default_choice = "1"
+        choice = Prompt.ask(
+            "请选择" if chinese else "Choose",
+            default=default_choice,
+        ).strip()
+        commit_message = ""
+        if choice.isdigit():
+            n = int(choice)
+            if 1 <= n <= len(options):
+                commit_message = options[n - 1][1]
+            elif n == custom_n:
+                commit_message = Prompt.ask(
+                    "请输入提交信息" if chinese else "Enter commit message"
+                ).strip()
+        if not commit_message:
+            # Also allow typing the message directly
+            if choice and not choice.isdigit():
+                commit_message = choice
+            else:
+                tip = "无效选择。" if chinese else "Invalid choice."
+                err_console.print(f"[red]{tip}[/red]")
+                raise typer.Exit(code=1)
+
+    if not commit_message:
+        tip = "提交信息为空，已取消。" if chinese else "Empty commit message; aborted."
+        err_console.print(f"[red]{tip}[/red]")
+        raise typer.Exit(code=1)
+
+    label = "将使用的提交信息：" if chinese else "Commit message to use:"
+    console.print(f"[bold]{label}[/bold] {commit_message}")
+    if not Confirm.ask(
+        "确认提交？" if chinese else "Confirm commit?",
+        default=True,
+    ):
+        console.print("已取消提交。" if chinese else "Commit aborted.")
+        raise typer.Exit(code=0)
+
+    git_commit(commit_message)
+    console.print(
+        ("[green]已提交：[/green] " if chinese else "[green]Committed:[/green] ")
+        + commit_message
+    )
+
+    # ----- 4) PUSH -----
+    step(4, "推送 (push)" if chinese else "Push")
+    if not Confirm.ask(
+        "确认推送到远程？" if chinese else "Push to remote?",
+        default=True,
+    ):
+        console.print(
+            "已跳过推送。提交已保留在本地。"
+            if chinese
+            else "Push skipped. Commit kept locally."
+        )
+        raise typer.Exit(code=0)
+
+    _do_push(remote=remote, yes=True, chinese=chinese)
 
 
 def _confirm_and_commit(

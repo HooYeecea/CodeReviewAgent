@@ -122,6 +122,7 @@ gai history --cn          # 查看本地 gai 命令执行记录
 gai history --serve --cn  # 同步命令执行报告并以本地 HTTP 打开
 gai guide --cn --open     # 生成 .gai/guide.html 并用浏览器打开
 gai usage --serve --cn    # 同步用量报告并以本地 HTTP 打开（刷新更稳）
+gai devflow --cn          # 引导式：AI 暂存建议 → 审查 → 中英提交词 → 推送
 gai add --cn -t           # 暂存并打印底层 git 链路
 ```
 
@@ -156,6 +157,7 @@ gai report --cn -o .\reports\                # 目录不存在则自动创建
 | `gai uncommit` | 软撤销最近一次提交（需确认） |
 | `gai review` | 审查已暂存变更，不提交 |
 | `gai commit` | 审查 → 建议信息 → 确认 → 提交 |
+| `gai devflow` | 引导式串联：AI 暂存建议 → 审查 → 中英提交词 → 推送 |
 | `gai push` | 推送当前分支（先检查是否有可推送内容） |
 | `gai pull` | 拉取远程（先检查；分叉可选 merge / rebase） |
 | `gai report` | 根据提交记录写工作总结 |
@@ -247,6 +249,27 @@ gai commit --cn --push
 gai commit -y --push -r origin
 gai commit --no-ai -m "chore: release"
 ```
+
+### `gai devflow`
+
+一条命令串联日常流程：**AI 暂存建议 → 审查 → 中英提交词自选 → 确认推送**。每一步仍由你决定，不会全自动一把梭。
+
+1. **add**：AI 建议暂存路径；`y` 采纳建议，`.` 全部暂存，`n` 手输路径  
+2. **review**：审查 staged diff（带 `--cn` 时审查文案为中文；不带则可自选 cn/en）  
+3. **commit**：同时给出英文 / 中文 Conventional Commits 候选，你选择或手输，再确认提交  
+4. **push**：再确认是否推送（可跳过，提交仍留在本地）
+
+```bash
+gai devflow --cn
+gai devflow
+gai devflow --cn -r origin
+```
+
+| 参数 | 说明 |
+|------|------|
+| `--cn` | 界面与审查用简体中文；提交词仍提供中英两种 |
+| `-r` / `--remote` | 最后一步 push 的远程名 |
+| `-t` / `--trace` | 打印底层 git / 链路 |
 
 ### `gai push`
 
@@ -480,7 +503,8 @@ CodeReviewAgent/
   pyproject.toml
   README.md
   src/gai/
-    cli.py           # 入口：add / unadd / uncommit / review / commit / push / pull / report / usage / history / guide / balance / config / completion
+    cli.py           # 入口：add / unadd / uncommit / review / commit / devflow / push / pull / report / usage / history / guide / balance / config / completion
+    devflow.py       # gai devflow：暂存建议与中英提交词
     command_history.py # .gai/commands.jsonl 命令执行记录
     history_report.py  # commands.jsonl → .gai/history-report.html
     guide.py         # .gai/guide.html 可视化使用指南（中英双语）

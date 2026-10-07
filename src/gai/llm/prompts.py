@@ -90,6 +90,102 @@ Keep bullets concrete and outcome-oriented, not a raw dump of commit subjects.
 """
 
 
+STAGE_SYSTEM_PROMPT = """\
+You help a developer decide which local git changes to stage for the next commit.
+
+Your job:
+1. Read the working-tree status (and optional unstaged diff snippet).
+2. Suggest a coherent set of paths to `git add` for ONE focused commit.
+3. Prefer source/docs that belong together; usually exclude secrets, local env files,
+   build artifacts, and unrelated WIP unless the status clearly shows they are part of this change.
+
+Rules:
+- Only suggest paths that appear in the provided status/diff.
+- Prefer concrete file paths over "." unless nearly everything should be staged.
+- Respond with ONLY valid JSON. No markdown fences, no commentary.
+
+JSON schema:
+{
+  "paths": ["path/to/file.py", "README.md"],
+  "reason": "one short sentence explaining the staging choice"
+}
+"""
+
+
+BILINGUAL_MESSAGE_SYSTEM_PROMPT = """\
+You write Conventional Commits messages for a staged git diff.
+
+Your job:
+1. Propose ONE English commit message.
+2. Propose ONE Simplified Chinese commit message for the same change.
+3. Both must follow Conventional Commits: type(scope): subject
+   Types: feat, fix, refactor, perf, docs, test, chore, style, ci, build
+4. Keep type/scope in English in BOTH messages.
+5. English subject: imperative mood, lowercase start preferred, no trailing period, <= 72 chars.
+6. Chinese subject: concise Simplified Chinese after the colon, no trailing period.
+7. Respond with ONLY valid JSON. No markdown fences, no commentary.
+
+JSON schema:
+{
+  "commit_message_en": "type(scope): english subject",
+  "commit_message_cn": "type(scope): 中文说明"
+}
+"""
+
+
+def build_stage_user_prompt(
+    *,
+    status_text: str,
+    diff_snippet: str = "",
+    truncated: bool = False,
+    chinese: bool = False,
+) -> str:
+    notes: list[str] = []
+    if truncated:
+        notes.append("NOTE: The unstaged diff snippet was truncated due to size.")
+    if chinese:
+        notes.append("LANGUAGE: Write `reason` in Simplified Chinese.")
+    else:
+        notes.append("LANGUAGE: Write `reason` in English.")
+    header = "\n".join(notes)
+    body = (
+        f"{header}\n\n"
+        "Git status --porcelain follows:\n"
+        "```\n"
+        f"{status_text.strip() or '(empty)'}\n"
+        "```\n"
+    )
+    if diff_snippet.strip():
+        body += (
+            "\nUnstaged / working-tree diff snippet (for context):\n"
+            "```diff\n"
+            f"{diff_snippet}\n"
+            "```\n"
+        )
+    body += "\nProduce the JSON staging suggestion now."
+    return body
+
+
+def build_bilingual_message_user_prompt(
+    *,
+    diff: str,
+    truncated: bool = False,
+) -> str:
+    note = ""
+    if truncated:
+        note = (
+            "NOTE: The diff was truncated due to size. "
+            "Summarize what is present.\n\n"
+        )
+    return (
+        f"{note}"
+        "Staged git diff follows. Produce both commit messages now.\n\n"
+        "```diff\n"
+        f"{diff}\n"
+        "```"
+    )
+
+
 def build_user_prompt(
     *,
     diff: str,

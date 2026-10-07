@@ -70,6 +70,17 @@ _COMMAND_META: list[dict[str, Any]] = [
         },
     },
     {
+        "id": "devflow",
+        "en": {
+            "title": "Guided ship flow",
+            "blurb": "AI stage suggest → review → pick EN/CN commit message → confirm push.",
+        },
+        "cn": {
+            "title": "引导式开发流程",
+            "blurb": "AI 暂存建议 → 审查 → 中英提交词自选 → 确认推送。",
+        },
+    },
+    {
         "id": "push",
         "en": {
             "title": "Push branch",
@@ -220,6 +231,7 @@ def _i18n() -> dict[str, dict[str, str]]:
                 "gai review --cn — 先审查（可选）",
                 "gai commit --cn — 审查 → 建议 Message → 确认 → 提交",
                 "gai push --cn — 推送到远程（或 commit 时加 --push）",
+                "gai devflow --cn — 或一条命令跑完：AI 暂存建议 → 审查 → 中英提交词 → 推送",
                 "gai report --cn — 需要时生成工作总结",
             ],
             "setup_h": "安装与配置",
@@ -277,6 +289,7 @@ def _i18n() -> dict[str, dict[str, str]]:
                 "gai review --cn — optional review-only pass",
                 "gai commit --cn — review → suggest message → confirm → commit",
                 "gai push --cn — push (or pass --push on commit)",
+                "gai devflow --cn — or one guided flow: AI stage → review → EN/CN message → push",
                 "gai report --cn — work summary when you need it",
             ],
             "setup_h": "Install & configure",
