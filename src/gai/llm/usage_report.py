@@ -480,8 +480,10 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
     font-size: .86rem;
   }}
   /* all = overview across repos; repo = single-repo detail */
-  body.view-all .scope-repo {{ display: none !important; }}
-  body.view-repo .scope-all {{ display: none !important; }}
+  html.view-all .scope-repo,
+  html.view-repo .scope-all {{
+    display: none !important;
+  }}
   .chart {{
     width: 100%;
     height: 300px;
