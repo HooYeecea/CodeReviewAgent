@@ -390,44 +390,44 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
     --heat-3: #fbbf24;
   }}
   html[data-theme="light"] {{
-    --bg0: #eaf0f7;
-    --bg1: #f7fafc;
-    --panel: linear-gradient(165deg, #ffffff, #f4f8fc);
+    --bg0: #e8eef6;
+    --bg1: #f5f8fc;
+    --panel: linear-gradient(165deg, #ffffff, #f2f6fb);
     --panel-flat: #ffffff;
-    --panel-border: #d7e0ec;
-    --panel-shine: rgba(255, 255, 255, 0.92);
-    --text: #10233f;
-    --muted: #5b6b82;
+    --panel-border: #c5d0de;
+    --panel-shine: rgba(255, 255, 255, 0.95);
+    --text: #0b1b33;
+    --muted: #334155;
     --accent: #0f766e;
-    --accent2: #0284c7;
-    --ok: #059669;
-    --fail: #dc2626;
-    --warn: #d97706;
-    --top-bg: rgba(247, 250, 252, .88);
+    --accent2: #0369a1;
+    --ok: #047857;
+    --fail: #b91c1c;
+    --warn: #b45309;
+    --top-bg: rgba(245, 248, 252, .92);
     --seg-bg: #ffffff;
-    --seg-btn: linear-gradient(180deg, #ffffff, #eef3f8);
-    --seg-btn-text: #3d516c;
+    --seg-btn: linear-gradient(180deg, #ffffff, #e8eef6);
+    --seg-btn-text: #1e3350;
     --seg-active-bg: linear-gradient(180deg, #ccfbf1, #e6fffa);
-    --seg-active-text: #0f766e;
+    --seg-active-text: #115e59;
     --on-ink: #ffffff;
-    --chart-well: linear-gradient(180deg, #ffffff, #f3f7fb);
-    --chart-well-border: #cfd9e6;
+    --chart-well: linear-gradient(180deg, #ffffff, #f1f5f9);
+    --chart-well-border: #b8c5d6;
     --chart-well-shadow:
-      0 1px 0 rgba(255,255,255,.95) inset,
-      0 -1px 0 rgba(16,35,63,.06) inset,
-      0 10px 22px rgba(16,35,63,.06) inset,
-      0 8px 18px rgba(16,35,63,.06);
-    --chart-muted: #4b5d73;
-    --chart-label: #1e3350;
-    --chart-line: #94a3b8;
-    --chart-split: rgba(15,35,63,.08);
+      0 1px 0 rgba(255,255,255,.98) inset,
+      0 -1px 0 rgba(11,27,51,.08) inset,
+      0 10px 22px rgba(11,27,51,.07) inset,
+      0 8px 18px rgba(11,27,51,.07);
+    --chart-muted: #1e3350;
+    --chart-label: #0b1b33;
+    --chart-line: #64748b;
+    --chart-split: rgba(11,27,51,.12);
     --chart-pie-border: #ffffff;
     --chart-symbol-stroke: #ffffff;
     --table-bg: #f8fafc;
-    --table-head: #eef3f8;
+    --table-head: #e8eef6;
     --badge-bg: linear-gradient(180deg, #ccfbf1, #e6fffa);
-    --badge-border: rgba(15,118,110,.28);
-    --badge-text: #0f766e;
+    --badge-border: rgba(15,118,110,.35);
+    --badge-text: #115e59;
     --shadow-deep: 0 18px 40px rgba(16,35,63,.08), 0 1px 0 rgba(255,255,255,.9) inset, 0 -1px 0 rgba(16,35,63,.05) inset;
     --shadow-lift: 0 12px 28px rgba(16,35,63,.08), 0 1px 0 rgba(255,255,255,.95) inset, 0 -1px 0 rgba(16,35,63,.06) inset;
     --glow-a: rgba(15,118,110,.10);
@@ -569,12 +569,21 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
   .card h2 {{
     margin: 0 0 4px;
     font-size: .98rem;
-    font-weight: 650;
+    font-weight: 700;
+    color: var(--text);
   }}
   .card .hint {{
     color: var(--muted);
-    font-size: .78rem;
+    font-size: .8rem;
+    font-weight: 500;
     margin-bottom: 6px;
+  }}
+  html[data-theme="light"] .card .hint,
+  html[data-theme="light"] .kpi .label,
+  html[data-theme="light"] .kpi .sub,
+  html[data-theme="light"] .meta,
+  html[data-theme="light"] footer {{
+    color: #1e3350;
   }}
   .card-head {{
     display: flex;
@@ -1108,7 +1117,12 @@ function localizedStatus(name) {{
 }}
 
 function baseText() {{
-  return {{ color: cssVar('--chart-muted', '#94a3b8'), fontSize: 11 }};
+  const light = document.documentElement.getAttribute('data-theme') === 'light';
+  return {{
+    color: cssVar('--chart-muted', '#94a3b8'),
+    fontSize: 11,
+    fontWeight: light ? 600 : 500
+  }};
 }}
 
 function trendHints() {{
