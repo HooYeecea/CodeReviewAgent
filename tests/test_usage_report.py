@@ -8,6 +8,7 @@ from gai.llm.history import UsageRecord, append_usage_record, load_usage_records
 from datetime import datetime
 
 from gai.llm.usage_report import (
+    build_report_datasets,
     build_trend_series,
     build_usage_analytics,
     path_to_file_url,
@@ -31,6 +32,8 @@ def test_write_usage_report_fixed_path(tmp_path: Path, monkeypatch) -> None:
             model="deepseek-chat",
             action="commit",
             action_detail="review+message",
+            repo_name="CodeReviewAgent",
+            remote_name="origin",
             branch="main",
             files_count=2,
             diff_chars=800,
@@ -52,6 +55,8 @@ def test_write_usage_report_fixed_path(tmp_path: Path, monkeypatch) -> None:
             model="gpt-4o-mini",
             action="report",
             action_detail="report",
+            repo_name="OtherApp",
+            remote_name=None,
             branch="feature/x",
             commit_count=12,
             since="7d",
@@ -74,7 +79,7 @@ def test_write_usage_report_fixed_path(tmp_path: Path, monkeypatch) -> None:
     assert "gai Token 用量报告" in text
     assert "echarts" in text.lower()
     assert "DeepSeek" in text or "deepseek" in text.lower()
-    assert "review+message" in text or "DATA" in text
+    assert "review+message" in text or "DATASETS" in text
     url = path_to_file_url(out)
     assert url.startswith("file://")
     assert "usage-report.html" in url
@@ -93,9 +98,19 @@ def test_write_usage_report_fixed_path(tmp_path: Path, monkeypatch) -> None:
     assert analytics["heatmap"]["actions"]
     assert any(cell[2] > 0 for cell in analytics["heatmap"]["data"])
     assert "chart-branch" in text
+    assert "chart-repo" in text
     assert "chart-heat" in text
+    assert "chart-heat-repo" in text
+    assert "project-filter" in text
     assert "trend-seg" in text
     assert "data-mode=\"today\"" in text
+    assert "CodeReviewAgent" in analytics["by_repo"]["labels"]
+    assert "OtherApp" in analytics["by_repo"]["labels"]
+    assert analytics["heatmap_repo"]["repos"]
+    datasets = build_report_datasets(records)
+    assert datasets["default_project"] == "__all__"
+    assert {p["id"] for p in datasets["projects"]} == {"CodeReviewAgent", "OtherApp"}
+    assert datasets["by_project"]["CodeReviewAgent"]["totals"]["calls"] == 1
     assert set(analytics["trends"]) >= {
         "today",
         "last7",

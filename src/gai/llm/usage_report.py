@@ -47,9 +47,12 @@ def build_usage_analytics(records: list[UsageRecord]) -> dict[str, Any]:
     by_model: dict[str, dict[str, int]] = defaultdict(lambda: {"calls": 0, "tokens": 0})
     by_user: dict[str, dict[str, int]] = defaultdict(lambda: {"calls": 0, "tokens": 0})
     by_branch: dict[str, dict[str, int]] = defaultdict(lambda: {"calls": 0, "tokens": 0})
+    by_repo: dict[str, dict[str, int]] = defaultdict(lambda: {"calls": 0, "tokens": 0})
     model_durations: dict[str, list[int]] = defaultdict(list)
     # heatmap: (branch, action) -> tokens
     heat: dict[tuple[str, str], int] = defaultdict(int)
+    # heatmap: (repo, action) -> tokens
+    heat_repo: dict[tuple[str, str], int] = defaultdict(int)
 
     for rec in records:
         tok = rec.total_tokens or 0
@@ -80,15 +83,26 @@ def build_usage_analytics(records: list[UsageRecord]) -> dict[str, Any]:
         by_branch[branch]["tokens"] += tok
         heat[(branch, action)] += tok
 
+        repo = _project_key(rec)
+        by_repo[repo]["calls"] += 1
+        by_repo[repo]["tokens"] += tok
+        heat_repo[(repo, action)] += tok
+
     recent = list(reversed(records[-100:]))
     trends = build_trend_series(records)
 
     branches = sorted(by_branch.keys(), key=lambda b: (-by_branch[b]["tokens"], b))
     actions = sorted(by_action.keys(), key=lambda a: (-by_action[a]["tokens"], a))
+    repos = sorted(by_repo.keys(), key=lambda r: (-by_repo[r]["tokens"], r))
     heatmap_data = [
         [actions.index(a), branches.index(b), heat[(b, a)]]
         for b, a in heat
         if heat[(b, a)] > 0
+    ]
+    heatmap_repo_data = [
+        [actions.index(a), repos.index(r), heat_repo[(r, a)]]
+        for r, a in heat_repo
+        if heat_repo[(r, a)] > 0 and a in actions and r in repos
     ]
 
     duration_by_model = _duration_series(model_durations)
@@ -116,6 +130,7 @@ def build_usage_analytics(records: list[UsageRecord]) -> dict[str, Any]:
         "by_model": _series(by_model),
         "by_user": _series(by_user),
         "by_branch": _series(by_branch),
+        "by_repo": _series(by_repo),
         "by_status": {
             "labels": ["ok", "fail", "unknown"],
             "calls": [ok_count, fail_count, unknown_count],
@@ -130,8 +145,48 @@ def build_usage_analytics(records: list[UsageRecord]) -> dict[str, Any]:
             "actions": actions,
             "data": heatmap_data,
         },
+        "heatmap_repo": {
+            "repos": repos,
+            "actions": actions,
+            "data": heatmap_repo_data,
+        },
         "recent": [r.to_dict() for r in recent],
     }
+
+
+def build_report_datasets(records: list[UsageRecord]) -> dict[str, Any]:
+    """Precompute analytics for all projects and each repo_name."""
+    labels: dict[str, str] = {}
+    for rec in records:
+        key = _project_key(rec)
+        labels[key] = _project_label(rec)
+
+    by_project: dict[str, dict[str, Any]] = {}
+    for key in labels:
+        subset = [r for r in records if _project_key(r) == key]
+        by_project[key] = build_usage_analytics(subset)
+
+    return {
+        "all": build_usage_analytics(records),
+        "by_project": by_project,
+        "projects": [
+            {"id": key, "label": labels[key]}
+            for key in sorted(labels.keys())
+        ],
+        "default_project": "__all__",
+    }
+
+
+def _project_key(rec: UsageRecord) -> str:
+    return (rec.repo_name or "").strip() or "(unknown)"
+
+
+def _project_label(rec: UsageRecord) -> str:
+    """Display label: repo bound with remote (remote is not a separate filter)."""
+    key = _project_key(rec)
+    if rec.remote_name:
+        return f"{key} · {rec.remote_name}"
+    return key
 
 
 def build_trend_series(
@@ -206,19 +261,20 @@ def write_usage_report(
 ) -> Path:
     """Overwrite the fixed HTML report with data synced from usage.jsonl."""
     target = path or usage_report_path()
-    analytics = build_usage_analytics(records)
+    datasets = build_report_datasets(records)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(
-        render_usage_report_html(analytics, chinese=chinese),
+        render_usage_report_html(datasets, chinese=chinese),
         encoding="utf-8",
     )
     return target
 
 
-def render_usage_report_html(analytics: dict[str, Any], *, chinese: bool = False) -> str:
+def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False) -> str:
     """Self-contained HTML dashboard powered by ECharts (CDN)."""
     t = _i18n(chinese)
-    payload = json.dumps(analytics, ensure_ascii=False)
+    analytics = datasets.get("all") or {}
+    payload = json.dumps(datasets, ensure_ascii=False)
     payload_js = json.dumps(payload)
     i18n_js = json.dumps(t, ensure_ascii=False)
     title = html.escape(t["title"])
@@ -233,6 +289,12 @@ def render_usage_report_html(analytics: dict[str, Any], *, chinese: bool = False
     avg_display = "—" if avg_ms is None else f"{avg_ms} ms"
     prompt = totals.get("prompt_tokens", 0)
     completion = totals.get("completion_tokens", 0)
+    project_options = ['<option value="__all__">' + html.escape(t["project_all"]) + "</option>"]
+    for item in datasets.get("projects") or []:
+        pid = html.escape(str(item.get("id") or ""))
+        label = html.escape(str(item.get("label") or pid))
+        project_options.append(f'<option value="{pid}">{label}</option>')
+    project_options_html = "\n".join(project_options)
 
     return f"""<!DOCTYPE html>
 <html lang="{'zh-CN' if chinese else 'en'}">
@@ -393,6 +455,30 @@ def render_usage_report_html(analytics: dict[str, Any], *, chinese: bool = False
     color: #bae6fd;
     font-weight: 650;
   }}
+  .filters {{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+    margin: 0 0 16px;
+    padding: 12px 14px;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 14px;
+  }}
+  .filters label {{
+    color: var(--muted);
+    font-size: .82rem;
+  }}
+  .filters select {{
+    min-width: 220px;
+    border-radius: 10px;
+    border: 1px solid rgba(148,163,184,.28);
+    background: rgba(15, 23, 42, .7);
+    color: var(--text);
+    padding: 8px 10px;
+    font-size: .86rem;
+  }}
   .chart {{
     width: 100%;
     height: 300px;
@@ -458,30 +544,38 @@ def render_usage_report_html(analytics: dict[str, Any], *, chinese: bool = False
       <div class="badge">ECharts · .gai/usage-report.html</div>
     </header>
 
+    <div class="filters">
+      <label for="project-filter">{t['project_filter']}</label>
+      <select id="project-filter">
+        {project_options_html}
+      </select>
+      <span class="meta" id="project-hint">{html.escape(t['hint_project'])}</span>
+    </div>
+
     <div class="empty" id="empty">{html.escape(t['empty'])}</div>
 
     <div id="content">
       <section class="kpis">
         <div class="kpi">
           <div class="label">{t['calls']}</div>
-          <div class="value">{calls}</div>
+          <div class="value" id="kpi-calls">{calls}</div>
         </div>
         <div class="kpi">
           <div class="label">{t['tokens']}</div>
-          <div class="value">{tokens}</div>
-          <div class="sub">{t['prompt']}: {prompt} · {t['completion']}: {completion}</div>
+          <div class="value" id="kpi-tokens">{tokens}</div>
+          <div class="sub" id="kpi-token-sub">{t['prompt']}: {prompt} · {t['completion']}: {completion}</div>
         </div>
         <div class="kpi">
           <div class="label">{t['ok']}</div>
-          <div class="value ok">{ok}</div>
+          <div class="value ok" id="kpi-ok">{ok}</div>
         </div>
         <div class="kpi">
           <div class="label">{t['fail']}</div>
-          <div class="value fail">{fail}</div>
+          <div class="value fail" id="kpi-fail">{fail}</div>
         </div>
         <div class="kpi">
           <div class="label">{t['avg_ms']}</div>
-          <div class="value">{avg_display}</div>
+          <div class="value" id="kpi-ms">{avg_display}</div>
         </div>
       </section>
 
@@ -503,6 +597,11 @@ def render_usage_report_html(analytics: dict[str, Any], *, chinese: bool = False
             </div>
           </div>
           <div id="chart-day" class="chart tall"></div>
+        </div>
+        <div class="card">
+          <h2>{t['by_repo']}</h2>
+          <div class="hint">{t['hint_repo']}</div>
+          <div id="chart-repo" class="chart"></div>
         </div>
         <div class="card">
           <h2>{t['by_branch']}</h2>
@@ -545,6 +644,11 @@ def render_usage_report_html(analytics: dict[str, Any], *, chinese: bool = False
           <div id="chart-user" class="chart"></div>
         </div>
         <div class="card full">
+          <h2>{t['heatmap_repo']}</h2>
+          <div class="hint">{t['hint_heat_repo']}</div>
+          <div id="chart-heat-repo" class="chart tall"></div>
+        </div>
+        <div class="card full">
           <h2>{t['heatmap']}</h2>
           <div class="hint">{t['hint_heat']}</div>
           <div id="chart-heat" class="chart tall"></div>
@@ -578,9 +682,18 @@ def render_usage_report_html(analytics: dict[str, Any], *, chinese: bool = False
   </div>
 
 <script>
-const DATA = JSON.parse({payload_js});
+const DATASETS = JSON.parse({payload_js});
 const I18N = {i18n_js};
 const COLORS = ['#38bdf8', '#a78bfa', '#34d399', '#fbbf24', '#f472b6', '#60a5fa', '#fb7185', '#2dd4bf'];
+let A = DATASETS.all || {{}};
+let currentProject = DATASETS.default_project || '__all__';
+let currentTrend = (A && A.default_trend) || 'today';
+let chartHandles = [];
+
+function activeAnalytics() {{
+  if (currentProject === '__all__') return DATASETS.all || {{}};
+  return (DATASETS.by_project || {{}})[currentProject] || DATASETS.all || {{}};
+}}
 
 function pieData(series, valueKey) {{
   const labels = series.labels || [];
@@ -626,8 +739,9 @@ function trendTitles() {{
 }}
 
 function applyTrend(chart, mode) {{
-  const trends = DATA.trends || {{}};
-  const series = trends[mode] || trends.today || DATA.by_day || {{ labels: [], calls: [], tokens: [] }};
+  currentTrend = mode;
+  const trends = A.trends || {{}};
+  const series = trends[mode] || trends.today || A.by_day || {{ labels: [], calls: [], tokens: [] }};
   const titles = trendTitles();
   const hints = trendHints();
   const titleEl = document.getElementById('trend-title');
@@ -704,17 +818,16 @@ function applyTrend(chart, mode) {{
 function initDayChart() {{
   const el = document.getElementById('chart-day');
   const chart = echarts.init(el, null, {{ renderer: 'canvas' }});
-  const initial = DATA.default_trend || 'today';
-  applyTrend(chart, initial);
+  applyTrend(chart, currentTrend || A.default_trend || 'today');
   const seg = document.getElementById('trend-seg');
   if (seg) {{
     seg.querySelectorAll('button').forEach(btn => {{
-      btn.classList.toggle('active', btn.dataset.mode === initial);
-      btn.addEventListener('click', () => {{
+      btn.classList.toggle('active', btn.dataset.mode === currentTrend);
+      btn.onclick = () => {{
         const mode = btn.dataset.mode;
         seg.querySelectorAll('button').forEach(b => b.classList.toggle('active', b === btn));
         applyTrend(chart, mode);
-      }});
+      }};
     }});
   }}
   return chart;
@@ -807,20 +920,16 @@ function initBar(id, series, opts) {{
   return chart;
 }}
 
-function initHeatmap() {{
-  const heat = DATA.heatmap || {{}};
-  const branches = heat.branches || [];
-  const actions = heat.actions || [];
-  const raw = heat.data || [];
-  const chart = echarts.init(document.getElementById('chart-heat'));
+function initHeatmapGeneric(elId, yKey, yLabels, actions, raw) {{
+  const chart = echarts.init(document.getElementById(elId));
   const maxVal = raw.reduce((m, d) => Math.max(m, d[2] || 0), 0) || 1;
   chart.setOption({{
     tooltip: {{
       position: 'top',
       formatter: function (p) {{
         const a = actions[p.value[0]] || '';
-        const b = branches[p.value[1]] || '';
-        return b + ' × ' + a + '<br/>' + p.value[2] + ' ' + I18N.tokens;
+        const y = yLabels[p.value[1]] || '';
+        return y + ' × ' + a + '<br/>' + p.value[2] + ' ' + I18N.tokens;
       }}
     }},
     grid: {{ left: 90, right: 30, top: 20, bottom: 60 }},
@@ -832,7 +941,7 @@ function initHeatmap() {{
     }},
     yAxis: {{
       type: 'category',
-      data: branches,
+      data: yLabels,
       splitArea: {{ show: true }},
       axisLabel: {{ color: '#94a3b8', fontSize: 11, width: 80, overflow: 'truncate' }}
     }},
@@ -847,6 +956,7 @@ function initHeatmap() {{
       inRange: {{ color: ['#0f172a', '#1d4ed8', '#38bdf8', '#fbbf24'] }}
     }},
     series: [{{
+      name: yKey,
       type: 'heatmap',
       data: raw,
       label: {{ show: true, color: '#e2e8f0', fontSize: 10 }},
@@ -858,9 +968,32 @@ function initHeatmap() {{
   return chart;
 }}
 
+function initHeatmap() {{
+  const heat = A.heatmap || {{}};
+  return initHeatmapGeneric(
+    'chart-heat',
+    'branch',
+    heat.branches || [],
+    heat.actions || [],
+    heat.data || []
+  );
+}}
+
+function initHeatmapRepo() {{
+  const heat = A.heatmap_repo || {{}};
+  return initHeatmapGeneric(
+    'chart-heat-repo',
+    'repo',
+    heat.repos || [],
+    heat.actions || [],
+    heat.data || []
+  );
+}}
+
 function fillTable() {{
   const body = document.getElementById('recent-body');
-  for (const r of (DATA.recent || [])) {{
+  body.innerHTML = '';
+  for (const r of (A.recent || [])) {{
     const tr = document.createElement('tr');
     const who = r.git_user && r.git_email
       ? `${{r.git_user}} <${{r.git_email}}>`
@@ -905,40 +1038,83 @@ function esc(s) {{
     .replaceAll('"', '&quot;');
 }}
 
-(function main() {{
-  const totals = DATA.totals || {{}};
+function updateKpis() {{
+  const totals = A.totals || {{}};
+  const setText = (id, value) => {{
+    const el = document.getElementById(id);
+    if (el) el.textContent = value;
+  }};
+  setText('kpi-calls', totals.calls || 0);
+  setText('kpi-tokens', totals.tokens || 0);
+  setText('kpi-ok', totals.ok || 0);
+  setText('kpi-fail', totals.fail || 0);
+  setText(
+    'kpi-ms',
+    totals.avg_duration_ms == null ? '—' : (totals.avg_duration_ms + ' ms')
+  );
+  setText(
+    'kpi-token-sub',
+    I18N.prompt + ': ' + (totals.prompt_tokens || 0) +
+    ' · ' + I18N.completion + ': ' + (totals.completion_tokens || 0)
+  );
+}}
+
+function disposeCharts() {{
+  chartHandles.forEach(c => {{ try {{ c.dispose(); }} catch (e) {{}} }});
+  chartHandles = [];
+}}
+
+function renderDashboard() {{
+  A = activeAnalytics();
+  updateKpis();
+  const totals = A.totals || {{}};
   const empty = (totals.calls || 0) === 0;
   document.getElementById('empty').style.display = empty ? 'block' : 'none';
   document.getElementById('content').style.display = empty ? 'none' : 'block';
+  disposeCharts();
   if (empty) return;
 
-  const charts = [
+  chartHandles = [
     initDayChart(),
-    initBar('chart-branch', DATA.by_branch || {{}}, {{ from: '#0ea5e9', to: '#22d3ee' }}),
-    initPie('chart-status', DATA.by_status || {{}}, {{
+    initBar('chart-repo', A.by_repo || {{}}, {{ from: '#22d3ee', to: '#38bdf8' }}),
+    initBar('chart-branch', A.by_branch || {{}}, {{ from: '#0ea5e9', to: '#22d3ee' }}),
+    initPie('chart-status', A.by_status || {{}}, {{
       valueKey: 'calls',
       unit: I18N.calls,
       localize: true,
       colors: ['#34d399', '#f87171', '#94a3b8']
     }}),
-    initPie('chart-split', DATA.token_split || {{}}, {{
+    initPie('chart-split', A.token_split || {{}}, {{
       localize: true,
       colors: ['#38bdf8', '#a78bfa']
     }}),
-    initBar('chart-duration', DATA.duration_by_model || {{}}, {{
+    initBar('chart-duration', A.duration_by_model || {{}}, {{
       valueKey: 'avg_ms',
       unit: 'ms',
       from: '#f59e0b',
       to: '#fbbf24'
     }}),
-    initPie('chart-action', DATA.by_action || {{}}),
-    initPie('chart-provider', DATA.by_provider || {{}}),
-    initBar('chart-model', DATA.by_model || {{}}),
-    initBar('chart-user', DATA.by_user || {{}}, {{ from: '#10b981', to: '#34d399' }}),
+    initPie('chart-action', A.by_action || {{}}),
+    initPie('chart-provider', A.by_provider || {{}}),
+    initBar('chart-model', A.by_model || {{}}),
+    initBar('chart-user', A.by_user || {{}}, {{ from: '#10b981', to: '#34d399' }}),
+    initHeatmapRepo(),
     initHeatmap(),
   ];
   fillTable();
-  window.addEventListener('resize', () => charts.forEach(c => c.resize()));
+}}
+
+(function main() {{
+  const filter = document.getElementById('project-filter');
+  if (filter) {{
+    filter.value = currentProject;
+    filter.addEventListener('change', () => {{
+      currentProject = filter.value || '__all__';
+      renderDashboard();
+    }});
+  }}
+  renderDashboard();
+  window.addEventListener('resize', () => chartHandles.forEach(c => c.resize()));
 }})();
 </script>
 </body>
@@ -1080,7 +1256,14 @@ def _i18n(chinese: bool) -> dict[str, str]:
             "seg_month": "按月",
             "seg_year": "按年",
             "seg_all_days": "全部日",
+            "project_filter": "项目仓库",
+            "project_all": "全部项目",
+            "hint_project": "按仓库筛选；远程与仓库绑定，不做单独筛选",
             "by_day": "用量趋势",
+            "by_repo": "按仓库用量",
+            "hint_repo": "以仓库根目录名为项目维度（含绑定远程）",
+            "heatmap_repo": "仓库 × 动作（Token 热力图）",
+            "hint_heat_repo": "颜色越亮表示该仓库上该动作消耗越多",
             "by_branch": "按分支用量",
             "by_status": "成功 / 失败",
             "token_split": "输入 vs 输出 Token",
@@ -1145,7 +1328,14 @@ def _i18n(chinese: bool) -> dict[str, str]:
         "seg_month": "Month",
         "seg_year": "Year",
         "seg_all_days": "All days",
+        "project_filter": "Project repo",
+        "project_all": "All projects",
+        "hint_project": "Filter by repo; remote is bound to repo (not a separate filter)",
         "by_day": "Usage trend",
+        "by_repo": "By repository",
+        "hint_repo": "Project dimension is repo root name (with bound remote)",
+        "heatmap_repo": "Repo × action heatmap (tokens)",
+        "hint_heat_repo": "Brighter cells mean more tokens for that action in that repo",
         "by_branch": "By branch",
         "by_status": "Success / failure",
         "token_split": "Prompt vs completion tokens",
