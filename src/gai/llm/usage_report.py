@@ -394,6 +394,8 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
     grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
     gap: 12px;
     margin-bottom: 16px;
+    position: relative;
+    z-index: 1;
   }}
   .kpi, .card, .filters {{
     position: relative;
@@ -402,6 +404,9 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
     border-radius: 18px;
     box-shadow: var(--shadow-lift);
     backdrop-filter: blur(10px);
+  }}
+  .kpi, .card {{
+    z-index: 1;
   }}
   .kpi::before, .card::before, .filters::before {{
     content: "";
@@ -495,6 +500,8 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
     align-items: center;
     margin: 0 0 16px;
     padding: 14px 16px;
+    z-index: 40;
+    overflow: visible;
   }}
   .filters > label {{
     color: #cbd5e1;
@@ -508,7 +515,10 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
   .dd {{
     position: relative;
     min-width: min(320px, 100%);
-    z-index: 20;
+    z-index: 50;
+  }}
+  .dd.open {{
+    z-index: 60;
   }}
   .dd-trigger {{
     width: 100%;
@@ -577,6 +587,7 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
     left: 0;
     right: 0;
     top: calc(100% + 8px);
+    z-index: 70;
     display: none;
     padding: 8px;
     border-radius: 14px;
