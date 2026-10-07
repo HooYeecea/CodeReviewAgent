@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 import typer
@@ -36,7 +38,17 @@ from gai.git_ops import (
 from gai.help_i18n import H
 from gai.llm.balance import fetch_balance, format_balance_result
 from gai.llm.client import LLMError
-from gai.llm.usage import clear_llm_usage, get_llm_calls, usage_totals
+from gai.llm.history import (
+    format_usage_table,
+    load_usage_records,
+    usage_log_path,
+)
+from gai.llm.usage import (
+    clear_llm_usage,
+    get_llm_calls,
+    set_llm_action,
+    usage_totals,
+)
 from gai.report import export_report, render_report, run_report
 from gai.review import render_review, run_review
 app = typer.Typer(
@@ -67,9 +79,11 @@ def _version_callback(value: bool) -> None:
 _LLM_USAGE_PRINTED = False
 
 
-def _start_trace(trace: bool) -> None:
+def _start_trace(trace: bool, *, action: str = "") -> None:
     set_tracing(trace)
     clear_llm_usage()
+    if action:
+        set_llm_action(action)
     global _LLM_USAGE_PRINTED
     _LLM_USAGE_PRINTED = False
 
@@ -459,7 +473,7 @@ def review_cmd(
     ),
 ) -> None:
     """Review staged changes without committing."""
-    _start_trace(trace)
+    _start_trace(trace, action="review")
     try:
         if not has_staged_changes():
             tip = (
@@ -567,7 +581,7 @@ def commit_cmd(
     ),
 ) -> None:
     """Review staged changes, suggest a commit message, then confirm and commit."""
-    _start_trace(trace)
+    _start_trace(trace, action="commit")
     try:
         if not has_staged_changes():
             tip = (
@@ -1155,7 +1169,7 @@ def report_cmd(
     ),
 ) -> None:
     """Summarize git commits into a paste-ready work report."""
-    _start_trace(trace)
+    _start_trace(trace, action="report")
     try:
         # --alltime wins over a concrete --since (except alltime token itself).
         since_arg = since
@@ -1217,6 +1231,166 @@ def report_cmd(
     except (GitError, LLMError, PeriodError, RuntimeError, ValueError, OSError) as exc:
         _print_error(exc, chinese=cn, trace=trace)
         raise typer.Exit(code=1) from exc
+    finally:
+        _print_footer(trace=trace, chinese=cn)
+
+
+def _parse_usage_since(value: str | None) -> datetime | None:
+    """Parse --since for usage history: 7d / 2w / 1m / 1y / YYYY-MM-DD."""
+    if value is None:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    lower = text.lower()
+    if lower in {"alltime", "all-time", "all_time", "all"}:
+        return None
+    rel = re.fullmatch(r"(\d+)\s*([dwmy])", lower)
+    if rel:
+        amount = int(rel.group(1))
+        unit = rel.group(2)
+        now = datetime.now(timezone.utc).astimezone()
+        if unit == "d":
+            return now - timedelta(days=amount)
+        if unit == "w":
+            return now - timedelta(weeks=amount)
+        if unit == "m":
+            return now - timedelta(days=30 * amount)
+        return now - timedelta(days=365 * amount)
+    try:
+        day = datetime.strptime(text, "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise PeriodError("invalid_since", value=value) from exc
+    return datetime(day.year, day.month, day.day, tzinfo=timezone.utc).astimezone()
+
+
+@app.command(
+    "usage",
+    help=H(
+        "Show local LLM token usage history recorded by gai.",
+        "查看 gai 本地记录的大模型 token 用量历史。",
+    ),
+)
+def usage_cmd(
+    limit: int = typer.Option(
+        20,
+        "--limit",
+        "-n",
+        help=H(
+            "Max records to show (newest first after filters; default 20).",
+            "最多显示条数（过滤后取最新；默认 20）。",
+        ),
+    ),
+    since: Optional[str] = typer.Option(
+        None,
+        "--since",
+        "-s",
+        help=H(
+            "Only records after this time: 7d / 2w / 1m / 1y / YYYY-MM-DD / alltime.",
+            "只看该时间之后：7d / 2w / 1m / 1y / YYYY-MM-DD / alltime。",
+        ),
+    ),
+    action: Optional[str] = typer.Option(
+        None,
+        "--action",
+        "-a",
+        help=H(
+            "Filter by action: review / commit / report.",
+            "按动作过滤：review / commit / report。",
+        ),
+    ),
+    provider: Optional[str] = typer.Option(
+        None,
+        "--provider",
+        help=H(
+            "Filter by provider id (e.g. deepseek, openai).",
+            "按厂商 id 过滤（如 deepseek、openai）。",
+        ),
+    ),
+    user: Optional[str] = typer.Option(
+        None,
+        "--user",
+        "-u",
+        help=H(
+            "Filter by git user name or email substring.",
+            "按 git 用户名或邮箱子串过滤。",
+        ),
+    ),
+    group: Optional[str] = typer.Option(
+        None,
+        "--group",
+        "-g",
+        help=H(
+            "Also summarize by: action / provider / model / user.",
+            "额外按 action / provider / model / user 汇总。",
+        ),
+    ),
+    as_json: bool = typer.Option(
+        False,
+        "--json",
+        help=H("Print records as JSON.", "以 JSON 输出记录。"),
+    ),
+    cn: bool = typer.Option(
+        False,
+        "--cn",
+        help=H(
+            "Use Simplified Chinese output.",
+            "使用简体中文输出；与 -h 联用时显示中文帮助。",
+        ),
+    ),
+    trace: bool = typer.Option(
+        False,
+        "--trace",
+        "-t",
+        help=_TRACE_OPT_HELP,
+    ),
+) -> None:
+    """Show locally recorded LLM usage (who / when / provider / model / tokens / action)."""
+    _start_trace(trace)
+    try:
+        if group and group not in {"action", "provider", "model", "user"}:
+            tip = (
+                "--group 仅支持：action / provider / model / user"
+                if cn
+                else "--group must be one of: action / provider / model / user"
+            )
+            err_console.print(f"[red]{tip}[/red]")
+            raise typer.Exit(code=1)
+
+        since_dt = _parse_usage_since(since)
+        # limit<=0 means no cap (show all matching)
+        cap = None if limit <= 0 else limit
+        records = load_usage_records(
+            limit=cap,
+            since=since_dt,
+            action=action,
+            provider=provider,
+            git_user=user,
+        )
+        if as_json:
+            console.print_json(data=[r.to_dict() for r in records])
+        else:
+            text = format_usage_table(records, chinese=cn, group=group)
+            console.print(text)
+            if not records:
+                tip = (
+                    f"（写入位置：{usage_log_path()}；"
+                    "每次成功调用大模型后会自动追加一行。）"
+                    if cn
+                    else (
+                        f"(log path: {usage_log_path()}; "
+                        "each successful LLM call appends one line.)"
+                    )
+                )
+                console.print(f"[dim]{tip}[/dim]")
+    except PeriodError as exc:
+        _print_error(exc, chinese=cn, trace=trace)
+        raise typer.Exit(code=1) from exc
+    except typer.Exit:
+        raise
+    except KeyboardInterrupt:
+        console.print("\n已取消。" if cn else "\nAborted.")
+        raise typer.Exit(code=130) from None
     finally:
         _print_footer(trace=trace, chinese=cn)
 

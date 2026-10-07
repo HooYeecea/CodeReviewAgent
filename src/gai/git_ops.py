@@ -55,8 +55,13 @@ def _record_trace(*args: str) -> None:
     _TRACE_LOG.append(f"git {joined}")
 
 
-def run_git(*args: str, cwd: Path | None = None) -> GitResult:
-    _record_trace(*args)
+def run_git(
+    *args: str,
+    cwd: Path | None = None,
+    trace: bool = True,
+) -> GitResult:
+    if trace:
+        _record_trace(*args)
     try:
         completed = subprocess.run(
             ["git", *args],
@@ -656,6 +661,22 @@ def resolve_since(value: str | None) -> str | None:
         "y": "years",
     }
     return f"{amount} {unit_map[unit]} ago"
+
+
+def current_git_identity(cwd: Path | None = None) -> tuple[str, str]:
+    """Return ``(user.name, user.email)``; empty strings if unavailable.
+
+    Does not require a git repository (falls back to global config) and never
+    raises. Silent w.r.t. ``--trace`` so usage logging does not pollute the chain.
+    """
+    try:
+        name_r = run_git("config", "user.name", cwd=cwd, trace=False)
+        email_r = run_git("config", "user.email", cwd=cwd, trace=False)
+    except GitError:
+        return "", ""
+    name = name_r.stdout.strip() if name_r.returncode == 0 else ""
+    email = email_r.stdout.strip() if email_r.returncode == 0 else ""
+    return name, email
 
 
 def current_author_filter(cwd: Path | None = None) -> str:

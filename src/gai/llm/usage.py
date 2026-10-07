@@ -15,6 +15,7 @@ class LLMCallInfo:
 
 
 _LLM_LOG: ContextVar[list[LLMCallInfo]] = ContextVar("gai_llm_log")
+_LLM_ACTION: ContextVar[str] = ContextVar("gai_llm_action", default="")
 
 
 def _log() -> list[LLMCallInfo]:
@@ -28,6 +29,19 @@ def _log() -> list[LLMCallInfo]:
 
 def clear_llm_usage() -> None:
     _LLM_LOG.set([])
+    _LLM_ACTION.set("")
+
+
+def set_llm_action(action: str) -> None:
+    """Tag subsequent LLM calls with a gai action (review / commit / report)."""
+    _LLM_ACTION.set((action or "").strip())
+
+
+def get_llm_action() -> str:
+    try:
+        return _LLM_ACTION.get()
+    except LookupError:
+        return ""
 
 
 def record_llm_call(

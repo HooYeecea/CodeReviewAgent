@@ -8,7 +8,9 @@ from typing import Any, Callable
 import httpx
 
 from gai.config import Settings
-from gai.llm.usage import record_llm_call
+from gai.git_ops import current_git_identity
+from gai.llm.history import UsageRecord, append_usage_record, now_iso
+from gai.llm.usage import get_llm_action, record_llm_call
 
 _RETRYABLE_KINDS = frozenset({"timeout", "network", "rate_limit", "server"})
 _DEFAULT_MAX_ATTEMPTS = 3
@@ -201,13 +203,49 @@ class LLMClient:
         model_name = ""
         if isinstance(data, dict):
             model_name = str(data.get("model") or "").strip()
+        resolved_model = model_name or self.settings.model
         record_llm_call(
-            model=model_name or self.settings.model,
+            model=resolved_model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+        )
+        self._persist_usage(
+            model=resolved_model,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
         )
         return content
+
+    def _persist_usage(
+        self,
+        *,
+        model: str,
+        prompt_tokens: int | None,
+        completion_tokens: int | None,
+        total_tokens: int | None,
+    ) -> None:
+        # Lazy import: balance ↔ client already share types; avoid import cycle.
+        from gai.llm.balance import detect_provider
+
+        provider = detect_provider(self.settings.base_url)
+        git_user, git_email = current_git_identity()
+        append_usage_record(
+            UsageRecord(
+                ts=now_iso(),
+                git_user=git_user,
+                git_email=git_email,
+                provider=provider.id,
+                provider_name=provider.name_en,
+                model=model,
+                action=get_llm_action() or "unknown",
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+                base_url=self.settings.base_url,
+            )
+        )
 
 
 def _as_int(value: Any) -> int | None:

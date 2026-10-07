@@ -61,6 +61,11 @@ _COMMAND_EXAMPLES: dict[str, tuple[tuple[str, str, str], ...]] = {
             "当前用户的全部历史提交总结",
         ),
     ),
+    "usage": (
+        ("gai usage --cn", "Show recent local LLM token usage", "查看近期本地 token 用量"),
+        ("gai usage --since 7d --group action --cn", "Last 7 days, grouped by action", "最近 7 天并按动作汇总"),
+        ("gai usage --action commit -n 50 --cn", "Commit-related usage, last 50 rows", "只看 commit，最近 50 条"),
+    ),
     "balance": (
         ("gai balance --cn", "Query remaining API credit/balance", "查询 API Key 剩余额度"),
         ("gai balance", "Same in English", "英文输出余额查询结果"),
