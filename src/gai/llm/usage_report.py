@@ -297,7 +297,7 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
     project_options_html = "\n".join(project_options)
 
     return f"""<!DOCTYPE html>
-<html lang="{'zh-CN' if chinese else 'en'}">
+<html lang="{'zh-CN' if chinese else 'en'}" class="view-all">
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
@@ -479,6 +479,9 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
     padding: 8px 10px;
     font-size: .86rem;
   }}
+  /* all = overview across repos; repo = single-repo detail */
+  body.view-all .scope-repo {{ display: none !important; }}
+  body.view-repo .scope-all {{ display: none !important; }}
   .chart {{
     width: 100%;
     height: 300px;
@@ -598,14 +601,14 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
           </div>
           <div id="chart-day" class="chart tall"></div>
         </div>
-        <div class="card">
+        <div class="card scope-all">
           <h2>{t['by_repo']}</h2>
           <div class="hint">{t['hint_repo']}</div>
           <div id="chart-repo" class="chart"></div>
         </div>
-        <div class="card">
+        <div class="card scope-repo">
           <h2>{t['by_branch']}</h2>
-          <div class="hint">{t['hint_bar']}</div>
+          <div class="hint">{t['hint_branch_repo']}</div>
           <div id="chart-branch" class="chart"></div>
         </div>
         <div class="card">
@@ -643,12 +646,12 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
           <div class="hint">{t['hint_bar']}</div>
           <div id="chart-user" class="chart"></div>
         </div>
-        <div class="card full">
+        <div class="card full scope-all">
           <h2>{t['heatmap_repo']}</h2>
           <div class="hint">{t['hint_heat_repo']}</div>
           <div id="chart-heat-repo" class="chart tall"></div>
         </div>
-        <div class="card full">
+        <div class="card full scope-repo">
           <h2>{t['heatmap']}</h2>
           <div class="hint">{t['hint_heat']}</div>
           <div id="chart-heat" class="chart tall"></div>
@@ -1064,8 +1067,19 @@ function disposeCharts() {{
   chartHandles = [];
 }}
 
+function applyViewScope() {{
+  const isAll = currentProject === '__all__';
+  document.documentElement.classList.toggle('view-all', isAll);
+  document.documentElement.classList.toggle('view-repo', !isAll);
+  const hint = document.getElementById('project-hint');
+  if (hint) {{
+    hint.textContent = isAll ? I18N.hint_project_all : I18N.hint_project_repo;
+  }}
+}}
+
 function renderDashboard() {{
   A = activeAnalytics();
+  applyViewScope();
   updateKpis();
   const totals = A.totals || {{}};
   const empty = (totals.calls || 0) === 0;
@@ -1074,10 +1088,9 @@ function renderDashboard() {{
   disposeCharts();
   if (empty) return;
 
-  chartHandles = [
+  const isAll = currentProject === '__all__';
+  const charts = [
     initDayChart(),
-    initBar('chart-repo', A.by_repo || {{}}, {{ from: '#22d3ee', to: '#38bdf8' }}),
-    initBar('chart-branch', A.by_branch || {{}}, {{ from: '#0ea5e9', to: '#22d3ee' }}),
     initPie('chart-status', A.by_status || {{}}, {{
       valueKey: 'calls',
       unit: I18N.calls,
@@ -1098,9 +1111,19 @@ function renderDashboard() {{
     initPie('chart-provider', A.by_provider || {{}}),
     initBar('chart-model', A.by_model || {{}}),
     initBar('chart-user', A.by_user || {{}}, {{ from: '#10b981', to: '#34d399' }}),
-    initHeatmapRepo(),
-    initHeatmap(),
   ];
+  if (isAll) {{
+    charts.push(
+      initBar('chart-repo', A.by_repo || {{}}, {{ from: '#22d3ee', to: '#38bdf8' }}),
+      initHeatmapRepo()
+    );
+  }} else {{
+    charts.push(
+      initBar('chart-branch', A.by_branch || {{}}, {{ from: '#0ea5e9', to: '#22d3ee' }}),
+      initHeatmap()
+    );
+  }}
+  chartHandles = charts;
   fillTable();
 }}
 
@@ -1259,12 +1282,15 @@ def _i18n(chinese: bool) -> dict[str, str]:
             "project_filter": "项目仓库",
             "project_all": "全部项目",
             "hint_project": "按仓库筛选；远程与仓库绑定，不做单独筛选",
+            "hint_project_all": "总览：跨仓库对比（按仓库用量、仓库×动作）",
+            "hint_project_repo": "单仓详情：分支分布、动作×分支等仓内分析",
             "by_day": "用量趋势",
             "by_repo": "按仓库用量",
-            "hint_repo": "以仓库根目录名为项目维度（含绑定远程）",
+            "hint_repo": "全部项目总览：对比各仓库 Token 消耗",
             "heatmap_repo": "仓库 × 动作（Token 热力图）",
-            "hint_heat_repo": "颜色越亮表示该仓库上该动作消耗越多",
+            "hint_heat_repo": "全部项目总览：颜色越亮表示该仓库上该动作消耗越多",
             "by_branch": "按分支用量",
+            "hint_branch_repo": "单仓详情：当前仓库内各分支 Token 消耗",
             "by_status": "成功 / 失败",
             "token_split": "输入 vs 输出 Token",
             "duration_by_model": "按模型平均耗时",
@@ -1273,6 +1299,7 @@ def _i18n(chinese: bool) -> dict[str, str]:
             "by_model": "按模型用量",
             "by_user": "按用户用量",
             "heatmap": "动作 × 分支（Token 热力图）",
+            "hint_heat": "单仓详情：颜色越亮表示该分支上该动作消耗越多",
             "hint_day": "双轴：Token 与调用次数",
             "hint_today": "当天 0:00 到当前时刻，按小时统计",
             "hint_last7": "含今天在内的最近 7 个自然日",
@@ -1286,7 +1313,6 @@ def _i18n(chinese: bool) -> dict[str, str]:
             "hint_status": "按调用次数看稳定性",
             "hint_split": "区分读入与生成消耗",
             "hint_duration": "单位：毫秒（ms）",
-            "hint_heat": "颜色越亮表示该分支上该动作消耗越多",
             "recent": "最近记录（最多 100 条）",
             "col_time": "时间",
             "col_user": "用户",
@@ -1331,12 +1357,15 @@ def _i18n(chinese: bool) -> dict[str, str]:
         "project_filter": "Project repo",
         "project_all": "All projects",
         "hint_project": "Filter by repo; remote is bound to repo (not a separate filter)",
+        "hint_project_all": "Overview: compare across repos (by repo, repo×action)",
+        "hint_project_repo": "Repo detail: branch breakdown, action×branch, etc.",
         "by_day": "Usage trend",
         "by_repo": "By repository",
-        "hint_repo": "Project dimension is repo root name (with bound remote)",
+        "hint_repo": "All-projects overview: compare token usage by repo",
         "heatmap_repo": "Repo × action heatmap (tokens)",
-        "hint_heat_repo": "Brighter cells mean more tokens for that action in that repo",
+        "hint_heat_repo": "All-projects overview: brighter means more tokens for that action in that repo",
         "by_branch": "By branch",
+        "hint_branch_repo": "Repo detail: token usage by branch in the selected repo",
         "by_status": "Success / failure",
         "token_split": "Prompt vs completion tokens",
         "duration_by_model": "Avg duration by model",
@@ -1345,6 +1374,7 @@ def _i18n(chinese: bool) -> dict[str, str]:
         "by_model": "By model",
         "by_user": "By user",
         "heatmap": "Action × branch heatmap (tokens)",
+        "hint_heat": "Repo detail: brighter means more tokens for that action on that branch",
         "hint_day": "Dual axis: tokens and call count",
         "hint_today": "Today from 00:00 to now, hourly buckets",
         "hint_last7": "Last 7 calendar days including today",
@@ -1358,7 +1388,6 @@ def _i18n(chinese: bool) -> dict[str, str]:
         "hint_status": "Call counts for reliability",
         "hint_split": "Separate read vs generate cost",
         "hint_duration": "Unit: milliseconds (ms)",
-        "hint_heat": "Brighter cells mean more tokens for that action on that branch",
         "recent": "Recent records (up to 100)",
         "col_time": "Time",
         "col_user": "User",
