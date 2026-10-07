@@ -7,6 +7,7 @@ from pathlib import Path
 from gai.llm.history import UsageRecord, append_usage_record, load_usage_records
 from gai.llm.usage_report import (
     build_usage_analytics,
+    path_to_file_url,
     usage_report_path,
     write_usage_report,
 )
@@ -63,9 +64,12 @@ def test_write_usage_report_fixed_path(tmp_path: Path, monkeypatch) -> None:
     assert out == usage_report_path()
     text = out.read_text(encoding="utf-8")
     assert "gai Token 用量报告" in text
-    assert "Chart.js" in text or "chart.js" in text
+    assert "echarts" in text.lower()
     assert "DeepSeek" in text or "deepseek" in text.lower()
     assert "review+message" in text or "DATA" in text
+    url = path_to_file_url(out)
+    assert url.startswith("file://")
+    assert "usage-report.html" in url
 
     analytics = build_usage_analytics(records)
     assert analytics["totals"]["calls"] == 2

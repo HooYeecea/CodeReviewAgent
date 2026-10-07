@@ -43,7 +43,11 @@ from gai.llm.history import (
     load_usage_records,
     usage_log_path,
 )
-from gai.llm.usage_report import usage_report_path, write_usage_report
+from gai.llm.usage_report import (
+    path_to_file_url,
+    usage_report_path,
+    write_usage_report,
+)
 from gai.llm.usage import (
     clear_llm_usage,
     get_llm_calls,
@@ -1381,16 +1385,20 @@ def usage_cmd(
         )
         if report:
             path = write_usage_report(records, chinese=cn)
+            link = path_to_file_url(path)
             msg = (
                 f"已同步用量报告：{path}"
                 if cn
                 else f"Synced usage report: {path}"
             )
             console.print(f"[green]{msg}[/green]")
+            label = "浏览器打开：" if cn else "Open in browser:"
+            # Rich markup link is clickable in supporting terminals (VS Code / Windows Terminal).
+            console.print(f"{label} [link={link}][cyan underline]{link}[/cyan underline][/link]")
             tip = (
-                "用浏览器打开该文件即可查看图表；再次执行会覆盖同步最新 usage.jsonl。"
+                "点击上方链接即可在浏览器中查看 ECharts 图表；再次执行会覆盖同步最新 usage.jsonl。"
                 if cn
-                else "Open it in a browser for charts; re-run overwrites with latest usage.jsonl."
+                else "Click the link above to open the ECharts dashboard; re-run overwrites with latest usage.jsonl."
             )
             console.print(f"[dim]{tip}[/dim]")
             if as_json:
