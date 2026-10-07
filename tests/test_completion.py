@@ -62,7 +62,16 @@ def test_completion_lists_all_top_level_commands():
             rc = shell_complete(cmd, {}, "gai", "_GAI_COMPLETE", "complete_powershell")
         assert rc == 0
         text = buf.getvalue()
-        for name in ("add", "commit", "review", "report", "usage", "completion", "config"):
+        for name in (
+            "add",
+            "commit",
+            "review",
+            "report",
+            "usage",
+            "guide",
+            "completion",
+            "config",
+        ):
             assert f"{name}:::" in text
     finally:
         restore()

@@ -55,6 +55,7 @@ from gai.llm.usage import (
     set_llm_action,
     usage_totals,
 )
+from gai.guide import write_guide_html
 from gai.report import export_report, render_report, run_report
 from gai.review import render_review, run_review
 app = typer.Typer(
@@ -1438,6 +1439,46 @@ def usage_cmd(
         raise typer.Exit(code=130) from None
     finally:
         _print_footer(trace=trace, chinese=cn)
+
+
+@app.command(
+    "guide",
+    help=H(
+        "Generate a local HTML user guide at .gai/guide.html (bilingual, with language toggle).",
+        "生成本地 HTML 使用指南：.gai/guide.html（中英双语，页面内可切换语言）。",
+    ),
+)
+def guide_cmd(
+    cn: bool = typer.Option(
+        False,
+        "--cn",
+        help=H(
+            "Open the guide with Chinese as the initial language.",
+            "以中文作为页面初始语言；页面内仍可切换到英文。",
+        ),
+    ),
+) -> None:
+    """Write .gai/guide.html and print a file:// link."""
+    path = write_guide_html(chinese=cn)
+    link = path_to_file_url(path)
+    msg = (
+        f"已生成使用指南：{path}"
+        if cn
+        else f"Wrote user guide: {path}"
+    )
+    console.print(f"[green]{msg}[/green]")
+    label = "浏览器打开：" if cn else "Open in browser:"
+    console.print(f"{label} [link={link}][cyan underline]{link}[/cyan underline][/link]")
+    tip = (
+        "带 --cn 时首屏为中文，不带则为英文；页面右上角语言按钮可随时切换。"
+        "再次执行会覆盖同步本文件。"
+        if cn
+        else (
+            "With --cn the page opens in Chinese; without it, English. "
+            "Use the in-page language toggle anytime. Re-run overwrites this file."
+        )
+    )
+    console.print(f"[dim]{tip}[/dim]")
 
 
 @app.command(

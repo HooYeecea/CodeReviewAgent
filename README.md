@@ -118,6 +118,7 @@ gai uncommit --cn         # 撤销最近一次提交（soft，需确认）
 gai report --cn           # 最近 7 天工作总结
 gai balance --cn          # 查询 API Key 剩余额度（若厂商支持）
 gai usage --cn            # 查看本地记录的 token 用量历史
+gai guide --cn            # 生成 .gai/guide.html 可视化使用指南（中英可切换）
 gai usage --report --cn   # 同步生成 .gai/usage-report.html 可视化报告
 gai add --cn -t           # 暂存并打印底层 git 链路
 ```
@@ -355,6 +356,21 @@ gai usage --user alice --json
 | `--cn` | 中文输出 |
 | `-t` / `--trace` | 打印链路（本命令通常无 git） |
 
+### `gai guide`
+
+生成本地可视化使用指南，固定写入 **`.gai/guide.html`**（中英双语同一文件）。
+
+```bash
+gai guide --cn    # 首屏中文
+gai guide         # 首屏英文
+```
+
+页面内可随时切换语言；命令行会打印可点击的 `file://` 链接。再次执行会覆盖同步。
+
+| 参数 | 说明 |
+|------|------|
+| `--cn` | 首屏使用中文（页面内仍可切到英文） |
+
 ### `gai balance`
 
 查询当前配置的 API Key **剩余额度**。
@@ -413,7 +429,8 @@ CodeReviewAgent/
   pyproject.toml
   README.md
   src/gai/
-    cli.py           # 入口：add / unadd / uncommit / review / commit / push / pull / report / usage / balance / config / completion
+    cli.py           # 入口：add / unadd / uncommit / review / commit / push / pull / report / usage / guide / balance / config / completion
+    guide.py         # .gai/guide.html 可视化使用指南（中英双语）
     completion_cmd.py # shell Tab 补全安装 / 查看
     cli_usage.py     # 子命令 / 参数拼写纠错
     errors.py        # 友好错误文案

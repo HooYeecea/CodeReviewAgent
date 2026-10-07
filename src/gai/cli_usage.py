@@ -92,6 +92,18 @@ _COMMAND_EXAMPLES: dict[str, tuple[tuple[str, str, str], ...]] = {
             "打印 PowerShell 补全脚本",
         ),
     ),
+    "guide": (
+        (
+            "gai guide --cn",
+            "Generate .gai/guide.html and open with Chinese first",
+            "生成 .gai/guide.html，首屏为中文",
+        ),
+        (
+            "gai guide",
+            "Generate the bilingual HTML guide (English first)",
+            "生成中英双语 HTML 指南（英文首屏）",
+        ),
+    ),
 }
 
 
