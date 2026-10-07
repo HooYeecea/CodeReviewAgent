@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
@@ -14,6 +15,12 @@ from rich.prompt import Confirm, Prompt
 
 from gai import __version__
 from gai.cli_usage import format_usage_error, want_chinese
+from gai.command_history import (
+    command_log_path,
+    format_command_table,
+    load_command_records,
+    maybe_record_command,
+)
 from gai.completion_cmd import completion_app
 from gai.config import CONFIG_FILE, load_settings, save_settings, settings_summary
 from gai.errors import PeriodError, format_cli_error
@@ -1551,6 +1558,109 @@ def guide_cmd(
 
 
 @app.command(
+    "history",
+    help=H(
+        "Show local gai command execution history (.gai/commands.jsonl).",
+        "查看本地 gai 命令执行记录（.gai/commands.jsonl）。",
+    ),
+)
+def history_cmd(
+    limit: int = typer.Option(
+        20,
+        "--limit",
+        "-n",
+        help=H(
+            "Max records to show (newest first after filters; default 20).",
+            "最多显示条数（过滤后取最新；默认 20）。",
+        ),
+    ),
+    since: Optional[str] = typer.Option(
+        None,
+        "--since",
+        "-s",
+        help=H(
+            "Only records after this time: 7d / 2w / 1m / 1y / YYYY-MM-DD / alltime.",
+            "只看该时间之后：7d / 2w / 1m / 1y / YYYY-MM-DD / alltime。",
+        ),
+    ),
+    command: Optional[str] = typer.Option(
+        None,
+        "--command",
+        "-c",
+        help=H(
+            "Filter by subcommand name (e.g. commit, usage, completion).",
+            "按子命令名过滤（如 commit、usage、completion）。",
+        ),
+    ),
+    failed: bool = typer.Option(
+        False,
+        "--failed",
+        help=H("Only show failed runs (non-zero exit).", "只显示失败的执行（非零退出码）。"),
+    ),
+    as_json: bool = typer.Option(
+        False,
+        "--json",
+        help=H("Print records as JSON.", "以 JSON 输出记录。"),
+    ),
+    cn: bool = typer.Option(
+        False,
+        "--cn",
+        help=H(
+            "Use Simplified Chinese output.",
+            "使用简体中文输出；与 -h 联用时显示中文帮助。",
+        ),
+    ),
+    trace: bool = typer.Option(
+        False,
+        "--trace",
+        "-t",
+        help=_TRACE_OPT_HELP,
+    ),
+) -> None:
+    """Show locally recorded gai CLI invocations."""
+    _start_trace(trace)
+    try:
+        since_dt = _parse_usage_since(since)
+        cap = None if limit <= 0 else limit
+        records = load_command_records(
+            limit=cap,
+            since=since_dt,
+            command=command,
+            ok=False if failed else None,
+        )
+        if as_json:
+            console.print_json(data=[r.to_dict() for r in records])
+        else:
+            console.print(format_command_table(records, chinese=cn))
+            if not records:
+                tip = (
+                    f"（写入位置：{command_log_path()}；"
+                    "每次执行 gai 子命令后会自动追加一行。"
+                    "可用环境变量 GAI_HISTORY=0 关闭。）"
+                    if cn
+                    else (
+                        f"(log path: {command_log_path()}; "
+                        "each gai invocation appends one line. "
+                        "Disable with GAI_HISTORY=0.)"
+                    )
+                )
+                console.print(f"[dim]{tip}[/dim]")
+    except PeriodError as exc:
+        _print_error(exc, chinese=cn, trace=trace)
+        raise typer.Exit(code=1) from exc
+    except OSError as exc:
+        _print_error(exc, chinese=cn, trace=trace)
+        raise typer.Exit(code=1) from exc
+    except typer.Exit:
+        raise
+    except KeyboardInterrupt:
+        console.print("\n已取消。" if cn else "\nAborted.")
+        raise typer.Exit(code=130) from None
+    finally:
+        _print_footer(trace=trace, chinese=cn)
+
+
+@app.command(
     "balance",
     help=H(
         "Show remaining API credit/balance when the provider supports it.",
@@ -1706,14 +1816,16 @@ def run(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     chinese = want_chinese(args)
     root = get_command(app)
+    started = time.perf_counter()
+    code = 1
 
     def _exit_code(exc: BaseException) -> int | None:
         if type(exc).__name__ == "Exit":
-            code = getattr(exc, "exit_code", 0)
-            return int(code) if code is not None else 0
+            exit_code = getattr(exc, "exit_code", 0)
+            return int(exit_code) if exit_code is not None else 0
         if isinstance(exc, typer.Exit):
-            code = getattr(exc, "exit_code", 0)
-            return int(code) if code is not None else 0
+            exit_code = getattr(exc, "exit_code", 0)
+            return int(exit_code) if exit_code is not None else 0
         return None
 
     def _is_usage_error(exc: BaseException) -> bool:
@@ -1735,30 +1847,40 @@ def run(argv: list[str] | None = None) -> int:
             return False
 
     try:
-        rv = root.main(args=args, prog_name="gai", standalone_mode=False)
-        return int(rv) if isinstance(rv, int) else 0
-    except BaseException as exc:
-        if isinstance(exc, SystemExit):
-            code = exc.code
-            if code is None:
-                return 0
-            if isinstance(code, int):
-                return code
-            return 1
-        code = _exit_code(exc)
-        if code is not None:
+        try:
+            rv = root.main(args=args, prog_name="gai", standalone_mode=False)
+            code = int(rv) if isinstance(rv, int) else 0
             return code
-        if type(exc).__name__ == "Abort":
-            tip = "\n已取消。" if chinese else "\nAborted."
-            err_console.print(tip)
-            return 130
-        if _is_usage_error(exc):
-            tip = format_usage_error(exc, argv=args, root=root, chinese=chinese)
-            label = "用法错误：" if chinese else "Usage:"
-            err_console.print(f"[red]{label}[/red]")
-            err_console.print(tip)
-            return 2
-        raise
+        except BaseException as exc:
+            if isinstance(exc, SystemExit):
+                exit_code = exc.code
+                if exit_code is None:
+                    code = 0
+                elif isinstance(exit_code, int):
+                    code = exit_code
+                else:
+                    code = 1
+                return code
+            mapped = _exit_code(exc)
+            if mapped is not None:
+                code = mapped
+                return code
+            if type(exc).__name__ == "Abort":
+                tip = "\n已取消。" if chinese else "\nAborted."
+                err_console.print(tip)
+                code = 130
+                return code
+            if _is_usage_error(exc):
+                tip = format_usage_error(exc, argv=args, root=root, chinese=chinese)
+                label = "用法错误：" if chinese else "Usage:"
+                err_console.print(f"[red]{label}[/red]")
+                err_console.print(tip)
+                code = 2
+                return code
+            raise
+    finally:
+        duration_ms = max(0, int((time.perf_counter() - started) * 1000))
+        maybe_record_command(args, exit_code=code, duration_ms=duration_ms)
 
 
 if __name__ == "__main__":

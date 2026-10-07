@@ -118,6 +118,7 @@ gai uncommit --cn         # 撤销最近一次提交（soft，需确认）
 gai report --cn           # 最近 7 天工作总结
 gai balance --cn          # 查询 API Key 剩余额度（若厂商支持）
 gai usage --cn            # 查看本地记录的 token 用量历史
+gai history --cn          # 查看本地 gai 命令执行记录
 gai guide --cn --open     # 生成 .gai/guide.html 并用浏览器打开
 gai usage --serve --cn    # 同步用量报告并以本地 HTTP 打开（刷新更稳）
 gai add --cn -t           # 暂存并打印底层 git 链路
@@ -159,6 +160,7 @@ gai report --cn -o .\reports\                # 目录不存在则自动创建
 | `gai report` | 根据提交记录写工作总结 |
 | `gai balance` | 查询 API Key 剩余额度（厂商支持时） |
 | `gai usage` | 查看本地记录的大模型 token 用量历史 |
+| `gai history` | 查看本地 gai 命令执行记录 |
 | `gai config` | 查看 / 写入 `~/.gai/config.toml` |
 
 ## 命令参考
@@ -385,6 +387,27 @@ gai guide                # 首屏英文
 | `--open` | 用默认浏览器打开 |
 | `--serve` | 用本地 HTTP 打开 |
 
+### `gai history`
+
+查看 **本地** 记录的 gai 命令执行历史（与 `gai usage` 的 token 用量分开）。每次通过 `gai` 入口执行的子命令都会追加一行到仓库 `.gai/commands.jsonl`（已 `.gitignore`）；可用 `GAI_HISTORY=0` 关闭，或用 `GAI_HISTORY_LOG` 覆盖路径。密钥类参数（如 `--api-key`）会掩码为 `***`。
+
+```bash
+gai history --cn
+gai history --command commit --cn
+gai history --failed --since 7d --cn
+gai history -n 50 --json
+```
+
+| 参数 | 说明 |
+|------|------|
+| `-n` / `--limit` | 最多显示条数（默认 20；`0` 不限制） |
+| `-s` / `--since` | `7d` / `2w` / `YYYY-MM-DD` / `alltime` |
+| `-c` / `--command` | 按子命令名过滤（如 `commit`、`usage`） |
+| `--failed` | 只看失败（非零退出码） |
+| `--json` | JSON 输出 |
+| `--cn` | 中文输出 |
+| `-t` / `--trace` | 打印链路（本命令通常无 git） |
+
 ### `gai balance`
 
 查询当前配置的 API Key **剩余额度**。
@@ -427,6 +450,7 @@ gai balance
 - **余额查询**：`gai balance` 先确认 API Key；按 `base_url` 识别厂商查询（DeepSeek / 硅基流动 / Moonshot·Kimi / OpenRouter）；未接入的厂商会提示当前厂商与模型。
 - **Git**：非仓库、无 remote、鉴权失败、推送被拒、拉取冲突、脏工作区等有可读说明；`--trace` 时额外打印原始详情。
 - **用量**：黄色一行显示本次调用；有 token 合计时只显示接口返回值，**不估算**。历史用量见 `gai usage`（本地 JSONL）。
+- **命令记录**：每次 `gai …` 执行会写入 `.gai/commands.jsonl`；用 `gai history` 查看，`GAI_HISTORY=0` 可关闭。
 
 ## 设计要点
 
@@ -443,7 +467,8 @@ CodeReviewAgent/
   pyproject.toml
   README.md
   src/gai/
-    cli.py           # 入口：add / unadd / uncommit / review / commit / push / pull / report / usage / guide / balance / config / completion
+    cli.py           # 入口：add / unadd / uncommit / review / commit / push / pull / report / usage / history / guide / balance / config / completion
+    command_history.py # .gai/commands.jsonl 命令执行记录
     guide.py         # .gai/guide.html 可视化使用指南（中英双语）
     completion_cmd.py # shell Tab 补全安装 / 查看
     cli_usage.py     # 子命令 / 参数拼写纠错

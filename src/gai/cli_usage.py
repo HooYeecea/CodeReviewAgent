@@ -69,6 +69,12 @@ _COMMAND_EXAMPLES: dict[str, tuple[tuple[str, str, str], ...]] = {
         ("gai usage --since 7d --group action --cn", "Last 7 days, grouped by action", "最近 7 天并按动作汇总"),
         ("gai usage --action commit -n 50 --cn", "Commit-related usage, last 50 rows", "只看 commit，最近 50 条"),
     ),
+    "history": (
+        ("gai history --cn", "Show recent gai command runs", "查看近期 gai 命令执行记录"),
+        ("gai history --command commit --cn", "Only commit-related runs", "只看 commit 相关执行"),
+        ("gai history --failed --since 7d --cn", "Failed runs in the last 7 days", "最近 7 天失败的执行"),
+        ("gai history -n 50 --json", "Last 50 rows as JSON", "最近 50 条以 JSON 输出"),
+    ),
     "balance": (
         ("gai balance --cn", "Query remaining API credit/balance", "查询 API Key 剩余额度"),
         ("gai balance", "Same in English", "英文输出余额查询结果"),

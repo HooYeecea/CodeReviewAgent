@@ -114,6 +114,17 @@ _COMMAND_META: list[dict[str, Any]] = [
         },
     },
     {
+        "id": "history",
+        "en": {
+            "title": "Command history",
+            "blurb": "Local log of gai CLI invocations (.gai/commands.jsonl).",
+        },
+        "cn": {
+            "title": "命令执行记录",
+            "blurb": "本地记录每次 gai 命令执行（.gai/commands.jsonl）。",
+        },
+    },
+    {
         "id": "balance",
         "en": {
             "title": "API balance",
@@ -234,6 +245,7 @@ def _i18n() -> dict[str, dict[str, str]]:
                 "审查 / 提交只看 staged diff（git diff --cached），不会偷偷提交未暂存文件。",
                 "不拦截原生 git：也可用 --no-ai -m 或直接 git commit / git push。",
                 "用量报告：gai usage --report / --serve → .gai/usage-report.html",
+                "命令执行记录：gai history --cn → .gai/commands.jsonl（GAI_HISTORY=0 可关闭）",
                 "本教程：gai guide [--cn] [--open|--serve] → .gai/guide.html；深链如 guide.html#commit",
                 "主题与语言偏好与用量报告共用（gai-ui-theme / gai-ui-lang）",
                 "PowerShell Tab 补全：gai completion install --shell powershell --cn，然后重开终端",
@@ -293,6 +305,7 @@ def _i18n() -> dict[str, dict[str, str]]:
                 "Review/commit only look at staged diffs (git diff --cached).",
                 "Native git stays available: use --no-ai -m or plain git commit / git push.",
                 "Usage dashboard: gai usage --report / --serve → .gai/usage-report.html",
+                "Command history: gai history --cn → .gai/commands.jsonl (disable with GAI_HISTORY=0)",
                 "This guide: gai guide [--cn] [--open|--serve] → .gai/guide.html; deep links like guide.html#commit",
                 "Theme/language prefs are shared with the usage report (gai-ui-theme / gai-ui-lang)",
                 "PowerShell Tab completion: gai completion install --shell powershell --cn, then restart the terminal",
