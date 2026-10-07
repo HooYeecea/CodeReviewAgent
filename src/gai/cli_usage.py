@@ -64,6 +64,8 @@ _COMMAND_EXAMPLES: dict[str, tuple[tuple[str, str, str], ...]] = {
     "usage": (
         ("gai usage --cn", "Show recent local LLM token usage", "查看近期本地 token 用量"),
         ("gai usage --report --cn", "Sync HTML dashboard to .gai/usage-report.html", "同步生成 .gai/usage-report.html 可视化报告"),
+        ("gai usage --report --open --cn", "Sync dashboard and open in browser", "同步报告并用浏览器打开"),
+        ("gai usage --report --serve --cn", "Sync and serve over local HTTP", "同步报告并以本地 HTTP 打开（可稳定刷新）"),
         ("gai usage --since 7d --group action --cn", "Last 7 days, grouped by action", "最近 7 天并按动作汇总"),
         ("gai usage --action commit -n 50 --cn", "Commit-related usage, last 50 rows", "只看 commit，最近 50 条"),
     ),
@@ -95,8 +97,18 @@ _COMMAND_EXAMPLES: dict[str, tuple[tuple[str, str, str], ...]] = {
     "guide": (
         (
             "gai guide --cn",
-            "Generate .gai/guide.html and open with Chinese first",
+            "Generate .gai/guide.html with Chinese as the initial language",
             "生成 .gai/guide.html，首屏为中文",
+        ),
+        (
+            "gai guide --open --cn",
+            "Generate the guide and open it in the browser",
+            "生成指南并用浏览器打开",
+        ),
+        (
+            "gai guide --serve --cn",
+            "Generate and serve the guide over local HTTP",
+            "生成指南并以本地 HTTP 打开",
         ),
         (
             "gai guide",
@@ -107,9 +119,14 @@ _COMMAND_EXAMPLES: dict[str, tuple[tuple[str, str, str], ...]] = {
 }
 
 
+def command_examples(command: str) -> tuple[tuple[str, str, str], ...]:
+    """Return (cmdline, en_desc, cn_desc) examples for a subcommand (shared with guide)."""
+    return _COMMAND_EXAMPLES.get(command, ())
+
+
 def _example_lines(command: str, *, chinese: bool, limit: int = 3) -> list[str]:
     """Format '正确示例/Correct examples' lines with what each command does."""
-    items = _COMMAND_EXAMPLES.get(command, ())
+    items = command_examples(command)
     if not items:
         return []
     header = "正确示例：" if chinese else "Correct examples:"

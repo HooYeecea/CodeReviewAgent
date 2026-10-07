@@ -12,6 +12,7 @@ from gai.llm.usage_report import (
     build_trend_series,
     build_usage_analytics,
     path_to_file_url,
+    sync_usage_data_file,
     usage_report_path,
     write_usage_report,
 )
@@ -80,8 +81,13 @@ def test_write_usage_report_fixed_path(tmp_path: Path, monkeypatch) -> None:
     assert "gai Token 用量报告" in text
     assert "echarts" in text.lower()
     assert "btn-refresh" in text
+    assert "btn-export-csv" in text
+    assert "btn-page-next" in text
     assert "btn-theme-dark" in text
     assert "btn-lang-cn" in text
+    assert "gai-ui-theme" in text
+    assert "gai-ui-lang" in text
+    assert "refresh_fail_file" in text
     assert "usage-data.js" in text
     assert "window.__GAI_USAGE_DATASETS__" in data_js
     assert "DeepSeek" in data_js or "deepseek" in data_js.lower()
@@ -185,3 +191,30 @@ def test_trend_today_is_hourly_until_now() -> None:
     assert last7["labels"][-1] == "2026-10-07"
     assert last7["tokens"][-1] == 30
     assert "2026-10" in trends["month"]["labels"]
+
+
+def test_sync_usage_data_file_creates_html_shell(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr("gai.llm.usage_report.project_root", lambda cwd=None: tmp_path)
+    monkeypatch.setattr("gai.llm.history.project_root", lambda cwd=None: tmp_path)
+    log = tmp_path / ".gai" / "usage.jsonl"
+    append_usage_record(
+        UsageRecord(
+            ts="2026-10-07T10:00:00+08:00",
+            git_user="Alice",
+            git_email="a@x.com",
+            provider="deepseek",
+            provider_name="DeepSeek",
+            model="deepseek-chat",
+            action="review",
+            total_tokens=10,
+            ok=True,
+        ),
+        path=log,
+    )
+    html = tmp_path / ".gai" / "usage-report.html"
+    data = tmp_path / ".gai" / "usage-data.js"
+    assert data.is_file()
+    assert html.is_file()
+    assert "echarts" in html.read_text(encoding="utf-8").lower()
+    # Force sync still works
+    assert sync_usage_data_file(log_path=log, force=True) == data

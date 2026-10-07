@@ -44,6 +44,7 @@ from gai.llm.history import (
     load_usage_records,
     usage_log_path,
 )
+from gai.local_serve import open_path, serve_gai_page
 from gai.llm.usage_report import (
     path_to_file_url,
     usage_report_path,
@@ -1346,6 +1347,22 @@ def usage_cmd(
             "根据 usage.jsonl 同步生成固定 HTML 报告：.gai/usage-report.html。",
         ),
     ),
+    open_browser: bool = typer.Option(
+        False,
+        "--open",
+        help=H(
+            "Open the HTML dashboard in the default browser (implies --report).",
+            "用默认浏览器打开 HTML 报告（隐含 --report）。",
+        ),
+    ),
+    serve: bool = typer.Option(
+        False,
+        "--serve",
+        help=H(
+            "Serve .gai over local HTTP and open (implies --report; stable Refresh).",
+            "用本地 HTTP 打开 .gai（隐含 --report；刷新更稳定）。",
+        ),
+    ),
     cn: bool = typer.Option(
         False,
         "--cn",
@@ -1373,9 +1390,10 @@ def usage_cmd(
             err_console.print(f"[red]{tip}[/red]")
             raise typer.Exit(code=1)
 
+        want_report = report or open_browser or serve
         since_dt = _parse_usage_since(since)
         # Report always uses the full filtered set; console view respects --limit.
-        if report:
+        if want_report:
             cap = None
         else:
             cap = None if limit <= 0 else limit
@@ -1386,7 +1404,7 @@ def usage_cmd(
             provider=provider,
             git_user=user,
         )
-        if report:
+        if want_report:
             path = write_usage_report(records, chinese=cn)
             link = path_to_file_url(path)
             msg = (
@@ -1395,15 +1413,35 @@ def usage_cmd(
                 else f"Synced usage report: {path}"
             )
             console.print(f"[green]{msg}[/green]")
-            label = "浏览器打开：" if cn else "Open in browser:"
-            # Rich markup link is clickable in supporting terminals (VS Code / Windows Terminal).
-            console.print(f"{label} [link={link}][cyan underline]{link}[/cyan underline][/link]")
-            tip = (
-                "点击上方链接即可在浏览器中查看 ECharts 图表；再次执行会覆盖同步最新 usage.jsonl。"
-                if cn
-                else "Click the link above to open the ECharts dashboard; re-run overwrites with latest usage.jsonl."
-            )
-            console.print(f"[dim]{tip}[/dim]")
+            if serve:
+                http_tip = (
+                    "正在本地 HTTP 服务中（Ctrl+C 结束）…"
+                    if cn
+                    else "Serving over local HTTP (Ctrl+C to stop)…"
+                )
+                console.print(f"[dim]{http_tip}[/dim]")
+                try:
+                    serve_gai_page(path, open_browser=True, hold_seconds=3600)
+                except KeyboardInterrupt:
+                    console.print("\n已停止服务。" if cn else "\nStopped server.")
+                    raise typer.Exit(code=130) from None
+            else:
+                label = "浏览器打开：" if cn else "Open in browser:"
+                console.print(
+                    f"{label} [link={link}][cyan underline]{link}[/cyan underline][/link]"
+                )
+                if open_browser:
+                    open_path(path, prefer_http=False)
+                tip = (
+                    "点击上方链接即可在浏览器中查看；日常 LLM 调用会自动更新 usage-data.js。"
+                    "刷新不稳时用：gai usage --serve"
+                    if cn
+                    else (
+                        "Click the link to open the dashboard; LLM calls refresh usage-data.js. "
+                        "If Refresh fails under file://, use: gai usage --serve"
+                    )
+                )
+                console.print(f"[dim]{tip}[/dim]")
             if as_json:
                 console.print_json(data=[r.to_dict() for r in records])
             return
@@ -1457,6 +1495,22 @@ def guide_cmd(
             "以中文作为页面初始语言；页面内仍可切换到英文。",
         ),
     ),
+    open_browser: bool = typer.Option(
+        False,
+        "--open",
+        help=H(
+            "Open the guide in the default browser.",
+            "用默认浏览器打开指南。",
+        ),
+    ),
+    serve: bool = typer.Option(
+        False,
+        "--serve",
+        help=H(
+            "Serve .gai over local HTTP and open the guide.",
+            "用本地 HTTP 打开指南。",
+        ),
+    ),
 ) -> None:
     """Write .gai/guide.html and print a file:// link."""
     path = write_guide_html(chinese=cn)
@@ -1467,15 +1521,30 @@ def guide_cmd(
         else f"Wrote user guide: {path}"
     )
     console.print(f"[green]{msg}[/green]")
+    if serve:
+        http_tip = (
+            "正在本地 HTTP 服务中（Ctrl+C 结束）…"
+            if cn
+            else "Serving over local HTTP (Ctrl+C to stop)…"
+        )
+        console.print(f"[dim]{http_tip}[/dim]")
+        try:
+            serve_gai_page(path, open_browser=True, hold_seconds=3600)
+        except KeyboardInterrupt:
+            console.print("\n已停止服务。" if cn else "\nStopped server.")
+            raise typer.Exit(code=130) from None
+        return
     label = "浏览器打开：" if cn else "Open in browser:"
     console.print(f"{label} [link={link}][cyan underline]{link}[/cyan underline][/link]")
+    if open_browser:
+        open_path(path, prefer_http=False)
     tip = (
-        "带 --cn 时首屏为中文，不带则为英文；页面右上角语言按钮可随时切换。"
+        "带 --cn 时首屏为中文；页面内可搜命令、深链 #commit；主题/语言与用量报告共用。"
         "再次执行会覆盖同步本文件。"
         if cn
         else (
-            "With --cn the page opens in Chinese; without it, English. "
-            "Use the in-page language toggle anytime. Re-run overwrites this file."
+            "With --cn the page opens in Chinese. Search commands, deep-link #commit; "
+            "theme/lang prefs are shared with the usage report. Re-run overwrites this file."
         )
     )
     console.print(f"[dim]{tip}[/dim]")

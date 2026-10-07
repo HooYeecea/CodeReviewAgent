@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import json
+import time
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -17,9 +18,12 @@ from gai.llm.history import (
     summarize_records,
     usage_log_path,
 )
+from gai.web_prefs import PREF_LANG, PREF_THEME, early_prefs_script
 
 _REPORT_RELATIVE = Path(".gai") / "usage-report.html"
 _DATA_RELATIVE = Path(".gai") / "usage-data.js"
+# Avoid rewriting usage-data.js on every rapid LLM call burst.
+_SYNC_MIN_INTERVAL_SEC = 2.0
 
 
 def usage_report_path(cwd: Path | None = None) -> Path:
@@ -48,15 +52,40 @@ def write_usage_data_js(
     return target
 
 
-def sync_usage_data_file(*, log_path: Path | None = None) -> Path | None:
-    """Rebuild usage-data.js from usage.jsonl (best-effort; never raises)."""
+def sync_usage_data_file(
+    *,
+    log_path: Path | None = None,
+    force: bool = False,
+    ensure_html: bool = True,
+) -> Path | None:
+    """Rebuild usage-data.js from usage.jsonl (best-effort; never raises).
+
+    Throttles rewrites within ``_SYNC_MIN_INTERVAL_SEC`` unless ``force``.
+    When ``ensure_html`` is True and the report HTML is missing, creates a
+    shell page so first-time users can open the dashboard after any LLM call.
+    """
     try:
-        records = load_usage_records(path=log_path)
-        datasets = build_report_datasets(records)
         data_path = (
             log_path.parent / "usage-data.js" if log_path is not None else usage_data_path()
         )
-        return write_usage_data_js(datasets, path=data_path)
+        if (
+            not force
+            and data_path.is_file()
+            and (time.time() - data_path.stat().st_mtime) < _SYNC_MIN_INTERVAL_SEC
+        ):
+            return data_path
+        records = load_usage_records(path=log_path)
+        datasets = build_report_datasets(records)
+        written = write_usage_data_js(datasets, path=data_path)
+        if ensure_html:
+            html_path = data_path.parent / "usage-report.html"
+            if not html_path.is_file():
+                # Create the HTML shell once; data file already written above.
+                html_path.write_text(
+                    render_usage_report_html(datasets, chinese=False),
+                    encoding="utf-8",
+                )
+        return written
     except Exception:
         return None
 
@@ -330,17 +359,7 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>{title}</title>
 <script>
-(function(){{
-  try {{
-    var th = localStorage.getItem('gai-usage-theme');
-    if (th === 'light' || th === 'dark') document.documentElement.setAttribute('data-theme', th);
-    var lg = localStorage.getItem('gai-usage-lang');
-    if (lg === 'cn' || lg === 'en') {{
-      document.documentElement.setAttribute('data-lang', lg);
-      document.documentElement.lang = lg === 'cn' ? 'zh-CN' : 'en';
-    }}
-  }} catch (e) {{}}
-}})();
+{early_prefs_script(default_lang=initial_lang, default_theme="dark")}
 </script>
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
 <script src="usage-data.js"></script>
@@ -703,6 +722,46 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
     opacity: .6;
     cursor: wait;
   }}
+  .toolbar .btn-export {{
+    border: 1px solid var(--panel-border);
+    background: var(--seg-btn);
+    color: var(--seg-btn-text);
+    border-radius: 999px;
+    padding: 8px 14px;
+    font: inherit;
+    font-weight: 650;
+    cursor: pointer;
+  }}
+  .toolbar .btn-export:hover {{ filter: brightness(1.08); }}
+  button:focus-visible, .dd-trigger:focus-visible, .seg button:focus-visible {{
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }}
+  .table-tools {{
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin: 0 0 10px;
+  }}
+  .pager {{
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }}
+  .pager button {{
+    border: 1px solid var(--panel-border);
+    background: var(--seg-btn);
+    color: var(--seg-btn-text);
+    border-radius: 8px;
+    padding: 6px 10px;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }}
+  .pager button:disabled {{ opacity: .45; cursor: not-allowed; }}
+  .pager-meta {{ color: var(--muted); font-size: .85rem; }}
   .toast {{
     position: fixed;
     bottom: 22px;
@@ -962,6 +1021,7 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
 
     <div class="toolbar">
       <button type="button" class="btn-refresh" id="btn-refresh" data-i="refresh">刷新</button>
+      <button type="button" class="btn-export" id="btn-export-csv" data-i="export_csv">导出 CSV</button>
       <div class="seg" role="group" aria-label="Theme">
         <button type="button" id="btn-theme-light" data-i="theme_light">日间</button>
         <button type="button" id="btn-theme-dark" data-i="theme_dark">夜间</button>
@@ -1091,6 +1151,13 @@ def render_usage_report_html(datasets: dict[str, Any], *, chinese: bool = False)
         </div>
         <div class="card full">
           <h2 data-i="recent">{t['recent']}</h2>
+          <div class="table-tools">
+            <div class="pager" role="navigation" aria-label="Table pages">
+              <button type="button" id="btn-page-prev" data-i="page_prev">上一页</button>
+              <span class="pager-meta" id="pager-meta"></span>
+              <button type="button" id="btn-page-next" data-i="page_next">下一页</button>
+            </div>
+          </div>
           <div class="table-wrap">
             <table>
               <thead>
@@ -1523,10 +1590,23 @@ function initHeatmapRepo() {{
   );
 }}
 
+const TABLE_PAGE_SIZE = 25;
+let tablePage = 0;
+
+function recentRows() {{
+  return A.recent || [];
+}}
+
 function fillTable() {{
   const body = document.getElementById('recent-body');
   body.innerHTML = '';
-  for (const r of (A.recent || [])) {{
+  const rows = recentRows();
+  const pages = Math.max(1, Math.ceil(rows.length / TABLE_PAGE_SIZE) || 1);
+  if (tablePage >= pages) tablePage = pages - 1;
+  if (tablePage < 0) tablePage = 0;
+  const start = tablePage * TABLE_PAGE_SIZE;
+  const slice = rows.slice(start, start + TABLE_PAGE_SIZE);
+  for (const r of slice) {{
     const tr = document.createElement('tr');
     const who = r.git_user && r.git_email
       ? `${{r.git_user}} <${{r.git_email}}>`
@@ -1561,6 +1641,45 @@ function fillTable() {{
       <td>${{status}}</td>`;
     body.appendChild(tr);
   }}
+  const metaEl = document.getElementById('pager-meta');
+  const prev = document.getElementById('btn-page-prev');
+  const next = document.getElementById('btn-page-next');
+  if (metaEl) {{
+    const shown = rows.length
+      ? `${{start + 1}}–${{start + slice.length}} / ${{rows.length}}`
+      : '0 / 0';
+    metaEl.textContent = (I18N.page_of || 'Page {{page}}/{{pages}} · {{shown}}')
+      .replace('{{page}}', String(tablePage + 1))
+      .replace('{{pages}}', String(pages))
+      .replace('{{shown}}', shown);
+  }}
+  if (prev) prev.disabled = tablePage <= 0;
+  if (next) next.disabled = tablePage >= pages - 1 || rows.length === 0;
+}}
+
+function exportCsv() {{
+  const rows = recentRows();
+  const headers = [
+    'ts','git_user','git_email','repo_name','remote_name','provider','model',
+    'action','action_detail','total_tokens','prompt_tokens','completion_tokens',
+    'branch','ok','error_kind','duration_ms'
+  ];
+  const escapeCell = (v) => {{
+    const s = v == null ? '' : String(v);
+    if (/[",\\n\\r]/.test(s)) return '"' + s.replaceAll('"', '""') + '"';
+    return s;
+  }};
+  const lines = [headers.join(',')];
+  for (const r of rows) {{
+    lines.push(headers.map((h) => escapeCell(r[h])).join(','));
+  }}
+  const blob = new Blob([lines.join('\\n')], {{ type: 'text/csv;charset=utf-8' }});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'gai-usage.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  showToast(I18N.export_ok || 'CSV exported');
 }}
 
 function esc(s) {{
@@ -1715,6 +1834,7 @@ function rebuildProjectMenu() {{
     btn.addEventListener('click', (e) => {{
       e.stopPropagation();
       currentProject = item.id || '__all__';
+      tablePage = 0;
       syncProjectDropdown();
       const root = document.getElementById('project-dd');
       const trigger = document.getElementById('project-dd-btn');
@@ -1781,9 +1901,16 @@ function applyDatasets(next) {{
   window.__GAI_USAGE_DATASETS__ = DATASETS;
   A = DATASETS.all || {{}};
   if (!currentTrend) currentTrend = A.default_trend || 'today';
+  tablePage = 0;
   rebuildProjectMenu();
   updateMetaLine();
   renderDashboard();
+}}
+
+function refreshHint() {{
+  const viaHttp = location.protocol === 'http:' || location.protocol === 'https:';
+  if (viaHttp) return I18N.refresh_fail_http || I18N.refresh_fail || 'Failed';
+  return I18N.refresh_fail_file || I18N.refresh_fail || 'Failed';
 }}
 
 function refreshData() {{
@@ -1806,7 +1933,7 @@ function refreshData() {{
     }}
   }};
   s.onerror = () => {{
-    showToast(I18N.refresh_fail || 'Failed');
+    showToast(refreshHint());
     if (btn) {{
       btn.disabled = false;
       btn.textContent = I18N.refresh;
@@ -1821,7 +1948,7 @@ function currentTheme() {{
 
 function applyTheme(theme) {{
   document.documentElement.setAttribute('data-theme', theme);
-  try {{ localStorage.setItem('gai-usage-theme', theme); }} catch (e) {{}}
+  try {{ localStorage.setItem('{PREF_THEME}', theme); }} catch (e) {{}}
   document.getElementById('btn-theme-light').classList.toggle('active', theme === 'light');
   document.getElementById('btn-theme-dark').classList.toggle('active', theme === 'dark');
 }}
@@ -1853,7 +1980,7 @@ function setLang(next) {{
   I18N = I18N_ALL[lang] || I18N_ALL.en;
   document.documentElement.setAttribute('data-lang', lang);
   document.documentElement.lang = lang === 'cn' ? 'zh-CN' : 'en';
-  try {{ localStorage.setItem('gai-usage-lang', lang); }} catch (e) {{}}
+  try {{ localStorage.setItem('{PREF_LANG}', lang); }} catch (e) {{}}
   document.getElementById('btn-lang-cn').classList.toggle('active', lang === 'cn');
   document.getElementById('btn-lang-en').classList.toggle('active', lang === 'en');
   applyStaticI18n();
@@ -1863,6 +1990,15 @@ function setLang(next) {{
 
 (function main() {{
   document.getElementById('btn-refresh').addEventListener('click', refreshData);
+  document.getElementById('btn-export-csv').addEventListener('click', exportCsv);
+  document.getElementById('btn-page-prev').addEventListener('click', () => {{
+    tablePage -= 1;
+    fillTable();
+  }});
+  document.getElementById('btn-page-next').addEventListener('click', () => {{
+    tablePage += 1;
+    fillTable();
+  }});
   document.getElementById('btn-theme-light').addEventListener('click', () => setTheme('light'));
   document.getElementById('btn-theme-dark').addEventListener('click', () => setTheme('dark'));
   document.getElementById('btn-lang-cn').addEventListener('click', () => setLang('cn'));
@@ -2062,10 +2198,17 @@ def _i18n(chinese: bool) -> dict[str, str]:
             "refresh": "刷新",
             "refreshing": "刷新中…",
             "refresh_ok": "已更新到最新用量数据",
-            "refresh_fail": "刷新失败：找不到 usage-data.js（请先运行 gai usage --report）",
+            "refresh_fail": "刷新失败：找不到 usage-data.js",
+            "refresh_fail_file": "刷新失败：file:// 下可能被浏览器拦截。请改用 gai usage --report --serve，或确认同目录有 usage-data.js",
+            "refresh_fail_http": "刷新失败：找不到 usage-data.js。请先执行 gai usage --report，或再跑一次会产生用量的 gai 命令",
+            "export_csv": "导出 CSV",
+            "export_ok": "已导出 CSV",
+            "page_prev": "上一页",
+            "page_next": "下一页",
+            "page_of": "第 {{page}}/{{pages}} 页 · {{shown}}",
             "theme_light": "日间",
             "theme_dark": "夜间",
-            "footer": "数据来自 .gai/usage.jsonl（同步为 usage-data.js）。点「刷新」可加载最新数据；日常 gai 调用也会自动更新数据文件。",
+            "footer": "数据来自 .gai/usage.jsonl（同步为 usage-data.js）。点「刷新」可加载最新数据；日常 gai 调用也会自动更新数据文件。file:// 刷新不稳时用 gai usage --report --serve。",
         }
     return {
         "title": "gai Token Usage Report",
@@ -2143,8 +2286,15 @@ def _i18n(chinese: bool) -> dict[str, str]:
         "refresh": "Refresh",
         "refreshing": "Refreshing…",
         "refresh_ok": "Usage data updated",
-        "refresh_fail": "Refresh failed: usage-data.js missing (run gai usage --report first)",
+        "refresh_fail": "Refresh failed: usage-data.js missing",
+        "refresh_fail_file": "Refresh failed: browsers may block file:// script reloads. Use gai usage --report --serve, or ensure usage-data.js sits beside this HTML.",
+        "refresh_fail_http": "Refresh failed: usage-data.js missing. Run gai usage --report, or any gai command that records LLM usage.",
+        "export_csv": "Export CSV",
+        "export_ok": "CSV exported",
+        "page_prev": "Prev",
+        "page_next": "Next",
+        "page_of": "Page {{page}}/{{pages}} · {{shown}}",
         "theme_light": "Light",
         "theme_dark": "Dark",
-        "footer": "Data from .gai/usage.jsonl (synced to usage-data.js). Click Refresh for the latest snapshot; normal gai LLM calls also update the data file.",
+        "footer": "Data from .gai/usage.jsonl (synced to usage-data.js). Click Refresh for the latest snapshot; normal gai LLM calls also update the data file. Prefer gai usage --report --serve if file:// refresh is blocked.",
     }

@@ -7,8 +7,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from gai.cli_usage import command_examples
 from gai.llm.history import project_root
 from gai.llm.usage_report import path_to_file_url
+from gai.web_prefs import PREF_LANG, PREF_THEME, early_prefs_script
 
 _GUIDE_RELATIVE = Path(".gai") / "guide.html"
 
@@ -19,303 +21,166 @@ __all__ = [
     "write_guide_html",
 ]
 
+# Titles/blurbs stay here; example lines are shared with cli_usage.command_examples().
+_COMMAND_META: list[dict[str, Any]] = [
+    {
+        "id": "add",
+        "en": {
+            "title": "Stage files",
+            "blurb": "Wrapper around git add. Defaults to '.' when no path is given.",
+        },
+        "cn": {
+            "title": "暂存文件",
+            "blurb": "包装 git add。未指定路径时默认暂存当前目录。",
+        },
+    },
+    {
+        "id": "unadd",
+        "en": {"title": "Unstage files", "blurb": "Undo staging. Asks for confirmation."},
+        "cn": {"title": "撤销暂存", "blurb": "撤销暂存区文件，需确认。"},
+    },
+    {
+        "id": "uncommit",
+        "en": {
+            "title": "Undo latest commit",
+            "blurb": "Soft reset (git reset --soft HEAD~1); changes stay staged.",
+        },
+        "cn": {
+            "title": "撤销最近提交",
+            "blurb": "软撤销（git reset --soft HEAD~1）；改动仍保留在暂存区。",
+        },
+    },
+    {
+        "id": "review",
+        "en": {
+            "title": "AI code review",
+            "blurb": "Review staged changes only — no commit.",
+        },
+        "cn": {"title": "AI 代码审查", "blurb": "只审查已暂存变更，不提交。"},
+    },
+    {
+        "id": "commit",
+        "en": {
+            "title": "Review & commit",
+            "blurb": "Review → suggest Conventional Commit message → confirm → commit.",
+        },
+        "cn": {
+            "title": "审查并提交",
+            "blurb": "审查 → 建议 Conventional Commits 信息 → 确认 → 提交。",
+        },
+    },
+    {
+        "id": "push",
+        "en": {
+            "title": "Push branch",
+            "blurb": "Push current branch; warns when there is nothing to push.",
+        },
+        "cn": {
+            "title": "推送分支",
+            "blurb": "推送当前分支；无可推送内容时会提示，不当成成功。",
+        },
+    },
+    {
+        "id": "pull",
+        "en": {
+            "title": "Pull updates",
+            "blurb": "Check remote updates, then pull (merge or rebase).",
+        },
+        "cn": {
+            "title": "拉取更新",
+            "blurb": "检查远程有更新后确认再拉取（merge 或 rebase）。",
+        },
+    },
+    {
+        "id": "report",
+        "en": {
+            "title": "Work summary",
+            "blurb": "Turn recent commits into a paste-ready work report.",
+        },
+        "cn": {
+            "title": "工作总结",
+            "blurb": "根据近期提交生成可粘贴的工作总结（周报 / 日报）。",
+        },
+    },
+    {
+        "id": "usage",
+        "en": {
+            "title": "Token usage",
+            "blurb": "Local LLM token history (JSONL) and optional ECharts dashboard.",
+        },
+        "cn": {
+            "title": "Token 用量",
+            "blurb": "本地大模型 token 用量（JSONL），可生成 ECharts 可视化报告。",
+        },
+    },
+    {
+        "id": "balance",
+        "en": {
+            "title": "API balance",
+            "blurb": "Query remaining credit when the provider supports it.",
+        },
+        "cn": {
+            "title": "余额查询",
+            "blurb": "查询 API Key 剩余额度（若厂商提供接口）。",
+        },
+    },
+    {
+        "id": "config",
+        "en": {
+            "title": "Configuration",
+            "blurb": "View or update ~/.gai/config.toml (env vars still win).",
+        },
+        "cn": {
+            "title": "配置",
+            "blurb": "查看或更新 ~/.gai/config.toml（环境变量优先级更高）。",
+        },
+    },
+    {
+        "id": "completion",
+        "en": {
+            "title": "Tab completion",
+            "blurb": "Install shell Tab-completion for gai subcommands and options.",
+        },
+        "cn": {
+            "title": "Tab 自动补全",
+            "blurb": "为 gai 子命令与选项安装 shell Tab 补全。",
+        },
+    },
+    {
+        "id": "guide",
+        "en": {
+            "title": "This guide",
+            "blurb": "Regenerate this HTML page under .gai/guide.html.",
+        },
+        "cn": {
+            "title": "本教程页",
+            "blurb": "重新生成 .gai/guide.html 可视化教程。",
+        },
+    },
+]
+
 
 def guide_path(cwd: Path | None = None) -> Path:
     return project_root(cwd) / _GUIDE_RELATIVE
 
 
 def _commands() -> list[dict[str, Any]]:
-    """Structured command cards for the HTML (en + cn)."""
-    return [
-        {
-            "id": "add",
-            "name": "add",
-            "en": {
-                "title": "Stage files",
-                "blurb": "Wrapper around git add. Defaults to '.' when no path is given.",
-                "examples": [
-                    ("gai add", "Stage all changes in the current directory"),
-                    ("gai add src/", "Stage files under src/"),
-                    ("gai add --cn -t", "Chinese tips + print git trace"),
-                ],
-            },
-            "cn": {
-                "title": "暂存文件",
-                "blurb": "包装 git add。未指定路径时默认暂存当前目录。",
-                "examples": [
-                    ("gai add", "暂存当前目录全部变更"),
-                    ("gai add src/", "暂存 src/ 目录下的文件"),
-                    ("gai add --cn -t", "中文提示暂存，并打印 git 链路"),
-                ],
-            },
-        },
-        {
-            "id": "unadd",
-            "name": "unadd",
-            "en": {
-                "title": "Unstage files",
-                "blurb": "Undo staging. Asks for confirmation.",
-                "examples": [
-                    ("gai unadd --cn", "Unstage all staged files"),
-                    ("gai unadd src/", "Unstage files under src/"),
-                ],
-            },
-            "cn": {
-                "title": "撤销暂存",
-                "blurb": "撤销暂存区文件，需确认。",
-                "examples": [
-                    ("gai unadd --cn", "撤销全部暂存"),
-                    ("gai unadd src/", "撤销 src/ 下的暂存"),
-                ],
-            },
-        },
-        {
-            "id": "uncommit",
-            "name": "uncommit",
-            "en": {
-                "title": "Undo latest commit",
-                "blurb": "Soft reset (git reset --soft HEAD~1); changes stay staged.",
-                "examples": [
-                    ("gai uncommit --cn", "Soft-undo the latest commit"),
-                ],
-            },
-            "cn": {
-                "title": "撤销最近提交",
-                "blurb": "软撤销（git reset --soft HEAD~1）；改动仍保留在暂存区。",
-                "examples": [
-                    ("gai uncommit --cn", "软撤销最近一次提交"),
-                ],
-            },
-        },
-        {
-            "id": "review",
-            "name": "review",
-            "en": {
-                "title": "AI code review",
-                "blurb": "Review staged changes only — no commit.",
-                "examples": [
-                    ("gai review --cn", "AI-review staged changes"),
-                    ("gai review --json", "Output review as JSON"),
-                ],
-            },
-            "cn": {
-                "title": "AI 代码审查",
-                "blurb": "只审查已暂存变更，不提交。",
-                "examples": [
-                    ("gai review --cn", "审查已暂存变更"),
-                    ("gai review --json", "以 JSON 输出审查结果"),
-                ],
-            },
-        },
-        {
-            "id": "commit",
-            "name": "commit",
-            "en": {
-                "title": "Review & commit",
-                "blurb": "Review → suggest Conventional Commit message → confirm → commit.",
-                "examples": [
-                    ("gai commit --cn", "Full interactive flow"),
-                    ("gai commit -y --cn", "Skip confirmations"),
-                    ("gai commit --cn --push", "Commit then push"),
-                    ('gai commit -m "fix: handle nil" --no-ai', "Manual message, skip AI"),
-                ],
-            },
-            "cn": {
-                "title": "审查并提交",
-                "blurb": "审查 → 建议 Conventional Commits 信息 → 确认 → 提交。",
-                "examples": [
-                    ("gai commit --cn", "完整交互流程"),
-                    ("gai commit -y --cn", "跳过交互确认"),
-                    ("gai commit --cn --push", "提交成功后推送"),
-                    ('gai commit -m "fix: handle nil" --no-ai', "指定信息并跳过 AI"),
-                ],
-            },
-        },
-        {
-            "id": "push",
-            "name": "push",
-            "en": {
-                "title": "Push branch",
-                "blurb": "Push current branch; warns when there is nothing to push.",
-                "examples": [
-                    ("gai push --cn", "Push after checks"),
-                    ("gai push -y --cn", "Push without confirm"),
-                    ("gai push -r origin -u --cn", "Push to origin and set upstream"),
-                ],
-            },
-            "cn": {
-                "title": "推送分支",
-                "blurb": "推送当前分支；无可推送内容时会提示，不当成成功。",
-                "examples": [
-                    ("gai push --cn", "检查后推送"),
-                    ("gai push -y --cn", "跳过确认直接推送"),
-                    ("gai push -r origin -u --cn", "推送到 origin 并设置上游"),
-                ],
-            },
-        },
-        {
-            "id": "pull",
-            "name": "pull",
-            "en": {
-                "title": "Pull updates",
-                "blurb": "Check remote updates, then pull (merge or rebase).",
-                "examples": [
-                    ("gai pull --cn", "Confirm then pull"),
-                    ("gai pull -y --cn", "Pull without confirm"),
-                    ("gai pull --rebase --cn", "Pull with rebase"),
-                ],
-            },
-            "cn": {
-                "title": "拉取更新",
-                "blurb": "检查远程有更新后确认再拉取（merge 或 rebase）。",
-                "examples": [
-                    ("gai pull --cn", "确认后拉取"),
-                    ("gai pull -y --cn", "跳过确认直接拉取"),
-                    ("gai pull --rebase --cn", "用 rebase 拉取"),
-                ],
-            },
-        },
-        {
-            "id": "report",
-            "name": "report",
-            "en": {
-                "title": "Work summary",
-                "blurb": "Turn recent commits into a paste-ready work report.",
-                "examples": [
-                    ("gai report --cn", "Default recent window"),
-                    ("gai report --since 7d --cn", "Last 7 days"),
-                    (
-                        "gai report --since 2026-09-01 --until 2026-09-20 --cn",
-                        "Explicit date range",
-                    ),
-                    ("gai report --alltime --author me --cn", "Full history for current git user"),
-                ],
-            },
-            "cn": {
-                "title": "工作总结",
-                "blurb": "根据近期提交生成可粘贴的工作总结（周报 / 日报）。",
-                "examples": [
-                    ("gai report --cn", "默认时间窗口"),
-                    ("gai report --since 7d --cn", "最近 7 天"),
-                    (
-                        "gai report --since 2026-09-01 --until 2026-09-20 --cn",
-                        "指定起止日期",
-                    ),
-                    ("gai report --alltime --author me --cn", "当前用户全部历史"),
-                ],
-            },
-        },
-        {
-            "id": "usage",
-            "name": "usage",
-            "en": {
-                "title": "Token usage",
-                "blurb": "Local LLM token history (JSONL) and optional ECharts dashboard.",
-                "examples": [
-                    ("gai usage --cn", "Show recent usage table"),
-                    ("gai usage --report --cn", "Sync .gai/usage-report.html"),
-                    ("gai usage --since 7d --group action --cn", "Last 7 days by action"),
-                ],
-            },
-            "cn": {
-                "title": "Token 用量",
-                "blurb": "本地大模型 token 用量（JSONL），可生成 ECharts 可视化报告。",
-                "examples": [
-                    ("gai usage --cn", "查看近期用量表"),
-                    ("gai usage --report --cn", "同步 .gai/usage-report.html"),
-                    ("gai usage --since 7d --group action --cn", "最近 7 天并按动作汇总"),
-                ],
-            },
-        },
-        {
-            "id": "balance",
-            "name": "balance",
-            "en": {
-                "title": "API balance",
-                "blurb": "Query remaining credit when the provider supports it.",
-                "examples": [
-                    ("gai balance --cn", "Query balance (Chinese)"),
-                    ("gai balance", "Query balance (English)"),
-                ],
-            },
-            "cn": {
-                "title": "余额查询",
-                "blurb": "查询 API Key 剩余额度（若厂商提供接口）。",
-                "examples": [
-                    ("gai balance --cn", "中文输出余额"),
-                    ("gai balance", "英文输出余额"),
-                ],
-            },
-        },
-        {
-            "id": "config",
-            "name": "config",
-            "en": {
-                "title": "Configuration",
-                "blurb": "View or update ~/.gai/config.toml (env vars still win).",
-                "examples": [
-                    ("gai config --show --cn", "Show effective config (secrets masked)"),
-                    (
-                        "gai config --api-key <key> --base-url <url> --model <name>",
-                        "Save API settings",
-                    ),
-                ],
-            },
-            "cn": {
-                "title": "配置",
-                "blurb": "查看或更新 ~/.gai/config.toml（环境变量优先级更高）。",
-                "examples": [
-                    ("gai config --show --cn", "查看生效配置（密钥已掩码）"),
-                    (
-                        "gai config --api-key <key> --base-url <url> --model <name>",
-                        "写入 API 配置",
-                    ),
-                ],
-            },
-        },
-        {
-            "id": "completion",
-            "name": "completion",
-            "en": {
-                "title": "Tab completion",
-                "blurb": "Install shell Tab-completion for gai subcommands and options.",
-                "examples": [
-                    ("gai completion install --shell powershell --cn", "Install for PowerShell"),
-                    ("gai completion install --cn", "Auto-detect shell"),
-                    ("gai completion show --shell powershell", "Print script only"),
-                ],
-            },
-            "cn": {
-                "title": "Tab 自动补全",
-                "blurb": "为 gai 子命令与选项安装 shell Tab 补全。",
-                "examples": [
-                    ("gai completion install --shell powershell --cn", "安装 PowerShell 补全"),
-                    ("gai completion install --cn", "自动检测 shell"),
-                    ("gai completion show --shell powershell", "仅打印脚本"),
-                ],
-            },
-        },
-        {
-            "id": "guide",
-            "name": "guide",
-            "en": {
-                "title": "This guide",
-                "blurb": "Regenerate this HTML page under .gai/guide.html.",
-                "examples": [
-                    ("gai guide --cn", "Generate and open Chinese-first page"),
-                    ("gai guide", "Generate and open English-first page"),
-                ],
-            },
-            "cn": {
-                "title": "本教程页",
-                "blurb": "重新生成 .gai/guide.html 可视化教程。",
-                "examples": [
-                    ("gai guide --cn", "生成并以中文为首屏语言"),
-                    ("gai guide", "生成并以英文为首屏语言"),
-                ],
-            },
-        },
-    ]
+    """Structured command cards; examples come from cli_usage (single source)."""
+    out: list[dict[str, Any]] = []
+    for meta in _COMMAND_META:
+        cmd_id = meta["id"]
+        examples = command_examples(cmd_id)
+        en_ex = [(line, en) for line, en, _cn in examples]
+        cn_ex = [(line, cn) for line, _en, cn in examples]
+        out.append(
+            {
+                "id": cmd_id,
+                "name": cmd_id,
+                "en": {**meta["en"], "examples": en_ex},
+                "cn": {**meta["cn"], "examples": cn_ex},
+            }
+        )
+    return out
 
 
 def _i18n() -> dict[str, dict[str, str]]:
@@ -355,7 +220,9 @@ def _i18n() -> dict[str, dict[str, str]]:
             ),
             "setup_cn": "几乎所有命令支持 --cn：中文运行时文案；与 -h 联用显示中文帮助。",
             "commands_h": "命令一览",
-            "commands_hint": "点击卡片在右侧抽屉查看详情；抽屉内可直接切换其他命令，无需回到上方。",
+            "commands_hint": "点击卡片在右侧抽屉查看详情；抽屉内可直接切换其他命令。支持搜索与深链 #commit。",
+            "search_ph": "搜索命令…",
+            "search_empty": "没有匹配的命令",
             "examples_h": "示例",
             "drawer_switch": "切换命令",
             "drawer_close": "关闭",
@@ -366,8 +233,9 @@ def _i18n() -> dict[str, dict[str, str]]:
             "tips": [
                 "审查 / 提交只看 staged diff（git diff --cached），不会偷偷提交未暂存文件。",
                 "不拦截原生 git：也可用 --no-ai -m 或直接 git commit / git push。",
-                "用量报告：gai usage --report → .gai/usage-report.html",
-                "本教程：gai guide [--cn] → .gai/guide.html（再次运行会覆盖同步）",
+                "用量报告：gai usage --report / --serve → .gai/usage-report.html",
+                "本教程：gai guide [--cn] [--open|--serve] → .gai/guide.html；深链如 guide.html#commit",
+                "主题与语言偏好与用量报告共用（gai-ui-theme / gai-ui-lang）",
                 "PowerShell Tab 补全：gai completion install --shell powershell --cn，然后重开终端",
             ],
             "footer": "由 gai guide 生成 · 存放于仓库 .gai/guide.html · 页面内可切换中/英与日间/夜间主题",
@@ -411,7 +279,9 @@ def _i18n() -> dict[str, dict[str, str]]:
                 "combine with -h for Chinese help."
             ),
             "commands_h": "Commands",
-            "commands_hint": "Click a card to open the side drawer. Switch commands inside the drawer — no need to scroll back up.",
+            "commands_hint": "Click a card for the side drawer. Search commands or deep-link with #commit.",
+            "search_ph": "Search commands…",
+            "search_empty": "No matching commands",
             "examples_h": "Examples",
             "drawer_switch": "Switch command",
             "drawer_close": "Close",
@@ -422,8 +292,9 @@ def _i18n() -> dict[str, dict[str, str]]:
             "tips": [
                 "Review/commit only look at staged diffs (git diff --cached).",
                 "Native git stays available: use --no-ai -m or plain git commit / git push.",
-                "Usage dashboard: gai usage --report → .gai/usage-report.html",
-                "This guide: gai guide [--cn] → .gai/guide.html (re-run overwrites)",
+                "Usage dashboard: gai usage --report / --serve → .gai/usage-report.html",
+                "This guide: gai guide [--cn] [--open|--serve] → .gai/guide.html; deep links like guide.html#commit",
+                "Theme/language prefs are shared with the usage report (gai-ui-theme / gai-ui-lang)",
                 "PowerShell Tab completion: gai completion install --shell powershell --cn, then restart the terminal",
             ],
             "footer": "Generated by gai guide · stored at .gai/guide.html · switch language and light/dark theme anytime",
@@ -464,16 +335,7 @@ def _render_html(payload: dict[str, Any]) -> str:
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>gai guide</title>
   <script>
-  (function () {{
-    try {{
-      var key = 'gai-guide-theme';
-      var saved = localStorage.getItem(key);
-      var theme = (saved === 'dark' || saved === 'light')
-        ? saved
-        : (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-      document.documentElement.setAttribute('data-theme', theme);
-    }} catch (e) {{}}
-  }})();
+  {early_prefs_script(default_lang=payload["initialLang"], default_theme="light")}
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -1146,6 +1008,31 @@ def _render_html(payload: dict[str, Any]) -> str:
       z-index: 50;
     }}
     .toast.show {{ opacity: 1; transform: none; }}
+    .cmd-search {{
+      width: min(100%, 420px);
+      margin: 0 0 14px;
+      padding: 10px 14px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--ink);
+      font: inherit;
+      font-size: .92rem;
+      box-shadow: var(--shadow);
+    }}
+    .cmd-search:focus-visible {{
+      outline: 2px solid var(--teal);
+      outline-offset: 2px;
+    }}
+    .cmd-empty {{
+      color: var(--muted);
+      font-size: .9rem;
+      padding: 8px 2px 4px;
+    }}
+    button:focus-visible, .seg button:focus-visible, .cmd-card:focus-visible, .ex:focus-visible {{
+      outline: 2px solid var(--teal);
+      outline-offset: 2px;
+    }}
 
     @media (max-width: 960px) {{
       .steps {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
@@ -1256,6 +1143,10 @@ gai config --api-key sk-xxx --base-url https://api.deepseek.com/v1 --model deeps
       <section id="commands">
         <h2 class="sec-head" data-i="commands_h"></h2>
         <p class="hint" data-i="commands_hint"></p>
+        <input type="search" class="cmd-search" id="cmd-search"
+               data-i-placeholder="search_ph" placeholder="Search commands…"
+               autocomplete="off" aria-label="Search commands" />
+        <div class="cmd-empty" id="cmd-empty" hidden data-i="search_empty"></div>
         <div class="cmd-grid" id="cmd-grid"></div>
       </section>
 
@@ -1290,11 +1181,16 @@ gai config --api-key sk-xxx --base-url https://api.deepseek.com/v1 --model deeps
   <script>
 (function () {{
   const DATA = JSON.parse(document.getElementById('guide-data').textContent);
-  let lang = DATA.initialLang === 'cn' ? 'cn' : 'en';
+  let lang = document.documentElement.getAttribute('data-lang') === 'cn'
+    ? 'cn'
+    : (DATA.initialLang === 'cn' ? 'cn' : 'en');
   let openId = '';
+  let searchQ = '';
   const toast = document.getElementById('toast');
   const drawerRoot = document.getElementById('drawer-root');
+  const searchInput = document.getElementById('cmd-search');
   let toastTimer = null;
+  let lastFocus = null;
   const copyLabel = {{ cn: '复制', en: 'Copy' }};
 
   function t() {{ return DATA.i18n[lang]; }}
@@ -1327,12 +1223,19 @@ gai config --api-key sk-xxx --base-url https://api.deepseek.com/v1 --model deeps
     return {{ cmd: step, desc: '' }};
   }}
 
-  function closeDrawer() {{
+  function closeDrawer({{ clearHash = true }} = {{}}) {{
     drawerRoot.classList.remove('open');
     drawerRoot.setAttribute('aria-hidden', 'true');
     document.body.classList.remove('drawer-open');
     openId = '';
     document.querySelectorAll('.cmd-card').forEach((el) => el.classList.remove('active'));
+    if (clearHash && location.hash && DATA.commands.some((c) => '#' + c.id === location.hash)) {{
+      history.replaceState(null, '', location.pathname + location.search);
+    }}
+    if (lastFocus && typeof lastFocus.focus === 'function') {{
+      try {{ lastFocus.focus(); }} catch (e) {{}}
+    }}
+    lastFocus = null;
   }}
 
   function currentTheme() {{
@@ -1341,7 +1244,7 @@ gai config --api-key sk-xxx --base-url https://api.deepseek.com/v1 --model deeps
 
   function applyTheme(theme) {{
     document.documentElement.setAttribute('data-theme', theme);
-    try {{ localStorage.setItem('gai-guide-theme', theme); }} catch (e) {{}}
+    try {{ localStorage.setItem('{PREF_THEME}', theme); }} catch (e) {{}}
     document.getElementById('btn-theme-light').classList.toggle('active', theme === 'light');
     document.getElementById('btn-theme-dark').classList.toggle('active', theme === 'dark');
   }}
@@ -1368,6 +1271,7 @@ gai config --api-key sk-xxx --base-url https://api.deepseek.com/v1 --model deeps
     lang = next === 'cn' ? 'cn' : 'en';
     document.documentElement.setAttribute('data-lang', lang);
     document.documentElement.lang = lang === 'cn' ? 'zh-CN' : 'en';
+    try {{ localStorage.setItem('{PREF_LANG}', lang); }} catch (e) {{}}
     document.getElementById('btn-cn').classList.toggle('active', lang === 'cn');
     document.getElementById('btn-en').classList.toggle('active', lang === 'en');
     document.title = t().doc_title;
@@ -1376,6 +1280,12 @@ gai config --api-key sk-xxx --base-url https://api.deepseek.com/v1 --model deeps
       const val = t()[key];
       if (typeof val === 'string') el.textContent = val;
     }});
+    document.querySelectorAll('[data-i-placeholder]').forEach((el) => {{
+      const key = el.getAttribute('data-i-placeholder');
+      const val = t()[key];
+      if (typeof val === 'string') el.setAttribute('placeholder', val);
+    }});
+    if (searchInput) searchInput.setAttribute('aria-label', t().search_ph || 'Search');
     document.getElementById('gen-time').textContent = DATA.generated;
 
     const flow = document.getElementById('flow-list');
@@ -1402,11 +1312,24 @@ gai config --api-key sk-xxx --base-url https://api.deepseek.com/v1 --model deeps
 
     renderCommands();
     renderDrawerSwitch();
-    if (openId) openCommand(openId);
+    if (openId) openCommand(openId, {{ updateHash: false }});
   }}
 
   function cmdLocale(cmd) {{
     return lang === 'cn' ? cmd.cn : cmd.en;
+  }}
+
+  function matchesSearch(cmd) {{
+    const q = searchQ.trim().toLowerCase();
+    if (!q) return true;
+    const loc = cmdLocale(cmd);
+    const hay = [
+      cmd.name,
+      loc.title,
+      loc.blurb,
+      ...(loc.examples || []).flatMap((p) => [p[0], p[1]]),
+    ].join(' ').toLowerCase();
+    return hay.includes(q);
   }}
 
   function renderDrawerSwitch() {{
@@ -1424,12 +1347,18 @@ gai config --api-key sk-xxx --base-url https://api.deepseek.com/v1 --model deeps
 
   function renderCommands() {{
     const grid = document.getElementById('cmd-grid');
+    const empty = document.getElementById('cmd-empty');
     grid.innerHTML = '';
+    let shown = 0;
     DATA.commands.forEach((cmd) => {{
+      if (!matchesSearch(cmd)) return;
+      shown += 1;
       const loc = cmdLocale(cmd);
       const card = document.createElement('button');
       card.type = 'button';
       card.className = 'cmd-card' + (openId === cmd.id ? ' active' : '');
+      card.id = 'cmd-' + cmd.id;
+      card.setAttribute('data-cmd', cmd.id);
       card.innerHTML =
         '<div class="name">gai ' + cmd.name + '</div>' +
         '<div class="title"></div>' +
@@ -1439,18 +1368,25 @@ gai config --api-key sk-xxx --base-url https://api.deepseek.com/v1 --model deeps
       card.addEventListener('click', () => openCommand(cmd.id));
       grid.appendChild(card);
     }});
+    if (empty) {{
+      empty.hidden = shown > 0;
+      empty.textContent = t().search_empty || '';
+    }}
   }}
 
-  function openCommand(id) {{
+  function openCommand(id, {{ updateHash = true }} = {{}}) {{
     const cmd = DATA.commands.find((c) => c.id === id);
     if (!cmd) return;
     const loc = cmdLocale(cmd);
+    if (!drawerRoot.classList.contains('open')) {{
+      lastFocus = document.activeElement;
+    }}
     openId = id;
     drawerRoot.classList.add('open');
     drawerRoot.setAttribute('aria-hidden', 'false');
     document.body.classList.add('drawer-open');
-    document.querySelectorAll('.cmd-card').forEach((el, i) => {{
-      el.classList.toggle('active', DATA.commands[i] && DATA.commands[i].id === id);
+    document.querySelectorAll('.cmd-card').forEach((el) => {{
+      el.classList.toggle('active', el.getAttribute('data-cmd') === id);
     }});
     document.querySelectorAll('#drawer-switch button').forEach((btn) => {{
       btn.classList.toggle('active', btn.textContent === cmd.name);
@@ -1464,28 +1400,67 @@ gai config --api-key sk-xxx --base-url https://api.deepseek.com/v1 --model deeps
       const desc = pair[1];
       const row = document.createElement('div');
       row.className = 'ex';
+      row.setAttribute('role', 'button');
+      row.tabIndex = 0;
       row.innerHTML = '<code></code><div class="desc"></div><div class="copy"></div>';
       row.querySelector('code').textContent = cmdText;
       row.querySelector('.desc').textContent = desc;
       row.querySelector('.copy').textContent = copyLabel[lang];
-      row.addEventListener('click', () => {{
-        copyText(cmdText).then(() => showToast(t().copied));
+      const copy = () => copyText(cmdText).then(() => showToast(t().copied));
+      row.addEventListener('click', copy);
+      row.addEventListener('keydown', (e) => {{
+        if (e.key === 'Enter' || e.key === ' ') {{ e.preventDefault(); copy(); }}
       }});
       box.appendChild(row);
     }});
+    if (updateHash) {{
+      const next = '#' + id;
+      if (location.hash !== next) history.replaceState(null, '', next);
+    }}
+    const closeBtn = document.getElementById('drawer-close');
+    if (closeBtn) closeBtn.focus();
+  }}
+
+  function applyHash() {{
+    const raw = (location.hash || '').replace(/^#/, '').trim().toLowerCase();
+    if (!raw) return;
+    if (DATA.commands.some((c) => c.id === raw)) {{
+      openCommand(raw, {{ updateHash: false }});
+      const card = document.getElementById('cmd-' + raw);
+      if (card) card.scrollIntoView({{ block: 'nearest' }});
+    }}
   }}
 
   document.getElementById('btn-cn').addEventListener('click', () => setLang('cn'));
   document.getElementById('btn-en').addEventListener('click', () => setLang('en'));
   document.getElementById('btn-theme-light').addEventListener('click', () => setTheme('light'));
   document.getElementById('btn-theme-dark').addEventListener('click', () => setTheme('dark'));
-  document.getElementById('drawer-close').addEventListener('click', closeDrawer);
-  document.getElementById('drawer-mask').addEventListener('click', closeDrawer);
+  document.getElementById('drawer-close').addEventListener('click', () => closeDrawer());
+  document.getElementById('drawer-mask').addEventListener('click', () => closeDrawer());
+  if (searchInput) {{
+    searchInput.addEventListener('input', () => {{
+      searchQ = searchInput.value || '';
+      renderCommands();
+    }});
+  }}
   document.addEventListener('keydown', (e) => {{
-    if (e.key === 'Escape' && drawerRoot.classList.contains('open')) closeDrawer();
+    if (e.key === 'Escape' && drawerRoot.classList.contains('open')) {{
+      closeDrawer();
+      return;
+    }}
+    if ((e.key === '/' || (e.key === 'k' && (e.metaKey || e.ctrlKey))) &&
+        document.activeElement !== searchInput) {{
+      const tag = (document.activeElement && document.activeElement.tagName) || '';
+      if (tag !== 'INPUT' && tag !== 'TEXTAREA') {{
+        e.preventDefault();
+        if (searchInput) searchInput.focus();
+      }}
+    }}
   }});
+  window.addEventListener('hashchange', applyHash);
   setTheme(currentTheme(), {{ animate: false }});
   setLang(lang);
+  applyHash();
   requestAnimationFrame(() => {{
     document.documentElement.classList.add('theme-ready');
   }});

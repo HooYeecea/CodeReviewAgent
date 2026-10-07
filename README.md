@@ -118,8 +118,8 @@ gai uncommit --cn         # 撤销最近一次提交（soft，需确认）
 gai report --cn           # 最近 7 天工作总结
 gai balance --cn          # 查询 API Key 剩余额度（若厂商支持）
 gai usage --cn            # 查看本地记录的 token 用量历史
-gai guide --cn            # 生成 .gai/guide.html 可视化使用指南（中英可切换）
-gai usage --report --cn   # 同步生成 .gai/usage-report.html 可视化报告
+gai guide --cn --open     # 生成 .gai/guide.html 并用浏览器打开
+gai usage --serve --cn    # 同步用量报告并以本地 HTTP 打开（刷新更稳）
 gai add --cn -t           # 暂存并打印底层 git 链路
 ```
 
@@ -330,16 +330,19 @@ gai report --since 2026-09-01 --until 2026-09-23 --json
 ```bash
 gai usage --cn
 gai usage --report --cn                 # 固定写入 .gai/usage-report.html（覆盖同步）
+gai usage --open --cn                   # 同步并打开浏览器（隐含 --report）
+gai usage --serve --cn                  # 本地 HTTP 打开，刷新更稳定（隐含 --report）
 gai usage --report --since 7d --cn      # 只把近 7 天数据同步进报告
 gai usage --since 7d --group action --cn
 gai usage --action commit -n 50 --cn
 gai usage --user alice --json
 ```
 
-`--report` 会读取当前项目的 `.gai/usage.jsonl`，**覆盖写入** `.gai/usage-report.html`，并同步 `.gai/usage-data.js`。报告页支持：
+`--report` / `--open` / `--serve` 会读取当前项目的 `.gai/usage.jsonl`，**覆盖写入** `.gai/usage-report.html`，并同步 `.gai/usage-data.js`。首次有 LLM 用量写入时也会自动生成报告壳（不必先跑 `--report`）。报告页支持：
 
-- **刷新**：加载最新 `usage-data.js`（日常 `gai` 调用大模型时也会自动更新该文件，一般不必反复跑 `--report`）
-- **中 / 英**、**日间 / 夜间**主题切换（本地记住选择）
+- **刷新**：加载最新 `usage-data.js`（日常 `gai` 调用会自动更新；`file://` 被拦时改用 `--serve`）
+- **导出 CSV**、最近记录分页
+- **中 / 英**、**日间 / 夜间**主题（与指南共用 `gai-ui-lang` / `gai-ui-theme`）
 
 可按仓库筛选：
 
@@ -357,24 +360,30 @@ gai usage --user alice --json
 | `-u` / `--user` | 按 git 用户名或邮箱子串过滤 |
 | `-g` / `--group` | 额外汇总：`action` / `provider` / `model` / `user` |
 | `--report` | 同步生成 `.gai/usage-report.html` 可视化报告 |
+| `--open` | 打开浏览器（隐含 `--report`） |
+| `--serve` | 本地 HTTP 打开（隐含 `--report`；刷新更稳） |
 | `--json` | JSON 输出 |
 | `--cn` | 中文输出 |
 | `-t` / `--trace` | 打印链路（本命令通常无 git） |
 
 ### `gai guide`
 
-生成本地可视化使用指南，固定写入 **`.gai/guide.html`**（中英双语同一文件）。
+生成本地可视化使用指南，固定写入 **`.gai/guide.html`**（中英双语同一文件）。示例与 CLI 用法提示同源；支持命令搜索与深链（如 `guide.html#commit`）。
 
 ```bash
-gai guide --cn    # 首屏中文
-gai guide         # 首屏英文
+gai guide --cn           # 首屏中文
+gai guide --open --cn    # 生成并用浏览器打开
+gai guide --serve --cn   # 本地 HTTP 打开
+gai guide                # 首屏英文
 ```
 
-页面内可随时切换语言；命令行会打印可点击的 `file://` 链接。再次执行会覆盖同步。
+页面内可随时切换语言 / 主题（与用量报告共用偏好）；命令行会打印可点击的 `file://` 链接。再次执行会覆盖同步。
 
 | 参数 | 说明 |
 |------|------|
 | `--cn` | 首屏使用中文（页面内仍可切到英文） |
+| `--open` | 用默认浏览器打开 |
+| `--serve` | 用本地 HTTP 打开 |
 
 ### `gai balance`
 
