@@ -67,6 +67,10 @@ def test_write_history_report_fixed_path(tmp_path: Path, monkeypatch) -> None:
     assert "gai-ui-lang" in text
     assert "history-data.js" in text
     assert "project-dd" in text
+    assert "dd-ico" in text
+    assert "dd-caret" in text
+    assert "dd-dot" in text
+    assert "justify-content: flex-end" in text
     assert "scope-all" in text
     assert "chart-heat-repo" in text
     assert "window.__GAI_HISTORY_DATASETS__" in data_js

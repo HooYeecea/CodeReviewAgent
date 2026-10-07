@@ -541,28 +541,40 @@ def render_history_report_html(datasets: dict[str, Any], *, chinese: bool = Fals
     --chart-well: linear-gradient(180deg, rgba(8,14,26,.45), rgba(8,14,26,.18));
     --table-head: rgba(15, 23, 42, .85);
     --table-row: rgba(255,255,255,.03);
-    --shadow: 0 18px 40px rgba(0,0,0,.35);
+    --badge-bg: linear-gradient(180deg, rgba(56,189,248,.16), rgba(56,189,248,.06));
+    --badge-border: rgba(56,189,248,.35);
+    --badge-text: #bae6fd;
+    --shadow-deep: 0 22px 48px rgba(0, 0, 0, .45), 0 2px 0 rgba(255,255,255,.04) inset;
+    --shadow-lift: 0 10px 28px rgba(0, 0, 0, .35), 0 1px 0 rgba(255,255,255,.06) inset, 0 -1px 0 rgba(0,0,0,.35) inset;
+    --glow-a: rgba(56,189,248,.18);
+    --glow-b: rgba(167,139,250,.16);
   }}
   html[data-theme="light"] {{
-    --bg0: #f3f6fb; --bg1: #e8eef7;
-    --panel: linear-gradient(165deg, #ffffff, #f5f8fc);
+    --bg0: #e8eef6; --bg1: #f5f8fc;
+    --panel: linear-gradient(165deg, #ffffff, #f2f6fb);
     --panel-flat: #ffffff;
-    --panel-border: rgba(15, 23, 42, 0.12);
-    --panel-shine: rgba(15, 23, 42, 0.04);
-    --text: #0f172a; --muted: #475569;
-    --accent: #0284c7; --accent2: #7c3aed;
-    --ok: #059669; --fail: #dc2626;
-    --top-bg: rgba(243, 246, 251, .86);
-    --seg-bg: rgba(226, 232, 240, .9);
-    --seg-btn: linear-gradient(180deg, #ffffff, #eef2f7);
-    --seg-btn-text: #334155;
-    --seg-active-bg: linear-gradient(180deg, rgba(2,132,199,.18), rgba(2,132,199,.08));
-    --seg-active-text: #0c4a6e;
+    --panel-border: #c5d0de;
+    --panel-shine: rgba(255, 255, 255, 0.95);
+    --text: #0b1b33; --muted: #334155;
+    --accent: #0f766e; --accent2: #0369a1;
+    --ok: #047857; --fail: #b91c1c;
+    --top-bg: rgba(245, 248, 252, .92);
+    --seg-bg: #ffffff;
+    --seg-btn: linear-gradient(180deg, #ffffff, #e8eef6);
+    --seg-btn-text: #1e3350;
+    --seg-active-bg: linear-gradient(180deg, #ccfbf1, #e6fffa);
+    --seg-active-text: #115e59;
     --on-ink: #ffffff;
-    --chart-well: linear-gradient(180deg, rgba(241,245,249,.9), rgba(248,250,252,.6));
-    --table-head: #eef2f7;
+    --chart-well: linear-gradient(180deg, #ffffff, #f1f5f9);
+    --table-head: #e8eef6;
     --table-row: rgba(15,23,42,.03);
-    --shadow: 0 14px 32px rgba(15,23,42,.08);
+    --badge-bg: linear-gradient(180deg, #ccfbf1, #e6fffa);
+    --badge-border: rgba(15,118,110,.35);
+    --badge-text: #115e59;
+    --shadow-deep: 0 18px 40px rgba(16,35,63,.08), 0 1px 0 rgba(255,255,255,.9) inset;
+    --shadow-lift: 0 12px 28px rgba(16,35,63,.08), 0 1px 0 rgba(255,255,255,.95) inset;
+    --glow-a: rgba(15,118,110,.10);
+    --glow-b: rgba(2,132,199,.08);
   }}
   * {{ box-sizing: border-box; }}
   body {{
@@ -570,120 +582,167 @@ def render_history_report_html(datasets: dict[str, Any], *, chinese: bool = Fals
     font: 15px/1.5 "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
     color: var(--text);
     background:
-      radial-gradient(1200px 600px at 10% -10%, rgba(56,189,248,.18), transparent 55%),
-      radial-gradient(900px 500px at 90% 0%, rgba(167,139,250,.14), transparent 50%),
-      linear-gradient(180deg, var(--bg0), var(--bg1));
+      radial-gradient(900px 420px at 8% -8%, var(--glow-a), transparent 55%),
+      radial-gradient(800px 380px at 92% 0%, var(--glow-b), transparent 50%),
+      linear-gradient(180deg, var(--bg1), var(--bg0));
   }}
-  html[data-theme="light"] body {{
-    background:
-      radial-gradient(1100px 520px at 8% -8%, rgba(2,132,199,.10), transparent 55%),
-      radial-gradient(800px 420px at 92% 0%, rgba(124,58,237,.08), transparent 50%),
-      linear-gradient(180deg, var(--bg0), var(--bg1));
-  }}
-  .shell {{ max-width: 1240px; margin: 0 auto; padding: 22px 18px 48px; }}
-  .hero {{
-    display: flex; justify-content: space-between; gap: 16px; align-items: flex-start;
-    margin-bottom: 14px;
+  .shell {{ max-width: 1240px; margin: 0 auto; padding: 28px 22px 40px; }}
+  header.hero {{
+    display: flex; flex-wrap: wrap; justify-content: space-between; gap: 16px;
+    margin-bottom: 22px;
   }}
   .brand {{
-    font-size: .72rem; letter-spacing: .14em; font-weight: 700;
-    color: var(--accent); text-transform: uppercase;
+    font-size: .78rem; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--accent); margin-bottom: 8px;
   }}
-  h1 {{ margin: 4px 0 6px; font-size: 1.55rem; }}
-  .meta {{ color: var(--muted); font-size: .86rem; }}
+  h1 {{
+    margin: 0; font-size: clamp(1.55rem, 2.4vw, 2rem); font-weight: 700;
+    letter-spacing: -.02em;
+  }}
+  .meta {{
+    margin-top: 10px; color: var(--muted); font-size: .9rem; line-height: 1.55;
+  }}
   .badge {{
-    border: 1px solid var(--panel-border); background: var(--panel-flat);
-    border-radius: 999px; padding: 8px 12px; color: var(--muted); font-size: .78rem;
+    align-self: flex-start; padding: 8px 12px; border-radius: 12px;
+    border: 1px solid var(--badge-border); background: var(--badge-bg);
+    box-shadow: var(--shadow-lift); color: var(--badge-text);
+    font-size: .82rem; font-weight: 650; white-space: nowrap;
   }}
   .toolbar {{
-    display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
-    margin: 0 0 14px; position: sticky; top: 0; z-index: 20;
-    padding: 10px 0; background: var(--top-bg); backdrop-filter: blur(10px);
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    justify-content: flex-end; margin: 0 0 12px;
   }}
   .toolbar .seg {{
-    display: inline-flex; gap: 2px; padding: 3px; border-radius: 999px;
-    background: var(--seg-bg); border: 1px solid var(--panel-border);
+    display: inline-flex; border: 1px solid var(--panel-border); background: var(--seg-bg);
+    border-radius: 10px; overflow: hidden; gap: 0; box-shadow: var(--shadow-lift);
   }}
-  .toolbar .seg button, .btn-refresh, .btn-export, .pager button {{
-    border: 0; background: transparent; color: var(--seg-btn-text);
-    border-radius: 999px; padding: 7px 12px; font: inherit; font-weight: 650; cursor: pointer;
+  .toolbar .seg button {{
+    border: 0; border-radius: 0; background: transparent; color: var(--muted);
+    box-shadow: none; padding: 8px 12px; font-size: .78rem; font-weight: 600;
+    cursor: pointer; font-family: inherit;
   }}
+  .toolbar .seg button:hover {{ color: var(--accent); }}
   .toolbar .seg button.active {{
-    background: var(--seg-active-bg); color: var(--seg-active-text);
+    background: var(--text); color: var(--on-ink); border-color: transparent;
   }}
-  .btn-refresh, .btn-export {{
-    border: 1px solid var(--panel-border); background: var(--seg-btn);
+  .toolbar .btn-refresh, .toolbar .btn-export {{
+    border: 1px solid var(--panel-border); background: var(--seg-bg); color: var(--text);
+    border-radius: 10px; padding: 8px 14px; font-size: .78rem; font-weight: 650;
+    cursor: pointer; box-shadow: var(--shadow-lift); font-family: inherit;
   }}
-  .btn-refresh:disabled {{ opacity: .6; cursor: wait; }}
-  button:focus-visible {{ outline: 2px solid var(--accent); outline-offset: 2px; }}
+  .toolbar .btn-refresh:hover, .toolbar .btn-export:hover {{
+    border-color: var(--accent); color: var(--accent);
+  }}
+  .toolbar .btn-refresh:disabled {{ opacity: .6; cursor: wait; }}
+  button:focus-visible, .dd-trigger:focus-visible, .seg button:focus-visible {{
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }}
+  .kpi, .card, .filters {{
+    position: relative; isolation: isolate; background: var(--panel);
+    border: 1px solid var(--panel-border); border-radius: 18px;
+    box-shadow: var(--shadow-lift); backdrop-filter: blur(10px);
+  }}
+  .kpi::before, .card::before, .filters::before {{
+    content: ""; position: absolute; inset: 0; z-index: 0; border-radius: inherit;
+    pointer-events: none;
+    background: linear-gradient(180deg, var(--panel-shine), transparent 42%);
+    opacity: .55;
+  }}
+  .kpi > *, .card > *, .filters > * {{ position: relative; z-index: 1; }}
+  html[data-theme="light"] .filters::before,
+  html[data-theme="light"] .kpi::before,
+  html[data-theme="light"] .card::before {{
+    opacity: .28;
+    background: linear-gradient(180deg, rgba(255,255,255,.7), transparent 36%);
+  }}
   .filters {{
-    display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 0 0 14px;
+    display: flex; flex-wrap: wrap; gap: 14px; align-items: center;
+    margin: 0 0 16px; padding: 14px 16px; z-index: 40; overflow: visible;
   }}
-  .filters label {{ color: var(--muted); font-size: .86rem; font-weight: 600; }}
-  .dd {{ position: relative; z-index: 30; }}
+  .filters > label {{
+    color: #cbd5e1; font-size: .84rem; font-weight: 600;
+  }}
+  html[data-theme="light"] .filters > label {{ color: #1e3350; }}
+  .filters > .meta {{ margin: 0; flex: 1 1 220px; }}
+  .dd {{
+    position: relative; min-width: min(320px, 100%); z-index: 50;
+  }}
+  .dd.open {{ z-index: 60; }}
   .dd-trigger {{
-    min-width: 220px; display: inline-flex; align-items: center; gap: 8px;
-    border: 1px solid var(--panel-border); background: var(--panel-flat);
-    color: var(--text); border-radius: 12px; padding: 9px 12px; font: inherit; cursor: pointer;
+    width: 100%; display: flex; align-items: center; gap: 10px;
+    border: 1px solid var(--panel-border); border-radius: 14px; padding: 11px 12px;
+    color: var(--text); cursor: pointer; text-align: left; background: var(--seg-btn);
+    box-shadow: var(--shadow-lift); font: inherit;
   }}
+  .dd-trigger:hover {{ border-color: var(--accent); }}
+  .dd.open .dd-trigger {{
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent), var(--shadow-lift);
+  }}
+  .dd-ico {{
+    width: 28px; height: 28px; border-radius: 9px; display: grid; place-items: center;
+    background: var(--seg-active-bg); border: 1px solid var(--badge-border);
+    box-shadow: 0 1px 0 rgba(255,255,255,.35) inset; color: var(--badge-text);
+    font-size: .85rem; flex: 0 0 auto;
+  }}
+  .dd-label {{
+    flex: 1 1 auto; font-size: .9rem; font-weight: 600;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }}
+  .dd-caret {{
+    width: 8px; height: 8px; border-right: 2px solid #94a3b8; border-bottom: 2px solid #94a3b8;
+    transform: rotate(45deg); margin: -4px 4px 0 0; transition: transform .18s ease;
+  }}
+  .dd.open .dd-caret {{ transform: rotate(225deg); margin-top: 2px; }}
   .dd-menu {{
-    display: none; position: absolute; top: calc(100% + 6px); left: 0; min-width: 100%;
-    background: var(--panel-flat); border: 1px solid var(--panel-border);
-    border-radius: 12px; box-shadow: var(--shadow); padding: 6px; z-index: 40;
+    position: absolute; left: 0; right: 0; top: calc(100% + 8px); z-index: 70;
+    display: none; padding: 8px; border-radius: 14px; border: 1px solid var(--panel-border);
+    background: var(--panel); box-shadow: var(--shadow-deep); max-height: 280px; overflow: auto;
   }}
   .dd.open .dd-menu {{ display: block; }}
   .dd-item {{
-    width: 100%; display: flex; align-items: center; gap: 8px;
-    border: 0; background: transparent; color: var(--text);
-    border-radius: 8px; padding: 8px 10px; font: inherit; cursor: pointer; text-align: left;
+    width: 100%; display: flex; align-items: center; gap: 10px; border: 0;
+    border-radius: 10px; background: transparent; color: var(--text);
+    padding: 10px 10px; cursor: pointer; text-align: left; font-size: .88rem; font: inherit;
   }}
-  .dd-item:hover, .dd-item.active {{ background: var(--seg-active-bg); }}
-  .dd-check {{ margin-left: auto; opacity: 0; color: var(--accent); }}
+  .dd-item:hover {{ background: color-mix(in srgb, var(--accent) 12%, transparent); }}
+  .dd-item.active {{
+    background: var(--seg-active-bg);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent) inset;
+  }}
+  .dd-item-text {{ flex: 1 1 auto; }}
+  .dd-check {{ opacity: 0; color: #7dd3fc; font-size: .85rem; }}
   .dd-item.active .dd-check {{ opacity: 1; }}
+  .dd-dot {{
+    width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto;
+    box-shadow: 0 0 0 3px rgba(255,255,255,.04);
+  }}
+  .dd-dot.all {{ background: #a78bfa; }}
+  .dd-dot.repo {{ background: #38bdf8; }}
   .kpis {{
     display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px;
   }}
-  .kpi {{
-    isolation: isolate; position: relative; overflow: hidden;
-    border: 1px solid var(--panel-border); border-radius: 16px;
-    background: var(--panel); box-shadow: var(--shadow); padding: 14px 16px;
-  }}
-  .kpi::before {{
-    content: ""; position: absolute; inset: 0 0 auto 0; height: 48%;
-    background: linear-gradient(180deg, var(--panel-shine), transparent);
-    pointer-events: none; z-index: 0;
-  }}
-  .kpi > * {{ position: relative; z-index: 1; }}
-  .kpi .label {{ color: var(--muted); font-size: .78rem; font-weight: 650; }}
-  .kpi .value {{ font-size: 1.55rem; font-weight: 750; margin-top: 4px; }}
-  .kpi .sub {{ color: var(--muted); font-size: .8rem; margin-top: 2px; }}
-  .grid {{
-    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px;
-  }}
-  .card {{
-    isolation: isolate; position: relative; overflow: hidden;
-    border: 1px solid var(--panel-border); border-radius: 16px;
-    background: var(--panel); box-shadow: var(--shadow); padding: 14px 16px 10px;
-  }}
-  .card::before {{
-    content: ""; position: absolute; inset: 0 0 auto 0; height: 42%;
-    background: linear-gradient(180deg, var(--panel-shine), transparent);
-    pointer-events: none; z-index: 0;
-  }}
-  .card > * {{ position: relative; z-index: 1; }}
+  .kpi {{ padding: 16px 16px 14px; z-index: 1; }}
+  .kpi .label {{ color: var(--muted); font-size: .8rem; font-weight: 650; }}
+  .kpi .value {{ margin-top: 8px; font-size: 1.45rem; font-weight: 760; letter-spacing: -.02em; }}
+  .kpi .sub {{ color: var(--muted); font-size: .78rem; margin-top: 4px; }}
+  .grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }}
+  .card {{ padding: 16px 16px 12px; min-width: 0; z-index: 1; }}
   .card.full {{ grid-column: 1 / -1; }}
-  .card h2 {{ margin: 0 0 4px; font-size: 1rem; }}
-  .hint {{ color: var(--muted); font-size: .8rem; margin-bottom: 8px; }}
-  .chart {{ height: 280px; border-radius: 12px; background: var(--chart-well); }}
+  .card h2 {{ margin: 0 0 4px; font-size: 1.02rem; font-weight: 750; }}
+  .hint {{ color: var(--muted); font-size: .84rem; font-weight: 600; margin-bottom: 6px; }}
+  .chart {{ height: 280px; border-radius: 14px; background: var(--chart-well); border: 1px solid var(--panel-border); }}
   .chart.tall {{ height: 340px; }}
-  .trend-seg {{ display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 8px; }}
+  .trend-seg {{ display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }}
   .trend-seg button {{
     border: 1px solid var(--panel-border); background: var(--seg-btn); color: var(--seg-btn-text);
-    border-radius: 999px; padding: 5px 10px; font: inherit; font-size: .78rem; font-weight: 650; cursor: pointer;
+    border-radius: 999px; padding: 6px 11px; font: inherit; font-size: .75rem; cursor: pointer;
+    box-shadow: var(--shadow-lift);
   }}
-  .trend-seg button.active {{ background: var(--seg-active-bg); color: var(--seg-active-text); }}
-  html.view-all .scope-repo {{ display: none; }}
-  html.view-repo .scope-all {{ display: none; }}
+  .trend-seg button.active {{
+    background: var(--seg-active-bg); border-color: var(--accent); color: var(--seg-active-text); font-weight: 650;
+  }}
+  html.view-all .scope-repo, html.view-repo .scope-all {{ display: none !important; }}
   .table-tools {{
     display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
     gap: 10px; margin: 0 0 10px;
@@ -691,11 +750,11 @@ def render_history_report_html(datasets: dict[str, Any], *, chinese: bool = Fals
   .pager {{ display: inline-flex; align-items: center; gap: 8px; }}
   .pager button {{
     border: 1px solid var(--panel-border); background: var(--seg-btn); color: var(--seg-btn-text);
-    border-radius: 8px; padding: 6px 10px;
+    border-radius: 8px; padding: 6px 10px; font: inherit; font-weight: 600; cursor: pointer;
   }}
   .pager button:disabled {{ opacity: .45; cursor: not-allowed; }}
   .pager-meta {{ color: var(--muted); font-size: .85rem; }}
-  .table-wrap {{ overflow: auto; border-radius: 12px; border: 1px solid var(--panel-border); }}
+  .table-wrap {{ overflow: auto; border-radius: 14px; border: 1px solid var(--panel-border); }}
   table {{ width: 100%; border-collapse: collapse; font-size: .84rem; }}
   th, td {{ padding: 9px 10px; text-align: left; border-bottom: 1px solid var(--panel-border); }}
   th {{ background: var(--table-head); color: var(--muted); font-weight: 700; position: sticky; top: 0; }}
@@ -707,13 +766,15 @@ def render_history_report_html(datasets: dict[str, Any], *, chinese: bool = Fals
   .pill.fail {{ background: rgba(248,113,113,.16); color: var(--fail); }}
   footer {{ margin-top: 18px; color: var(--muted); font-size: .78rem; }}
   .toast {{
-    position: fixed; bottom: 22px; right: 22px; padding: 10px 16px; border-radius: 10px;
-    background: var(--text); color: var(--on-ink); font-weight: 650; opacity: 0;
-    pointer-events: none; transition: opacity .2s ease; z-index: 50;
+    position: fixed; bottom: 22px; right: 22px; z-index: 80; padding: 10px 16px; border-radius: 10px;
+    background: var(--text); color: var(--on-ink); font-weight: 650; font-size: .85rem;
+    opacity: 0; transform: translateY(6px); pointer-events: none;
+    transition: opacity .2s ease, transform .2s ease;
   }}
-  .toast.show {{ opacity: 1; }}
+  .toast.show {{ opacity: 1; transform: none; }}
   @media (max-width: 960px) {{
     .kpis, .grid {{ grid-template-columns: 1fr; }}
+    .dd {{ min-width: 100%; }}
   }}
 </style>
 </head>
@@ -747,7 +808,9 @@ def render_history_report_html(datasets: dict[str, Any], *, chinese: bool = Fals
         <button type="button" class="dd-trigger" id="project-dd-btn"
                 aria-haspopup="listbox" aria-expanded="false"
                 aria-labelledby="project-filter-label project-dd-label">
+          <span class="dd-ico" aria-hidden="true">⌘</span>
           <span class="dd-label" id="project-dd-label">{project_dd_label}</span>
+          <span class="dd-caret" aria-hidden="true"></span>
         </button>
         <div class="dd-menu" id="project-dd-menu" role="listbox" aria-labelledby="project-filter-label"></div>
       </div>
@@ -1120,25 +1183,43 @@ function renderDashboard() {{
   fillTable();
 }}
 
+let dropdownBound = false;
+
 function rebuildProjectMenu() {{
   const menu = document.getElementById('project-dd-menu');
   if (!menu) return;
+  const ids = new Set((DATASETS.projects || []).map((p) => p.id));
+  if (currentProject !== '__all__' && !ids.has(currentProject)) {{
+    currentProject = DATASETS.default_project || '__all__';
+  }}
   const items = [{{ id: '__all__', label: I18N.project_all }}].concat(DATASETS.projects || []);
   menu.innerHTML = '';
   items.forEach((item) => {{
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'dd-item' + (currentProject === item.id ? ' active' : '');
+    btn.className = 'dd-item' + (item.id === currentProject ? ' active' : '');
+    btn.dataset.value = item.id;
     btn.setAttribute('role', 'option');
-    btn.innerHTML = '<span class="dd-item-text"></span><span class="dd-check">✓</span>';
-    btn.querySelector('.dd-item-text').textContent = item.label || item.id;
+    const mark = document.createElement('span');
+    mark.className = 'dd-dot ' + (item.id === '__all__' ? 'all' : 'repo');
+    const text = document.createElement('span');
+    text.className = 'dd-item-text';
+    text.textContent = item.label || item.id;
+    const check = document.createElement('span');
+    check.className = 'dd-check';
+    check.textContent = '✓';
+    btn.appendChild(mark);
+    btn.appendChild(text);
+    btn.appendChild(check);
     btn.addEventListener('click', (e) => {{
       e.stopPropagation();
       currentProject = item.id || '__all__';
       tablePage = 0;
       syncProjectDropdown();
-      document.getElementById('project-dd').classList.remove('open');
-      document.getElementById('project-dd-btn').setAttribute('aria-expanded', 'false');
+      const root = document.getElementById('project-dd');
+      const trigger = document.getElementById('project-dd-btn');
+      if (root) root.classList.remove('open');
+      if (trigger) trigger.setAttribute('aria-expanded', 'false');
       renderDashboard();
     }});
     menu.appendChild(btn);
@@ -1149,45 +1230,46 @@ function rebuildProjectMenu() {{
 function syncProjectDropdown() {{
   const labelEl = document.getElementById('project-dd-label');
   const menu = document.getElementById('project-dd-menu');
+  if (!menu) return;
   let activeLabel = I18N.project_all;
-  if (menu) {{
-    menu.querySelectorAll('.dd-item').forEach(btn => {{
-      const id = (DATASETS.projects || []).find(p => p.label === btn.querySelector('.dd-item-text').textContent);
-      const isAll = btn.querySelector('.dd-item-text').textContent === I18N.project_all;
-      const active = isAll ? currentProject === '__all__' :
-        !!(id && id.id === currentProject);
-      btn.classList.toggle('active', active);
-      if (active) activeLabel = btn.querySelector('.dd-item-text').textContent;
-    }});
-  }}
-  if (currentProject !== '__all__') {{
-    const hit = (DATASETS.projects || []).find(p => p.id === currentProject);
-    if (hit) activeLabel = hit.label;
-  }} else {{
-    activeLabel = I18N.project_all;
-  }}
-  if (labelEl) labelEl.textContent = activeLabel;
+  menu.querySelectorAll('.dd-item').forEach(btn => {{
+    const on = btn.dataset.value === currentProject;
+    btn.classList.toggle('active', on);
+    if (on) {{
+      const text = btn.querySelector('.dd-item-text');
+      activeLabel = text ? text.textContent : btn.dataset.value;
+    }}
+  }});
+  if (labelEl) labelEl.textContent = activeLabel || I18N.project_all;
 }}
 
 function initProjectDropdown() {{
   const root = document.getElementById('project-dd');
   const btn = document.getElementById('project-dd-btn');
+  const menu = document.getElementById('project-dd-menu');
+  if (!root || !btn || !menu || dropdownBound) {{
+    rebuildProjectMenu();
+    return;
+  }}
+  dropdownBound = true;
+  const close = () => {{
+    root.classList.remove('open');
+    btn.setAttribute('aria-expanded', 'false');
+  }};
+  const open = () => {{
+    root.classList.add('open');
+    btn.setAttribute('aria-expanded', 'true');
+  }};
   btn.addEventListener('click', (e) => {{
     e.stopPropagation();
-    const open = root.classList.toggle('open');
-    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (root.classList.contains('open')) close();
+    else open();
   }});
   document.addEventListener('click', (e) => {{
-    if (!root.contains(e.target)) {{
-      root.classList.remove('open');
-      btn.setAttribute('aria-expanded', 'false');
-    }}
+    if (!root.contains(e.target)) close();
   }});
   document.addEventListener('keydown', (e) => {{
-    if (e.key === 'Escape') {{
-      root.classList.remove('open');
-      btn.setAttribute('aria-expanded', 'false');
-    }}
+    if (e.key === 'Escape') close();
   }});
   rebuildProjectMenu();
 }}
