@@ -299,7 +299,7 @@ gai usage --action commit -n 50 --cn
 gai usage --user alice --json
 ```
 
-`--report` 会读取当前项目的 `.gai/usage.jsonl`，**覆盖写入**固定文件 `.gai/usage-report.html`（ECharts 可视化：按日 / 动作 / 厂商 / 模型 / 用户）。命令行会打印可点击的 `file://` 链接；再次执行会与最新日志同步。
+`--report` 会读取当前项目的 `.gai/usage.jsonl`，**覆盖写入**固定文件 `.gai/usage-report.html`（ECharts：按日 / 分支 / 成功失败 / 输入输出 / 耗时 / 动作 / 厂商 / 模型 / 用户，以及动作×分支热力图）。命令行会打印可点击的 `file://` 链接；再次执行会与最新日志同步。
 
 | 参数 | 说明 |
 |------|------|

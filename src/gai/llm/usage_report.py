@@ -38,6 +38,7 @@ def build_usage_analytics(records: list[UsageRecord]) -> dict[str, Any]:
     summary = summarize_records(records)
     ok_count = sum(1 for r in records if r.ok is True)
     fail_count = sum(1 for r in records if r.ok is False)
+    unknown_count = sum(1 for r in records if r.ok is None)
     durations = [r.duration_ms for r in records if r.duration_ms is not None]
     avg_ms = int(sum(durations) / len(durations)) if durations else None
 
@@ -47,6 +48,10 @@ def build_usage_analytics(records: list[UsageRecord]) -> dict[str, Any]:
     by_provider: dict[str, dict[str, int]] = defaultdict(lambda: {"calls": 0, "tokens": 0})
     by_model: dict[str, dict[str, int]] = defaultdict(lambda: {"calls": 0, "tokens": 0})
     by_user: dict[str, dict[str, int]] = defaultdict(lambda: {"calls": 0, "tokens": 0})
+    by_branch: dict[str, dict[str, int]] = defaultdict(lambda: {"calls": 0, "tokens": 0})
+    model_durations: dict[str, list[int]] = defaultdict(list)
+    # heatmap: (branch, action) -> tokens
+    heat: dict[tuple[str, str], int] = defaultdict(int)
 
     for rec in records:
         day = _day_key(rec.ts)
@@ -65,6 +70,8 @@ def build_usage_analytics(records: list[UsageRecord]) -> dict[str, Any]:
         model = rec.model or "(unknown)"
         by_model[model]["calls"] += 1
         by_model[model]["tokens"] += tok
+        if rec.duration_ms is not None:
+            model_durations[model].append(rec.duration_ms)
 
         if rec.git_user and rec.git_email:
             user = f"{rec.git_user} <{rec.git_email}>"
@@ -73,8 +80,23 @@ def build_usage_analytics(records: list[UsageRecord]) -> dict[str, Any]:
         by_user[user]["calls"] += 1
         by_user[user]["tokens"] += tok
 
+        branch = (rec.branch or "").strip() or "(unknown)"
+        by_branch[branch]["calls"] += 1
+        by_branch[branch]["tokens"] += tok
+        heat[(branch, action)] += tok
+
     days = sorted(by_day_calls.keys())
     recent = list(reversed(records[-100:]))
+
+    branches = sorted(by_branch.keys(), key=lambda b: (-by_branch[b]["tokens"], b))
+    actions = sorted(by_action.keys(), key=lambda a: (-by_action[a]["tokens"], a))
+    heatmap_data = [
+        [actions.index(a), branches.index(b), heat[(b, a)]]
+        for b, a in heat
+        if heat[(b, a)] > 0
+    ]
+
+    duration_by_model = _duration_series(model_durations)
 
     return {
         "generated_at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
@@ -87,6 +109,7 @@ def build_usage_analytics(records: list[UsageRecord]) -> dict[str, Any]:
             "completion_tokens": summary.completion_tokens,
             "ok": ok_count,
             "fail": fail_count,
+            "unknown": unknown_count,
             "avg_duration_ms": avg_ms,
         },
         "by_day": {
@@ -98,6 +121,21 @@ def build_usage_analytics(records: list[UsageRecord]) -> dict[str, Any]:
         "by_provider": _series(by_provider),
         "by_model": _series(by_model),
         "by_user": _series(by_user),
+        "by_branch": _series(by_branch),
+        "by_status": {
+            "labels": ["ok", "fail", "unknown"],
+            "calls": [ok_count, fail_count, unknown_count],
+        },
+        "token_split": {
+            "labels": ["prompt", "completion"],
+            "tokens": [summary.prompt_tokens, summary.completion_tokens],
+        },
+        "duration_by_model": duration_by_model,
+        "heatmap": {
+            "branches": branches,
+            "actions": actions,
+            "data": heatmap_data,
+        },
         "recent": [r.to_dict() for r in recent],
     }
 
@@ -366,6 +404,26 @@ def render_usage_report_html(analytics: dict[str, Any], *, chinese: bool = False
           <div id="chart-day" class="chart tall"></div>
         </div>
         <div class="card">
+          <h2>{t['by_branch']}</h2>
+          <div class="hint">{t['hint_bar']}</div>
+          <div id="chart-branch" class="chart"></div>
+        </div>
+        <div class="card">
+          <h2>{t['by_status']}</h2>
+          <div class="hint">{t['hint_status']}</div>
+          <div id="chart-status" class="chart"></div>
+        </div>
+        <div class="card">
+          <h2>{t['token_split']}</h2>
+          <div class="hint">{t['hint_split']}</div>
+          <div id="chart-split" class="chart"></div>
+        </div>
+        <div class="card">
+          <h2>{t['duration_by_model']}</h2>
+          <div class="hint">{t['hint_duration']}</div>
+          <div id="chart-duration" class="chart"></div>
+        </div>
+        <div class="card">
           <h2>{t['by_action']}</h2>
           <div class="hint">{t['hint_pie']}</div>
           <div id="chart-action" class="chart"></div>
@@ -384,6 +442,11 @@ def render_usage_report_html(analytics: dict[str, Any], *, chinese: bool = False
           <h2>{t['by_user']}</h2>
           <div class="hint">{t['hint_bar']}</div>
           <div id="chart-user" class="chart"></div>
+        </div>
+        <div class="card full">
+          <h2>{t['heatmap']}</h2>
+          <div class="hint">{t['hint_heat']}</div>
+          <div id="chart-heat" class="chart tall"></div>
         </div>
         <div class="card full">
           <h2>{t['recent']}</h2>
@@ -416,10 +479,19 @@ const DATA = JSON.parse({payload_js});
 const I18N = {i18n_js};
 const COLORS = ['#38bdf8', '#a78bfa', '#34d399', '#fbbf24', '#f472b6', '#60a5fa', '#fb7185', '#2dd4bf'];
 
-function pieData(series) {{
+function pieData(series, valueKey) {{
   const labels = series.labels || [];
-  const tokens = series.tokens || [];
-  return labels.map((name, i) => ({{ name, value: tokens[i] || 0 }}));
+  const values = series[valueKey || 'tokens'] || [];
+  return labels.map((name, i) => ({{ name, value: values[i] || 0 }})).filter(d => d.value > 0);
+}}
+
+function localizedStatus(name) {{
+  if (name === 'ok') return I18N.ok;
+  if (name === 'fail') return I18N.fail;
+  if (name === 'unknown') return I18N.unknown;
+  if (name === 'prompt') return I18N.prompt;
+  if (name === 'completion') return I18N.completion;
+  return name;
 }}
 
 function baseText() {{
@@ -491,14 +563,22 @@ function initDayChart() {{
   return chart;
 }}
 
-function initPie(id, series) {{
+function initPie(id, series, opts) {{
+  opts = opts || {{}};
+  const valueKey = opts.valueKey || 'tokens';
+  const unit = opts.unit || I18N.tokens;
+  const colors = opts.colors || COLORS;
+  const data = pieData(series, valueKey).map(d => ({{
+    name: opts.localize ? localizedStatus(d.name) : d.name,
+    value: d.value
+  }}));
   const chart = echarts.init(document.getElementById(id));
   chart.setOption({{
-    color: COLORS,
+    color: colors,
     tooltip: {{
       trigger: 'item',
       formatter: function (p) {{
-        return p.name + '<br/>' + p.value + ' (' + I18N.tokens + ') · ' + p.percent + '%';
+        return p.name + '<br/>' + p.value + ' (' + unit + ') · ' + p.percent + '%';
       }}
     }},
     legend: {{
@@ -519,19 +599,29 @@ function initPie(id, series) {{
         borderWidth: 2
       }},
       label: {{ color: '#e2e8f0', formatter: '{{b}}' }},
-      data: pieData(series)
+      data
     }}]
   }});
   return chart;
 }}
 
-function initBar(id, series) {{
+function initBar(id, series, opts) {{
+  opts = opts || {{}};
+  const valueKey = opts.valueKey || 'tokens';
+  const unit = opts.unit || I18N.tokens;
   const chart = echarts.init(document.getElementById(id));
   const labels = (series.labels || []).slice();
-  const tokens = (series.tokens || []).slice();
+  const values = (series[valueKey] || []).slice();
   chart.setOption({{
     color: ['#a78bfa'],
-    tooltip: {{ trigger: 'axis', axisPointer: {{ type: 'shadow' }} }},
+    tooltip: {{
+      trigger: 'axis',
+      axisPointer: {{ type: 'shadow' }},
+      formatter: function (items) {{
+        const p = items[0];
+        return p.name + '<br/>' + p.value + ' ' + unit;
+      }}
+    }},
     grid: {{ left: 16, right: 24, top: 24, bottom: 24, containLabel: true }},
     xAxis: {{
       type: 'value',
@@ -541,19 +631,70 @@ function initBar(id, series) {{
     yAxis: {{
       type: 'category',
       data: labels,
-      axisLabel: {{ ...baseText(), width: 120, overflow: 'truncate' }},
+      axisLabel: {{ color: '#94a3b8', fontSize: 11, width: 120, overflow: 'truncate' }},
       axisLine: {{ lineStyle: {{ color: '#334155' }} }}
     }},
     series: [{{
       type: 'bar',
-      data: tokens,
+      data: values,
       barMaxWidth: 22,
       itemStyle: {{
         borderRadius: [0, 8, 8, 0],
         color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
-          {{ offset: 0, color: '#6366f1' }},
-          {{ offset: 1, color: '#38bdf8' }}
+          {{ offset: 0, color: opts.from || '#6366f1' }},
+          {{ offset: 1, color: opts.to || '#38bdf8' }}
         ])
+      }}
+    }}]
+  }});
+  return chart;
+}}
+
+function initHeatmap() {{
+  const heat = DATA.heatmap || {{}};
+  const branches = heat.branches || [];
+  const actions = heat.actions || [];
+  const raw = heat.data || [];
+  const chart = echarts.init(document.getElementById('chart-heat'));
+  const maxVal = raw.reduce((m, d) => Math.max(m, d[2] || 0), 0) || 1;
+  chart.setOption({{
+    tooltip: {{
+      position: 'top',
+      formatter: function (p) {{
+        const a = actions[p.value[0]] || '';
+        const b = branches[p.value[1]] || '';
+        return b + ' × ' + a + '<br/>' + p.value[2] + ' ' + I18N.tokens;
+      }}
+    }},
+    grid: {{ left: 90, right: 30, top: 20, bottom: 60 }},
+    xAxis: {{
+      type: 'category',
+      data: actions,
+      splitArea: {{ show: true }},
+      axisLabel: {{ color: '#94a3b8', fontSize: 11, rotate: actions.length > 5 ? 25 : 0 }}
+    }},
+    yAxis: {{
+      type: 'category',
+      data: branches,
+      splitArea: {{ show: true }},
+      axisLabel: {{ color: '#94a3b8', fontSize: 11, width: 80, overflow: 'truncate' }}
+    }},
+    visualMap: {{
+      min: 0,
+      max: maxVal,
+      calculable: true,
+      orient: 'horizontal',
+      left: 'center',
+      bottom: 0,
+      textStyle: {{ color: '#94a3b8' }},
+      inRange: {{ color: ['#0f172a', '#1d4ed8', '#38bdf8', '#fbbf24'] }}
+    }},
+    series: [{{
+      type: 'heatmap',
+      data: raw,
+      label: {{ show: true, color: '#e2e8f0', fontSize: 10 }},
+      emphasis: {{
+        itemStyle: {{ shadowBlur: 10, shadowColor: 'rgba(0,0,0,.45)' }}
       }}
     }}]
   }});
@@ -610,10 +751,28 @@ function esc(s) {{
 
   const charts = [
     initDayChart(),
+    initBar('chart-branch', DATA.by_branch || {{}}, {{ from: '#0ea5e9', to: '#22d3ee' }}),
+    initPie('chart-status', DATA.by_status || {{}}, {{
+      valueKey: 'calls',
+      unit: I18N.calls,
+      localize: true,
+      colors: ['#34d399', '#f87171', '#94a3b8']
+    }}),
+    initPie('chart-split', DATA.token_split || {{}}, {{
+      localize: true,
+      colors: ['#38bdf8', '#a78bfa']
+    }}),
+    initBar('chart-duration', DATA.duration_by_model || {{}}, {{
+      valueKey: 'avg_ms',
+      unit: 'ms',
+      from: '#f59e0b',
+      to: '#fbbf24'
+    }}),
     initPie('chart-action', DATA.by_action || {{}}),
     initPie('chart-provider', DATA.by_provider || {{}}),
     initBar('chart-model', DATA.by_model || {{}}),
-    initBar('chart-user', DATA.by_user || {{}}),
+    initBar('chart-user', DATA.by_user || {{}}, {{ from: '#10b981', to: '#34d399' }}),
+    initHeatmap(),
   ];
   fillTable();
   window.addEventListener('resize', () => charts.forEach(c => c.resize()));
@@ -630,6 +789,20 @@ def _series(bucket: dict[str, dict[str, int]]) -> dict[str, list[Any]]:
         "labels": [k for k, _ in items],
         "calls": [v["calls"] for _, v in items],
         "tokens": [v["tokens"] for _, v in items],
+    }
+
+
+def _duration_series(bucket: dict[str, list[int]]) -> dict[str, list[Any]]:
+    items = []
+    for model, vals in bucket.items():
+        if not vals:
+            continue
+        items.append((model, int(sum(vals) / len(vals)), len(vals)))
+    items.sort(key=lambda x: (-x[1], x[0]))
+    return {
+        "labels": [m for m, _, _ in items],
+        "avg_ms": [avg for _, avg, _ in items],
+        "calls": [n for _, _, n in items],
     }
 
 
@@ -659,15 +832,25 @@ def _i18n(chinese: bool) -> dict[str, str]:
             "completion": "输出",
             "ok": "成功",
             "fail": "失败",
+            "unknown": "未知",
             "avg_ms": "平均耗时",
             "by_day": "按日趋势",
+            "by_branch": "按分支用量",
+            "by_status": "成功 / 失败",
+            "token_split": "输入 vs 输出 Token",
+            "duration_by_model": "按模型平均耗时",
             "by_action": "按动作分布",
             "by_provider": "按厂商分布",
             "by_model": "按模型用量",
             "by_user": "按用户用量",
+            "heatmap": "动作 × 分支（Token 热力图）",
             "hint_day": "双轴：Token 与调用次数",
             "hint_pie": "环形图按 Token 占比",
             "hint_bar": "横向柱状图按 Token",
+            "hint_status": "按调用次数看稳定性",
+            "hint_split": "区分读入与生成消耗",
+            "hint_duration": "单位：毫秒（ms）",
+            "hint_heat": "颜色越亮表示该分支上该动作消耗越多",
             "recent": "最近记录（最多 100 条）",
             "col_time": "时间",
             "col_user": "用户",
@@ -690,15 +873,25 @@ def _i18n(chinese: bool) -> dict[str, str]:
         "completion": "Completion",
         "ok": "OK",
         "fail": "Failed",
+        "unknown": "Unknown",
         "avg_ms": "Avg duration",
         "by_day": "Daily trend",
+        "by_branch": "By branch",
+        "by_status": "Success / failure",
+        "token_split": "Prompt vs completion tokens",
+        "duration_by_model": "Avg duration by model",
         "by_action": "By action",
         "by_provider": "By provider",
         "by_model": "By model",
         "by_user": "By user",
+        "heatmap": "Action × branch heatmap (tokens)",
         "hint_day": "Dual axis: tokens and call count",
         "hint_pie": "Donut chart by token share",
         "hint_bar": "Horizontal bars by tokens",
+        "hint_status": "Call counts for reliability",
+        "hint_split": "Separate read vs generate cost",
+        "hint_duration": "Unit: milliseconds (ms)",
+        "hint_heat": "Brighter cells mean more tokens for that action on that branch",
         "recent": "Recent records (up to 100)",
         "col_time": "Time",
         "col_user": "User",

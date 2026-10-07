@@ -31,6 +31,8 @@ def test_write_usage_report_fixed_path(tmp_path: Path, monkeypatch) -> None:
             branch="main",
             files_count=2,
             diff_chars=800,
+            prompt_tokens=80,
+            completion_tokens=40,
             total_tokens=120,
             ok=True,
             duration_ms=900,
@@ -47,8 +49,11 @@ def test_write_usage_report_fixed_path(tmp_path: Path, monkeypatch) -> None:
             model="gpt-4o-mini",
             action="report",
             action_detail="report",
+            branch="feature/x",
             commit_count=12,
             since="7d",
+            prompt_tokens=30,
+            completion_tokens=10,
             total_tokens=40,
             ok=False,
             error_kind="timeout",
@@ -77,6 +82,15 @@ def test_write_usage_report_fixed_path(tmp_path: Path, monkeypatch) -> None:
     assert analytics["totals"]["ok"] == 1
     assert analytics["totals"]["fail"] == 1
     assert "2026-10-07" in analytics["by_day"]["labels"]
+    assert "main" in analytics["by_branch"]["labels"]
+    assert "feature/x" in analytics["by_branch"]["labels"]
+    assert analytics["token_split"]["tokens"] == [110, 50]
+    assert analytics["duration_by_model"]["labels"]
+    assert analytics["heatmap"]["branches"]
+    assert analytics["heatmap"]["actions"]
+    assert any(cell[2] > 0 for cell in analytics["heatmap"]["data"])
+    assert "chart-branch" in text
+    assert "chart-heat" in text
 
     # Re-run overwrites same file (sync)
     write_usage_report(records, chinese=False)
