@@ -424,3 +424,28 @@ def format_balance_result(result: BalanceResult, *, chinese: bool = False) -> st
         if result.note_en:
             lines.append(result.note_en)
     return "\n".join(lines)
+
+
+def _first_amount(result: BalanceResult) -> str | None:
+    for item in result.items:
+        currency = item.currency or ""
+        unit = f" {currency}" if currency else ""
+        for value in (item.remaining, item.total, item.cash, item.gift):
+            if value is not None:
+                return f"{value}{unit}"
+    return None
+
+
+def format_balance_brief(result: BalanceResult, *, chinese: bool = False) -> str:
+    """One-line balance for config --list."""
+    provider = result.provider.name_cn if chinese else result.provider.name_en
+    if not result.supported:
+        if chinese:
+            return f"{provider}不支持余额查询"
+        return f"{provider} does not support balance lookup"
+    amount = _first_amount(result)
+    if amount:
+        return f"{amount}（{provider}）" if chinese else f"{amount} ({provider})"
+    if chinese:
+        return f"已查询（{provider}），无明细金额"
+    return f"queried ({provider}), no amount returned"

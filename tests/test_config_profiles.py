@@ -144,3 +144,29 @@ def test_mask_and_summary(cfg_home: Path, monkeypatch: pytest.MonkeyPatch) -> No
     assert summary["profile"] == "0"
     assert summary["api_key"] == "sk-a...mnop"
     assert "sk-abcdefghijklmnop" not in summary["api_key"]
+
+
+def test_profiles_overview_counts_and_current(
+    cfg_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GAI_API_KEY", "sk-zero-aaaaaaaa")
+    monkeypatch.setenv("GAI_API_KEY1", "sk-one-bbbbbbbb")
+    monkeypatch.setenv("GAI_PROFILE", "1")
+    text = config.format_profiles_overview(
+        chinese=True,
+        balance_line="DeepSeek 可用总额 12.34 CNY",
+    )
+    assert "已配置 API Key：2 个" in text
+    assert "当前使用：编号 1" in text
+    assert "余额：DeepSeek 可用总额 12.34 CNY" in text
+
+
+def test_query_active_balance_unsupported_vendor(
+    cfg_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GAI_API_KEY", "sk-test-xxxxxxxx")
+    monkeypatch.setenv("GAI_BASE_URL", "https://api.openai.com/v1")
+    from gai.cli import _query_active_profile_balance
+
+    line = _query_active_profile_balance(chinese=True)
+    assert "不支持余额查询" in line

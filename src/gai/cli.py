@@ -24,10 +24,12 @@ from gai.command_history import (
 from gai.completion_cmd import completion_app
 from gai.config import (
     CONFIG_FILE,
+    format_profiles_overview,
     list_profiles,
     load_settings,
     profiles_summary,
     save_settings,
+    settings_from_profile,
     settings_summary,
 )
 from gai.devflow import (
@@ -60,7 +62,11 @@ from gai.git_ops import (
 )
 from gai.history_report import history_report_path, write_history_report
 from gai.help_i18n import H
-from gai.llm.balance import fetch_balance, format_balance_result
+from gai.llm.balance import (
+    fetch_balance,
+    format_balance_brief,
+    format_balance_result,
+)
 from gai.llm.client import LLMError
 from gai.llm.history import (
     format_usage_table,
@@ -2126,6 +2132,30 @@ def balance_cmd(
         _print_footer(trace=trace, chinese=cn)
 
 
+def _query_active_profile_balance(*, chinese: bool) -> str:
+    """Best-effort one-line balance for the active profile; never raises."""
+    profiles = list_profiles()
+    active = next((p for p in profiles if p.active), None)
+    if active is None:
+        return "（无当前配置档）" if chinese else "(no active profile)"
+    if not active.api_key:
+        return (
+            "当前配置档未设置 API Key"
+            if chinese
+            else "active profile has no API key"
+        )
+    try:
+        settings = settings_from_profile(active, load_settings())
+        result = fetch_balance(settings)
+        return format_balance_brief(result, chinese=chinese)
+    except (LLMError, RuntimeError, OSError) as exc:
+        msg = format_cli_error(exc, chinese=chinese)
+        first = msg.splitlines()[0].strip() if msg else str(exc)
+        return f"查询失败（{first}）" if chinese else f"lookup failed ({first})"
+    except Exception as exc:  # noqa: BLE001 — list must still print
+        return f"查询失败（{exc}）" if chinese else f"lookup failed ({exc})"
+
+
 @app.command(
     "config",
     help=H(
@@ -2147,8 +2177,8 @@ def config_cmd(
         "--list",
         "-l",
         help=H(
-            "List all LLM profiles from env and config (secrets masked).",
-            "列出环境变量与配置文件中的全部 LLM 配置档（密钥已掩码）。",
+            "List profiles, show which key is in use, and query its balance.",
+            "列出配置档、当前编号，并查询该 API Key 余额（不支持则说明）。",
         ),
     ),
     use_profile: Optional[str] = typer.Option(
@@ -2267,10 +2297,10 @@ def config_cmd(
 
         if list_profiles_flag:
             rows = profiles_summary(chinese=cn)
+            balance_line = _query_active_profile_balance(chinese=cn)
+            console.print(format_profiles_overview(chinese=cn, balance_line=balance_line))
             if not rows:
-                console.print(
-                    "（尚无配置档）" if cn else "(no profiles yet)"
-                )
+                console.print("（尚无配置档）" if cn else "(no profiles yet)")
             else:
                 console.print(json.dumps(rows, indent=2, ensure_ascii=False))
             # Avoid dumping --show by default when user only asked for --list.

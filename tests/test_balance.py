@@ -11,6 +11,7 @@ from gai.config import Settings
 from gai.llm.balance import (
     detect_provider,
     fetch_balance,
+    format_balance_brief,
     format_balance_result,
 )
 from gai.llm.client import LLMError
@@ -46,6 +47,8 @@ def test_unsupported_provider_message_cn():
     assert "gpt-4o-mini" in text
     assert "未提供" in text or "余额查询" in text
     assert "DeepSeek" in text
+    brief = format_balance_brief(result, chinese=True)
+    assert brief == "OpenAI不支持余额查询"
 
 
 def test_deepseek_balance_ok(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -96,6 +99,9 @@ def test_deepseek_balance_ok(monkeypatch: pytest.MonkeyPatch) -> None:
     text = format_balance_result(result, chinese=True)
     assert "12.34" in text
     assert "DeepSeek" in text
+    brief = format_balance_brief(result, chinese=True)
+    assert "12.34" in brief
+    assert "DeepSeek" in brief
 
 
 def test_siliconflow_balance_ok(monkeypatch: pytest.MonkeyPatch) -> None:

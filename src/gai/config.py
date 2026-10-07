@@ -390,6 +390,7 @@ def settings_summary(settings: Settings) -> dict[str, str]:
 
 
 def profiles_summary(chinese: bool = False) -> list[dict[str, str]]:
+    _ = chinese
     rows: list[dict[str, str]] = []
     for p in list_profiles():
         mark = "*" if p.active else ""
@@ -403,6 +404,52 @@ def profiles_summary(chinese: bool = False) -> list[dict[str, str]]:
                 "source": "+".join(p.sources),
             }
         )
-    if chinese and not rows:
-        return rows
     return rows
+
+
+def settings_from_profile(profile: ProfileInfo, template: Settings | None = None) -> Settings:
+    """Build Settings for a listed profile (timeout/review from template or defaults)."""
+    base = template or Settings()
+    return Settings(
+        api_key=profile.api_key,
+        base_url=profile.base_url or DEFAULT_BASE_URL,
+        model=profile.model or DEFAULT_MODEL,
+        timeout=base.timeout,
+        max_diff_chars=base.max_diff_chars,
+        ignore_patterns=base.ignore_patterns,
+        profile=profile.name,
+    )
+
+
+def format_profile_label(name: str, *, chinese: bool = False) -> str:
+    if name.isdigit():
+        return f"编号 {name}" if chinese else f"#{name}"
+    return f"配置档 {name}" if chinese else f"profile {name}"
+
+
+def format_profiles_overview(
+    *,
+    chinese: bool = False,
+    balance_line: str | None = None,
+) -> str:
+    profiles = list_profiles()
+    keyed = [p for p in profiles if p.api_key]
+    active = next((p for p in profiles if p.active), None)
+    lines: list[str] = []
+    if chinese:
+        lines.append(f"已配置 API Key：{len(keyed)} 个")
+        if active:
+            lines.append(f"当前使用：{format_profile_label(active.name, chinese=True)}")
+        else:
+            lines.append("当前使用：（无）")
+        if balance_line:
+            lines.append(f"余额：{balance_line}")
+    else:
+        lines.append(f"Configured API keys: {len(keyed)}")
+        if active:
+            lines.append(f"In use: {format_profile_label(active.name, chinese=False)}")
+        else:
+            lines.append("In use: (none)")
+        if balance_line:
+            lines.append(f"Balance: {balance_line}")
+    return "\n".join(lines)
