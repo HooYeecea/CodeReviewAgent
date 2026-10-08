@@ -103,6 +103,50 @@ _COMMAND_META: list[dict[str, Any]] = [
         },
     },
     {
+        "id": "merge",
+        "en": {
+            "title": "Merge branch",
+            "blurb": "Merge another branch into HEAD with confirmation and conflict tips.",
+        },
+        "cn": {
+            "title": "合并分支",
+            "blurb": "把其他分支合并进当前分支；需确认，冲突时给出提示。",
+        },
+    },
+    {
+        "id": "rebase",
+        "en": {
+            "title": "Rebase branch",
+            "blurb": "Rebase onto another ref; warns that history will be rewritten.",
+        },
+        "cn": {
+            "title": "变基",
+            "blurb": "变基到另一引用；会提示改写历史的风险。",
+        },
+    },
+    {
+        "id": "switch",
+        "en": {
+            "title": "Switch branch",
+            "blurb": "Switch or create branches; warns when the worktree is dirty.",
+        },
+        "cn": {
+            "title": "切换分支",
+            "blurb": "切换或创建分支；工作区有未提交改动时会警告。",
+        },
+    },
+    {
+        "id": "stash",
+        "en": {
+            "title": "Stash changes",
+            "blurb": "Stash local changes, or pop the latest entry with --pop.",
+        },
+        "cn": {
+            "title": "暂存改动 (stash)",
+            "blurb": "stash 本地改动；`--pop` 弹出最近一条。",
+        },
+    },
+    {
         "id": "report",
         "en": {
             "title": "Work summary",

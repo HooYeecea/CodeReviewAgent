@@ -49,16 +49,25 @@ from gai.git_ops import (
     check_sync,
     commit as git_commit,
     clear_trace,
+    commits_ahead_of_head,
+    get_current_branch,
     get_traced_commands,
     has_staged_changes,
     is_worktree_dirty,
     last_commit_subject,
     list_change_entries,
+    list_local_branches,
+    merge as git_merge,
     plan_push,
     pull as git_pull,
     push as git_push,
+    rebase as git_rebase,
     set_tracing,
     short_status,
+    stash_list as git_stash_list,
+    stash_pop as git_stash_pop,
+    stash_push as git_stash_push,
+    switch_branch as git_switch,
     unadd as git_unadd,
     uncommit as git_uncommit,
 )
@@ -1435,6 +1444,386 @@ def pull_cmd(
     _start_trace(trace)
     try:
         _do_pull(remote=remote, yes=yes, chinese=cn, rebase=True if rebase else None)
+    except (GitError, RuntimeError) as exc:
+        _print_error(exc, chinese=cn, trace=trace)
+        raise typer.Exit(code=1) from exc
+    except typer.Exit:
+        raise
+    except KeyboardInterrupt:
+        console.print("\n已取消。" if cn else "\nAborted.")
+        raise typer.Exit(code=130) from None
+    finally:
+        _print_footer(trace=trace, chinese=cn)
+
+
+def _confirm_dirty_continue(*, chinese: bool, yes: bool, action: str) -> None:
+    """Warn on dirty worktree; refuse with --yes; otherwise ask to continue."""
+    if not is_worktree_dirty():
+        return
+    status_text = short_status()
+    tip = (
+        f"工作区有未提交改动，{action} 可能覆盖文件或产生冲突。建议先提交或 stash。"
+        if chinese
+        else f"Working tree has uncommitted changes; {action} may overwrite files or conflict. Commit or stash first."
+    )
+    console.print(f"[yellow]{tip}[/yellow]")
+    if status_text:
+        console.print(f"[dim]{status_text}[/dim]")
+    if yes:
+        err = (
+            f"已指定 --yes，为避免覆盖本地改动，已取消{action}。"
+            if chinese
+            else f"Refusing to {action} with --yes while the working tree is dirty."
+        )
+        err_console.print(f"[red]{err}[/red]")
+        raise typer.Exit(code=1)
+    proceed = f"仍要继续{action}？" if chinese else f"Continue {action} anyway?"
+    if not Confirm.ask(proceed, default=False):
+        console.print(("已取消。" if chinese else "Aborted."))
+        raise typer.Exit(code=0)
+
+
+@app.command(
+    "merge",
+    help=H(
+        "Merge another branch into the current branch (with confirmation).",
+        "将其他分支合并进当前分支（需确认）。",
+    ),
+)
+def merge_cmd(
+    branch: str = typer.Argument(
+        ...,
+        help=H("Branch or ref to merge into HEAD.", "要合并进当前 HEAD 的分支或引用。"),
+    ),
+    no_ff: bool = typer.Option(
+        False,
+        "--no-ff",
+        help=H(
+            "Create a merge commit even for fast-forward.",
+            "即使可快进也创建 merge commit。",
+        ),
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help=H("Skip interactive confirmation.", "跳过交互确认。"),
+    ),
+    cn: bool = typer.Option(
+        False,
+        "--cn",
+        help=H(
+            "Use Simplified Chinese prompts.",
+            "使用简体中文提示；与 -h 联用时显示中文帮助。",
+        ),
+    ),
+    trace: bool = typer.Option(
+        False,
+        "--trace",
+        "-t",
+        help=_TRACE_OPT_HELP,
+    ),
+) -> None:
+    """Merge a branch into HEAD with preview and confirmation."""
+    _start_trace(trace)
+    try:
+        current = get_current_branch()
+        ahead = commits_ahead_of_head(branch)
+        console.print(
+            (f"当前分支：{current}" if cn else f"Current branch: {current}")
+        )
+        if ahead <= 0:
+            tip = (
+                f"已与 {branch} 同步，没有可合并的提交。"
+                if cn
+                else f"Already up to date with {branch}; nothing to merge."
+            )
+            console.print(f"[yellow]{tip}[/yellow]")
+            raise typer.Exit(code=0)
+        console.print(
+            (
+                f"将合并：{branch}（带来约 {ahead} 个提交）"
+                if cn
+                else f"Will merge: {branch} (~{ahead} commit(s))"
+            )
+        )
+        if no_ff:
+            console.print(
+                "[dim]使用 --no-ff（强制生成 merge commit）[/dim]"
+                if cn
+                else "[dim]Using --no-ff (force merge commit)[/dim]"
+            )
+        _confirm_dirty_continue(chinese=cn, yes=yes, action="合并" if cn else "merge")
+        ask = (
+            f"确定把 {branch} 合并进 {current}？"
+            if cn
+            else f"Confirm merge {branch} into {current}?"
+        )
+        if not yes and not Confirm.ask(ask, default=False):
+            console.print("已取消。" if cn else "Aborted.")
+            raise typer.Exit(code=0)
+        with console.status("[bold]" + ("正在合并..." if cn else "Merging...") + "[/bold]"):
+            brought = git_merge(branch, no_ff=no_ff)
+        console.print(
+            f"[green]已合并 {branch}（约 {brought} 个提交）→ {current}[/green]"
+            if cn
+            else f"[green]Merged {branch} (~{brought} commit(s)) → {current}[/green]"
+        )
+    except (GitError, RuntimeError) as exc:
+        _print_error(exc, chinese=cn, trace=trace)
+        raise typer.Exit(code=1) from exc
+    except typer.Exit:
+        raise
+    except KeyboardInterrupt:
+        console.print("\n已取消。" if cn else "\nAborted.")
+        raise typer.Exit(code=130) from None
+    finally:
+        _print_footer(trace=trace, chinese=cn)
+
+
+@app.command(
+    "rebase",
+    help=H(
+        "Rebase the current branch onto another ref (rewrites history; confirmation required).",
+        "把当前分支变基到另一引用上（会改写历史；需确认）。",
+    ),
+)
+def rebase_cmd(
+    onto: str = typer.Argument(
+        ...,
+        help=H("Upstream ref to rebase onto (e.g. main, origin/main).", "变基目标（如 main、origin/main）。"),
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help=H("Skip interactive confirmation.", "跳过交互确认。"),
+    ),
+    cn: bool = typer.Option(
+        False,
+        "--cn",
+        help=H(
+            "Use Simplified Chinese prompts.",
+            "使用简体中文提示；与 -h 联用时显示中文帮助。",
+        ),
+    ),
+    trace: bool = typer.Option(
+        False,
+        "--trace",
+        "-t",
+        help=_TRACE_OPT_HELP,
+    ),
+) -> None:
+    """Rebase current branch onto another ref with a strong confirmation."""
+    _start_trace(trace)
+    try:
+        current = get_current_branch()
+        console.print(
+            (f"当前分支：{current}" if cn else f"Current branch: {current}")
+        )
+        console.print(
+            (f"变基到：{onto}" if cn else f"Rebase onto: {onto}")
+        )
+        warn = (
+            "警告：rebase 会改写当前分支历史；若已推送过，之后需要 force-push（有风险）。"
+            if cn
+            else "Warning: rebase rewrites this branch's history; if already pushed you may need a risky force-push later."
+        )
+        console.print(f"[yellow]{warn}[/yellow]")
+        _confirm_dirty_continue(chinese=cn, yes=yes, action="变基" if cn else "rebase")
+        ask = (
+            f"确定把 {current} 变基到 {onto}？"
+            if cn
+            else f"Confirm rebase {current} onto {onto}?"
+        )
+        if not yes and not Confirm.ask(ask, default=False):
+            console.print("已取消。" if cn else "Aborted.")
+            raise typer.Exit(code=0)
+        with console.status("[bold]" + ("正在变基..." if cn else "Rebasing...") + "[/bold]"):
+            replayed = git_rebase(onto)
+        console.print(
+            f"[green]已将 {current} 变基到 {onto}（重放约 {replayed} 个提交）[/green]"
+            if cn
+            else f"[green]Rebased {current} onto {onto} (replayed ~{replayed} commit(s))[/green]"
+        )
+    except (GitError, RuntimeError) as exc:
+        _print_error(exc, chinese=cn, trace=trace)
+        raise typer.Exit(code=1) from exc
+    except typer.Exit:
+        raise
+    except KeyboardInterrupt:
+        console.print("\n已取消。" if cn else "\nAborted.")
+        raise typer.Exit(code=130) from None
+    finally:
+        _print_footer(trace=trace, chinese=cn)
+
+
+@app.command(
+    "switch",
+    help=H(
+        "Switch branches (warns when the working tree is dirty).",
+        "切换分支（工作区有未提交改动时会警告）。",
+    ),
+)
+def switch_cmd(
+    branch: str = typer.Argument(
+        ...,
+        help=H("Branch to switch to.", "要切换到的分支名。"),
+    ),
+    create: bool = typer.Option(
+        False,
+        "--create",
+        "-c",
+        help=H("Create the branch, then switch to it.", "创建分支并切换过去。"),
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help=H("Skip interactive confirmation when dirty.", "脏工作区时跳过交互确认。"),
+    ),
+    cn: bool = typer.Option(
+        False,
+        "--cn",
+        help=H(
+            "Use Simplified Chinese prompts.",
+            "使用简体中文提示；与 -h 联用时显示中文帮助。",
+        ),
+    ),
+    trace: bool = typer.Option(
+        False,
+        "--trace",
+        "-t",
+        help=_TRACE_OPT_HELP,
+    ),
+) -> None:
+    """Switch (or create+switch) branches with dirty-worktree guards."""
+    _start_trace(trace)
+    try:
+        current = get_current_branch()
+        branches = list_local_branches()
+        action = "创建并切换" if (cn and create) else ("create+switch" if create else ("切换" if cn else "switch"))
+        console.print(
+            (f"当前分支：{current}" if cn else f"Current branch: {current}")
+        )
+        if create:
+            console.print(
+                (f"将创建并切换到：{branch}" if cn else f"Will create and switch to: {branch}")
+            )
+        else:
+            console.print(
+                (f"将切换到：{branch}" if cn else f"Will switch to: {branch}")
+            )
+            if branch not in branches and not create:
+                # Still allow remote-tracking / other refs via git switch.
+                console.print(
+                    f"[dim]本地分支列表未直接看到 {branch}，将交给 git switch 解析。[/dim]"
+                    if cn
+                    else f"[dim]{branch} not in local branch list; git switch will resolve it.[/dim]"
+                )
+        _confirm_dirty_continue(chinese=cn, yes=yes, action=action)
+        if not yes and not create:
+            ask = (
+                f"确定切换到 {branch}？"
+                if cn
+                else f"Confirm switch to {branch}?"
+            )
+            if not Confirm.ask(ask, default=True):
+                console.print("已取消。" if cn else "Aborted.")
+                raise typer.Exit(code=0)
+        with console.status("[bold]" + ("正在切换..." if cn else "Switching...") + "[/bold]"):
+            landed = git_switch(branch, create=create)
+        console.print(
+            f"[green]已切换到 {landed}[/green]"
+            if cn
+            else f"[green]Switched to {landed}[/green]"
+        )
+    except (GitError, RuntimeError) as exc:
+        _print_error(exc, chinese=cn, trace=trace)
+        raise typer.Exit(code=1) from exc
+    except typer.Exit:
+        raise
+    except KeyboardInterrupt:
+        console.print("\n已取消。" if cn else "\nAborted.")
+        raise typer.Exit(code=130) from None
+    finally:
+        _print_footer(trace=trace, chinese=cn)
+
+
+@app.command(
+    "stash",
+    help=H(
+        "Stash local changes, or pop the latest stash with --pop.",
+        "暂存本地改动；加 --pop 弹出最近一条 stash。",
+    ),
+)
+def stash_cmd(
+    pop: bool = typer.Option(
+        False,
+        "--pop",
+        help=H("Pop the latest stash entry.", "弹出最近一条 stash。"),
+    ),
+    message: Optional[str] = typer.Option(
+        None,
+        "--message",
+        "-m",
+        help=H("Optional stash message (push only).", "可选 stash 说明（仅 push）。"),
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help=H("Skip interactive confirmation.", "跳过交互确认。"),
+    ),
+    cn: bool = typer.Option(
+        False,
+        "--cn",
+        help=H(
+            "Use Simplified Chinese prompts.",
+            "使用简体中文提示；与 -h 联用时显示中文帮助。",
+        ),
+    ),
+    trace: bool = typer.Option(
+        False,
+        "--trace",
+        "-t",
+        help=_TRACE_OPT_HELP,
+    ),
+) -> None:
+    """Stash push (default) or stash pop."""
+    _start_trace(trace)
+    try:
+        if pop:
+            entries = git_stash_list()
+            if not entries:
+                tip = "没有可弹出的 stash。" if cn else "No stash entries to pop."
+                err_console.print(f"[red]{tip}[/red]")
+                raise typer.Exit(code=1)
+            console.print(
+                (f"将弹出：{entries[0]}" if cn else f"Will pop: {entries[0]}")
+            )
+            ask = "确定弹出该 stash？" if cn else "Confirm stash pop?"
+            if not yes and not Confirm.ask(ask, default=False):
+                console.print("已取消。" if cn else "Aborted.")
+                raise typer.Exit(code=0)
+            with console.status("[bold]" + ("正在弹出 stash..." if cn else "Popping stash...") + "[/bold]"):
+                summary = git_stash_pop()
+            console.print(f"[green]{summary}[/green]")
+        else:
+            if not is_worktree_dirty():
+                tip = "工作区干净，没有可 stash 的改动。" if cn else "Working tree clean; nothing to stash."
+                console.print(f"[yellow]{tip}[/yellow]")
+                raise typer.Exit(code=0)
+            status_text = short_status()
+            if status_text:
+                console.print(f"[dim]{status_text}[/dim]")
+            ask = "确定 stash 当前改动？" if cn else "Confirm stash current changes?"
+            if not yes and not Confirm.ask(ask, default=False):
+                console.print("已取消。" if cn else "Aborted.")
+                raise typer.Exit(code=0)
+            with console.status("[bold]" + ("正在 stash..." if cn else "Stashing...") + "[/bold]"):
+                summary = git_stash_push(message=message)
+            console.print(f"[green]{summary}[/green]")
     except (GitError, RuntimeError) as exc:
         _print_error(exc, chinese=cn, trace=trace)
         raise typer.Exit(code=1) from exc

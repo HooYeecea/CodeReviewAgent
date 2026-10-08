@@ -64,6 +64,24 @@ _COMMAND_EXAMPLES: dict[str, tuple[tuple[str, str, str], ...]] = {
         ("gai pull -y --cn", "Pull without interactive confirmation (merge if diverged)", "拉取并跳过交互确认（分叉时用 merge）"),
         ("gai pull --rebase --cn", "Pull with rebase instead of merge", "用 rebase 拉取而不是 merge"),
     ),
+    "merge": (
+        ("gai merge feature --cn", "Merge feature into the current branch (asks to confirm)", "把 feature 合并进当前分支（需确认）"),
+        ("gai merge feature --no-ff --cn", "Merge with an explicit merge commit", "合并并强制生成 merge commit"),
+        ("gai merge feature -y --cn", "Merge without interactive confirmation", "合并并跳过交互确认"),
+    ),
+    "rebase": (
+        ("gai rebase main --cn", "Rebase current branch onto main (asks to confirm)", "把当前分支变基到 main（需确认）"),
+        ("gai rebase origin/main --cn", "Rebase onto a remote-tracking branch", "变基到远程跟踪分支"),
+    ),
+    "switch": (
+        ("gai switch feature --cn", "Switch to an existing branch", "切换到已有分支"),
+        ("gai switch -c topic --cn", "Create topic and switch to it", "创建 topic 并切换过去"),
+    ),
+    "stash": (
+        ("gai stash --cn", "Stash current local changes (asks to confirm)", "stash 当前本地改动（需确认）"),
+        ("gai stash -m 'wip' --cn", "Stash with a message", "带说明的 stash"),
+        ("gai stash --pop --cn", "Pop the latest stash entry", "弹出最近一条 stash"),
+    ),
     "report": (
         ("gai report --cn", "Summarize recent commits into a work report", "根据近期提交生成工作总结"),
         ("gai report --since 7d --cn", "Report covering the last 7 days", "统计最近 7 天的提交"),

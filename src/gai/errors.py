@@ -152,12 +152,62 @@ _GIT_MESSAGES: dict[str, tuple[str, str]] = {
         "git pull 失败。",
     ),
     "dirty_worktree": (
-        "Working tree has uncommitted changes. Commit, stash, or discard them before pulling.",
-        "工作区有未提交改动。请先提交、stash 或丢弃后再拉取。",
+        "Working tree has uncommitted changes. Commit, stash, or discard them first.",
+        "工作区有未提交改动。请先提交、stash 或丢弃后再继续。",
     ),
     "pull_conflict": (
         "Pull stopped on a merge/rebase conflict. Resolve conflicts, then continue or abort the git operation.",
         "拉取因合并/变基冲突中断。请解决冲突后继续，或中止本次 git 操作。",
+    ),
+    "merge_conflict": (
+        "Merge stopped on conflicts. Resolve them, then commit "
+        "(or run `git merge --abort`).",
+        "合并因冲突中断。请解决冲突后提交，或执行 `git merge --abort` 中止。",
+    ),
+    "rebase_conflict": (
+        "Rebase stopped on conflicts. Resolve them, then `git rebase --continue` "
+        "(or `git rebase --abort`).",
+        "变基因冲突中断。请解决冲突后执行 `git rebase --continue`，或 `git rebase --abort` 中止。",
+    ),
+    "merge_failed": (
+        "git merge failed.",
+        "git merge 失败。",
+    ),
+    "rebase_failed": (
+        "git rebase failed.",
+        "git rebase 失败。",
+    ),
+    "switch_failed": (
+        "git switch failed.",
+        "git switch 失败。",
+    ),
+    "stash_failed": (
+        "git stash failed.",
+        "git stash 失败。",
+    ),
+    "branch_not_found": (
+        "Branch or ref not found. Check the name with `git branch -a`.",
+        "找不到该分支或引用。请用 `git branch -a` 核对名称。",
+    ),
+    "branch_exists": (
+        "Branch already exists. Pick another name, or switch to it without --create.",
+        "分支已存在。请换名，或不加 --create 直接切换。",
+    ),
+    "already_on_branch": (
+        "Already on that branch; nothing to do.",
+        "已在该分支上，无需操作。",
+    ),
+    "nothing_to_merge": (
+        "Already up to date; nothing to merge.",
+        "已是最新，没有可合并的提交。",
+    ),
+    "nothing_to_rebase": (
+        "Already up to date; nothing to rebase.",
+        "已是最新，没有可变基的提交。",
+    ),
+    "nothing_to_stash": (
+        "No local changes (or stash entries) to use.",
+        "没有可 stash 的本地改动（或没有 stash 记录）。",
     ),
     "add_failed": (
         "git add failed.",
@@ -285,6 +335,12 @@ def format_cli_error(exc: BaseException, *, chinese: bool = False) -> str:
                 "log_failed",
                 "dirty_worktree",
                 "pull_conflict",
+                "merge_conflict",
+                "rebase_conflict",
+                "merge_failed",
+                "rebase_failed",
+                "switch_failed",
+                "stash_failed",
             } and raw:
                 detail = raw if len(raw) <= 240 else raw[:240] + "…"
                 # Avoid duplicating when message already is the detail

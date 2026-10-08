@@ -124,6 +124,11 @@ gai commit --cn --push    # 提交成功后推送到已配置 remote
 gai push --cn             # 仅推送（无可推送时提示，不当成成功）
 gai pull --cn             # 检查后确认再拉取
 gai pull --rebase --cn    # 用 rebase 拉取
+gai merge feature --cn    # 合并分支（需确认）
+gai rebase main --cn      # 变基（需确认；会改写历史）
+gai switch feature --cn   # 切换分支
+gai stash --cn            # stash 本地改动
+gai stash --pop --cn      # 弹出最近一条 stash
 gai unadd --cn            # 撤销暂存（需确认）
 gai uncommit --cn         # 撤销最近一次提交（soft，需确认）
 gai report --cn           # 最近 7 天工作总结
@@ -171,6 +176,10 @@ gai report --cn -o .\reports\                # 目录不存在则自动创建
 | `gai devflow` | 引导式串联：AI 暂存建议 → 审查 → 中英提交词 → 推送 |
 | `gai push` | 推送当前分支（先检查是否有可推送内容） |
 | `gai pull` | 拉取远程（先检查；分叉可选 merge / rebase） |
+| `gai merge` | 合并其他分支进当前分支（需确认） |
+| `gai rebase` | 变基到指定引用（需确认；改写历史） |
+| `gai switch` | 切换 / 创建分支（脏工作区会警告） |
+| `gai stash` | stash 本地改动，或 `--pop` 弹出 |
 | `gai report` | 根据提交记录写工作总结 |
 | `gai balance` | 查询 API Key 剩余额度（厂商支持时） |
 | `gai usage` | 查看本地记录的大模型 token 用量历史 |
@@ -324,6 +333,59 @@ gai push -r origin -u --cn
 gai pull --cn
 gai pull --rebase --cn
 gai pull -y
+```
+
+### `gai merge`
+
+将其他分支合并进当前分支：预览提交数 → 脏工作区警告 → 确认 → `git merge`。冲突时提示解决或 `git merge --abort`。
+
+```bash
+gai merge feature --cn
+gai merge feature --no-ff --cn
+gai merge feature -y --cn
+```
+
+| 参数 | 说明 |
+|------|------|
+| `BRANCH` | 要合并的分支 / 引用 |
+| `--no-ff` | 强制生成 merge commit |
+| `-y` / `--yes` | 跳过确认（脏工作区仍会拒绝） |
+| `--cn` | 中文提示 |
+| `-t` / `--trace` | 打印 git 链路 |
+
+### `gai rebase`
+
+把当前分支变基到指定引用。会明确警告「改写历史」；冲突时提示 `git rebase --continue` / `--abort`。
+
+```bash
+gai rebase main --cn
+gai rebase origin/main --cn
+```
+
+| 参数 | 说明 |
+|------|------|
+| `ONTO` | 变基目标（如 `main`、`origin/main`） |
+| `-y` / `--yes` | 跳过确认（脏工作区仍会拒绝） |
+| `--cn` | 中文提示 |
+| `-t` / `--trace` | 打印 git 链路 |
+
+### `gai switch`
+
+切换分支；`--create` / `-c` 可新建。工作区有未提交改动时会警告。
+
+```bash
+gai switch feature --cn
+gai switch -c topic --cn
+```
+
+### `gai stash`
+
+默认 `stash push -u`（含未跟踪文件，需确认）；`--pop` 弹出最近一条。
+
+```bash
+gai stash --cn
+gai stash -m "wip" --cn
+gai stash --pop --cn
 ```
 
 ### `gai report`

@@ -531,6 +531,32 @@ def classify_remote_failure(detail: str) -> str:
     return "generic"
 
 
+def classify_git_failure(detail: str, *, kind: str = "generic") -> str:
+    """Classify local git failures (merge / rebase / switch / stash)."""
+    code = classify_remote_failure(detail)
+    if code == "pull_conflict":
+        if kind == "merge":
+            return "merge_conflict"
+        if kind == "rebase":
+            return "rebase_conflict"
+        return "pull_conflict"
+    if code != "generic":
+        return code
+    text = (detail or "").lower()
+    if "already exists" in text and kind == "switch":
+        return "branch_exists"
+    if "did not match any" in text or "needed a single revision" in text:
+        return "branch_not_found"
+    if "no local changes to save" in text or "no stash entries" in text:
+        return "nothing_to_stash"
+    return {
+        "merge": "merge_failed",
+        "rebase": "rebase_failed",
+        "switch": "switch_failed",
+        "stash": "stash_failed",
+    }.get(kind, "generic")
+
+
 def fetch_remote(remote: str, cwd: Path | None = None) -> None:
     ensure_repo(cwd)
     result = run_git("fetch", remote, cwd=cwd)
@@ -702,6 +728,173 @@ def pull(
             f"Nothing to pull: already up to date with {sync.remote}/{sync.branch}."
         )
     return sync
+
+
+def ref_exists(ref: str, cwd: Path | None = None) -> bool:
+    """True when ``ref`` resolves (branch, tag, or commit-ish)."""
+    ensure_repo(cwd)
+    result = run_git("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", cwd=cwd)
+    if result.returncode == 0:
+        return True
+    # Fallback without ^{commit} for some refs.
+    result = run_git("rev-parse", "--verify", "--quiet", ref, cwd=cwd)
+    return result.returncode == 0
+
+
+def list_local_branches(cwd: Path | None = None) -> list[str]:
+    ensure_repo(cwd)
+    result = run_git("branch", "--format=%(refname:short)", cwd=cwd)
+    if result.returncode != 0:
+        raise GitError(result.stderr.strip() or "failed to list branches")
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def commits_ahead_of_head(ref: str, cwd: Path | None = None) -> int:
+    """How many commits ``ref`` has that HEAD does not (merge preview)."""
+    ensure_repo(cwd)
+    if not ref_exists(ref, cwd):
+        raise GitError(f"ref not found: {ref}", code="branch_not_found")
+    return _rev_list_count(f"HEAD..{ref}", cwd)
+
+
+def merge(
+    branch: str,
+    cwd: Path | None = None,
+    *,
+    no_ff: bool = False,
+) -> int:
+    """Merge ``branch`` into HEAD. Returns commits brought in (best-effort)."""
+    ensure_repo(cwd)
+    current = get_current_branch(cwd)
+    target = branch.strip()
+    if not target:
+        raise GitError("merge branch name is required", code="branch_not_found")
+    if target == current:
+        raise GitError(
+            f"already on '{current}'; nothing to merge",
+            code="already_on_branch",
+        )
+    if not ref_exists(target, cwd):
+        raise GitError(f"branch/ref not found: {target}", code="branch_not_found")
+    ahead = commits_ahead_of_head(target, cwd)
+    if ahead <= 0:
+        raise GitError(
+            f"Already up to date with '{target}' (nothing to merge).",
+            code="nothing_to_merge",
+        )
+    args = ["merge", "--no-edit"]
+    if no_ff:
+        args.append("--no-ff")
+    args.append(target)
+    result = run_git(*args, cwd=cwd)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "git merge failed").strip()
+        code = classify_git_failure(detail, kind="merge")
+        raise GitError(detail, code=code if code != "generic" else "merge_failed")
+    return ahead
+
+
+def rebase(onto: str, cwd: Path | None = None) -> int:
+    """Rebase current branch onto ``onto``. Returns commit count being replayed."""
+    ensure_repo(cwd)
+    current = get_current_branch(cwd)
+    target = onto.strip()
+    if not target:
+        raise GitError("rebase onto ref is required", code="branch_not_found")
+    if target == current:
+        raise GitError(
+            f"cannot rebase '{current}' onto itself",
+            code="already_on_branch",
+        )
+    if not ref_exists(target, cwd):
+        raise GitError(f"branch/ref not found: {target}", code="branch_not_found")
+    # Commits on HEAD that are not on onto (what rebase will replay).
+    replay = _rev_list_count(f"{target}..HEAD", cwd)
+    if replay <= 0 and commits_ahead_of_head(target, cwd) <= 0:
+        raise GitError(
+            f"Already up to date with '{target}' (nothing to rebase).",
+            code="nothing_to_rebase",
+        )
+    result = run_git("rebase", target, cwd=cwd)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "git rebase failed").strip()
+        code = classify_git_failure(detail, kind="rebase")
+        raise GitError(detail, code=code if code != "generic" else "rebase_failed")
+    return replay
+
+
+def switch_branch(
+    name: str,
+    cwd: Path | None = None,
+    *,
+    create: bool = False,
+) -> str:
+    """Switch to ``name`` (optionally create). Returns the branch switched to."""
+    ensure_repo(cwd)
+    branch = name.strip()
+    if not branch:
+        raise GitError("branch name is required", code="branch_not_found")
+    current = get_current_branch(cwd)
+    if branch == current and not create:
+        raise GitError(f"already on '{current}'", code="already_on_branch")
+    if create:
+        result = run_git("switch", "-c", branch, cwd=cwd)
+    else:
+        if not ref_exists(branch, cwd):
+            raise GitError(f"branch not found: {branch}", code="branch_not_found")
+        result = run_git("switch", branch, cwd=cwd)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "git switch failed").strip()
+        code = classify_git_failure(detail, kind="switch")
+        raise GitError(detail, code=code if code != "generic" else "switch_failed")
+    return branch
+
+
+def stash_push(cwd: Path | None = None, *, message: str | None = None) -> str:
+    """Stash local changes. Returns git stdout summary."""
+    ensure_repo(cwd)
+    if not is_worktree_dirty(cwd):
+        raise GitError("No local changes to stash.", code="nothing_to_stash")
+    # Include untracked files so new WIP files are covered (common CLI expectation).
+    args = ["stash", "push", "-u"]
+    if message:
+        args.extend(["-m", message])
+    result = run_git(*args, cwd=cwd)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "git stash push failed").strip()
+        code = classify_git_failure(detail, kind="stash")
+        raise GitError(detail, code=code if code != "generic" else "stash_failed")
+    return (result.stdout or result.stderr or "Saved working directory").strip()
+
+
+def stash_pop(cwd: Path | None = None) -> str:
+    """Apply and drop the latest stash entry."""
+    ensure_repo(cwd)
+    listed = run_git("stash", "list", cwd=cwd)
+    if listed.returncode != 0:
+        raise GitError(
+            listed.stderr.strip() or "git stash list failed",
+            code="stash_failed",
+        )
+    if not (listed.stdout or "").strip():
+        raise GitError("No stash entries to pop.", code="nothing_to_stash")
+    result = run_git("stash", "pop", cwd=cwd)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "git stash pop failed").strip()
+        code = classify_git_failure(detail, kind="stash")
+        # Conflicts during stash pop are common.
+        if code == "pull_conflict":
+            code = "merge_conflict"
+        raise GitError(detail, code=code if code != "generic" else "stash_failed")
+    return (result.stdout or result.stderr or "Dropped stash entry").strip()
+
+
+def stash_list(cwd: Path | None = None) -> list[str]:
+    ensure_repo(cwd)
+    result = run_git("stash", "list", cwd=cwd)
+    if result.returncode != 0:
+        raise GitError(result.stderr.strip() or "git stash list failed", code="stash_failed")
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 
 @dataclass(frozen=True)
