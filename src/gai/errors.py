@@ -193,6 +193,10 @@ _GIT_MESSAGES: dict[str, tuple[str, str]] = {
         "Branch already exists. Pick another name, or switch to it without --create.",
         "分支已存在。请换名，或不加 --create 直接切换。",
     ),
+    "branch_failed": (
+        "git branch (create) failed.",
+        "创建分支失败（git branch）。",
+    ),
     "already_on_branch": (
         "Already on that branch; nothing to do.",
         "已在该分支上，无需操作。",

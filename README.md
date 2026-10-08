@@ -126,6 +126,7 @@ gai pull --cn             # 检查后确认再拉取
 gai pull --rebase --cn    # 用 rebase 拉取
 gai merge feature --cn    # 合并分支（需确认）
 gai rebase main --cn      # 变基（需确认；会改写历史）
+gai branch topic --cn     # 创建分支但不签出
 gai switch feature --cn   # 切换分支
 gai stash --cn            # stash 本地改动
 gai stash --pop --cn      # 弹出最近一条 stash
@@ -178,7 +179,8 @@ gai report --cn -o .\reports\                # 目录不存在则自动创建
 | `gai pull` | 拉取远程（先检查；分叉可选 merge / rebase） |
 | `gai merge` | 合并其他分支进当前分支（需确认） |
 | `gai rebase` | 变基到指定引用（需确认；改写历史） |
-| `gai switch` | 切换 / 创建分支（脏工作区会警告） |
+| `gai branch` | 创建分支但不签出 |
+| `gai switch` | 切换 / 创建并切换分支（脏工作区会警告） |
 | `gai stash` | stash 本地改动，或 `--pop` 弹出 |
 | `gai report` | 根据提交记录写工作总结 |
 | `gai balance` | 查询 API Key 剩余额度（厂商支持时） |
@@ -369,9 +371,27 @@ gai rebase origin/main --cn
 | `--cn` | 中文提示 |
 | `-t` / `--trace` | 打印 git 链路 |
 
+### `gai branch`
+
+创建新分支但**不签出**（仍留在当前分支）。需要立刻切过去用 `gai switch`，或用 `gai switch -c` 创建并切换。
+
+```bash
+gai branch topic --cn
+gai branch topic main --cn    # 基于 main 创建
+gai branch topic -y --cn
+```
+
+| 参数 | 说明 |
+|------|------|
+| `NAME` | 新分支名 |
+| `START` | 可选起点（默认当前 HEAD） |
+| `-y` / `--yes` | 跳过确认 |
+| `--cn` | 中文提示 |
+| `-t` / `--trace` | 打印 git 链路 |
+
 ### `gai switch`
 
-切换分支；`--create` / `-c` 可新建。工作区有未提交改动时会警告。
+切换分支；`--create` / `-c` 可新建并签出。工作区有未提交改动时会警告。
 
 ```bash
 gai switch feature --cn

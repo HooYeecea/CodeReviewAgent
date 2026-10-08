@@ -73,6 +73,10 @@ _COMMAND_EXAMPLES: dict[str, tuple[tuple[str, str, str], ...]] = {
         ("gai rebase main --cn", "Rebase current branch onto main (asks to confirm)", "把当前分支变基到 main（需确认）"),
         ("gai rebase origin/main --cn", "Rebase onto a remote-tracking branch", "变基到远程跟踪分支"),
     ),
+    "branch": (
+        ("gai branch topic --cn", "Create topic without checking it out", "创建 topic 但不签出"),
+        ("gai branch topic main --cn", "Create topic from main, stay on current branch", "基于 main 创建 topic，仍留在当前分支"),
+    ),
     "switch": (
         ("gai switch feature --cn", "Switch to an existing branch", "切换到已有分支"),
         ("gai switch -c topic --cn", "Create topic and switch to it", "创建 topic 并切换过去"),

@@ -10,8 +10,10 @@ import pytest
 from gai.git_ops import (
     GitError,
     commits_ahead_of_head,
+    create_branch,
     get_current_branch,
     is_worktree_dirty,
+    list_local_branches,
     merge,
     rebase,
     stash_list,
@@ -96,6 +98,26 @@ def test_rebase_onto_main(branched_repo: Path) -> None:
     replayed = rebase(BRANCH, repo)
     assert replayed >= 1
     assert get_current_branch(repo) == "feature"
+
+
+def test_create_branch_without_checkout(branched_repo: Path) -> None:
+    repo = branched_repo
+    before = get_current_branch(repo)
+    created = create_branch("topic", repo)
+    assert created == "topic"
+    assert get_current_branch(repo) == before
+    assert "topic" in list_local_branches(repo)
+    with pytest.raises(GitError) as caught:
+        create_branch("topic", repo)
+    assert caught.value.code == "branch_exists"
+
+
+def test_create_branch_from_start_point(branched_repo: Path) -> None:
+    repo = branched_repo
+    before = get_current_branch(repo)
+    create_branch("from-feature", repo, start_point="feature")
+    assert get_current_branch(repo) == before
+    assert "from-feature" in list_local_branches(repo)
 
 
 def test_switch_and_create(branched_repo: Path) -> None:

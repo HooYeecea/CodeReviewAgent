@@ -125,6 +125,17 @@ _COMMAND_META: list[dict[str, Any]] = [
         },
     },
     {
+        "id": "branch",
+        "en": {
+            "title": "Create branch",
+            "blurb": "Create a new branch without checking it out.",
+        },
+        "cn": {
+            "title": "创建分支",
+            "blurb": "创建新分支但不签出（仍停留在当前分支）。",
+        },
+    },
+    {
         "id": "switch",
         "en": {
             "title": "Switch branch",

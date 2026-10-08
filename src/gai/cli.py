@@ -50,6 +50,7 @@ from gai.git_ops import (
     commit as git_commit,
     clear_trace,
     commits_ahead_of_head,
+    create_branch as git_create_branch,
     get_current_branch,
     get_traced_commands,
     has_staged_changes,
@@ -1645,6 +1646,105 @@ def rebase_cmd(
             f"[green]已将 {current} 变基到 {onto}（重放约 {replayed} 个提交）[/green]"
             if cn
             else f"[green]Rebased {current} onto {onto} (replayed ~{replayed} commit(s))[/green]"
+        )
+    except (GitError, RuntimeError) as exc:
+        _print_error(exc, chinese=cn, trace=trace)
+        raise typer.Exit(code=1) from exc
+    except typer.Exit:
+        raise
+    except KeyboardInterrupt:
+        console.print("\n已取消。" if cn else "\nAborted.")
+        raise typer.Exit(code=130) from None
+    finally:
+        _print_footer(trace=trace, chinese=cn)
+
+
+@app.command(
+    "branch",
+    help=H(
+        "Create a new branch without checking it out.",
+        "创建新分支但不签出（仍停留在当前分支）。",
+    ),
+)
+def branch_cmd(
+    name: str = typer.Argument(
+        ...,
+        help=H("Name of the branch to create.", "要创建的分支名。"),
+    ),
+    start_point: Optional[str] = typer.Argument(
+        None,
+        help=H(
+            "Optional start point (commit/branch; default: HEAD).",
+            "可选起点（提交/分支；默认当前 HEAD）。",
+        ),
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help=H("Skip interactive confirmation.", "跳过交互确认。"),
+    ),
+    cn: bool = typer.Option(
+        False,
+        "--cn",
+        help=H(
+            "Use Simplified Chinese prompts.",
+            "使用简体中文提示；与 -h 联用时显示中文帮助。",
+        ),
+    ),
+    trace: bool = typer.Option(
+        False,
+        "--trace",
+        "-t",
+        help=_TRACE_OPT_HELP,
+    ),
+) -> None:
+    """Create a branch at HEAD (or start_point) without switching to it."""
+    _start_trace(trace)
+    try:
+        current = get_current_branch()
+        console.print(
+            (f"当前分支：{current}" if cn else f"Current branch: {current}")
+        )
+        if start_point:
+            console.print(
+                (
+                    f"将创建分支：{name}（起点 {start_point}），不切换过去"
+                    if cn
+                    else f"Will create branch: {name} (from {start_point}), without switching"
+                )
+            )
+        else:
+            console.print(
+                (
+                    f"将创建分支：{name}（基于当前 HEAD），不切换过去"
+                    if cn
+                    else f"Will create branch: {name} (from HEAD), without switching"
+                )
+            )
+        tip = (
+            "需要签出请用：gai switch <name> 或 gai switch -c <name>"
+            if cn
+            else "To check it out: gai switch <name> or gai switch -c <name>"
+        )
+        console.print(f"[dim]{tip}[/dim]")
+        ask = (
+            f"确定创建分支 {name}？"
+            if cn
+            else f"Confirm create branch {name}?"
+        )
+        if not yes and not Confirm.ask(ask, default=True):
+            console.print("已取消。" if cn else "Aborted.")
+            raise typer.Exit(code=0)
+        with console.status(
+            "[bold]" + ("正在创建分支..." if cn else "Creating branch...") + "[/bold]"
+        ):
+            created = git_create_branch(name, start_point=start_point)
+        still = get_current_branch()
+        console.print(
+            f"[green]已创建分支 {created}；仍在 {still}[/green]"
+            if cn
+            else f"[green]Created branch {created}; still on {still}[/green]"
         )
     except (GitError, RuntimeError) as exc:
         _print_error(exc, chinese=cn, trace=trace)

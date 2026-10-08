@@ -543,7 +543,7 @@ def classify_git_failure(detail: str, *, kind: str = "generic") -> str:
     if code != "generic":
         return code
     text = (detail or "").lower()
-    if "already exists" in text and kind == "switch":
+    if "already exists" in text and kind in {"switch", "branch"}:
         return "branch_exists"
     if "did not match any" in text or "needed a single revision" in text:
         return "branch_not_found"
@@ -554,6 +554,7 @@ def classify_git_failure(detail: str, *, kind: str = "generic") -> str:
         "rebase": "rebase_failed",
         "switch": "switch_failed",
         "stash": "stash_failed",
+        "branch": "branch_failed",
     }.get(kind, "generic")
 
 
@@ -821,6 +822,35 @@ def rebase(onto: str, cwd: Path | None = None) -> int:
         code = classify_git_failure(detail, kind="rebase")
         raise GitError(detail, code=code if code != "generic" else "rebase_failed")
     return replay
+
+
+def create_branch(
+    name: str,
+    cwd: Path | None = None,
+    *,
+    start_point: str | None = None,
+) -> str:
+    """Create a local branch without checking it out. Returns the new name."""
+    ensure_repo(cwd)
+    branch = name.strip()
+    if not branch:
+        raise GitError("branch name is required", code="branch_not_found")
+    if ref_exists(branch, cwd):
+        raise GitError(f"branch already exists: {branch}", code="branch_exists")
+    args = ["branch", branch]
+    if start_point:
+        start = start_point.strip()
+        if not start:
+            raise GitError("start point is empty", code="branch_not_found")
+        if not ref_exists(start, cwd):
+            raise GitError(f"start point not found: {start}", code="branch_not_found")
+        args.append(start)
+    result = run_git(*args, cwd=cwd)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "git branch failed").strip()
+        code = classify_git_failure(detail, kind="branch")
+        raise GitError(detail, code=code if code != "generic" else "branch_failed")
+    return branch
 
 
 def switch_branch(
