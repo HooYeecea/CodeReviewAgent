@@ -160,14 +160,30 @@ _GIT_MESSAGES: dict[str, tuple[str, str]] = {
         "拉取因合并/变基冲突中断。请解决冲突后继续，或中止本次 git 操作。",
     ),
     "merge_conflict": (
-        "Merge stopped on conflicts. Resolve them, then commit "
-        "(or run `git merge --abort`).",
-        "合并因冲突中断。请解决冲突后提交，或执行 `git merge --abort` 中止。",
+        "Merge stopped on conflicts. Resolve them, then `gai merge --continue` "
+        "(or `gai merge --abort`).",
+        "合并因冲突中断。请解决冲突后执行 `gai merge --continue`，或 `gai merge --abort` 中止。",
     ),
     "rebase_conflict": (
-        "Rebase stopped on conflicts. Resolve them, then `git rebase --continue` "
-        "(or `git rebase --abort`).",
-        "变基因冲突中断。请解决冲突后执行 `git rebase --continue`，或 `git rebase --abort` 中止。",
+        "Rebase stopped on conflicts. Resolve them, then `gai rebase --continue` "
+        "(or `gai rebase --abort`).",
+        "变基因冲突中断。请解决冲突后执行 `gai rebase --continue`，或 `gai rebase --abort` 中止。",
+    ),
+    "merge_in_progress": (
+        "A merge is already in progress. Use `gai merge --continue` or `gai merge --abort`.",
+        "已有合并进行中。请用 `gai merge --continue` 继续，或 `gai merge --abort` 中止。",
+    ),
+    "rebase_in_progress": (
+        "A rebase is already in progress. Use `gai rebase --continue` or `gai rebase --abort`.",
+        "已有变基进行中。请用 `gai rebase --continue` 继续，或 `gai rebase --abort` 中止。",
+    ),
+    "no_merge_in_progress": (
+        "No merge in progress.",
+        "当前没有进行中的合并。",
+    ),
+    "no_rebase_in_progress": (
+        "No rebase in progress.",
+        "当前没有进行中的变基。",
     ),
     "merge_failed": (
         "git merge failed.",
@@ -341,6 +357,8 @@ def format_cli_error(exc: BaseException, *, chinese: bool = False) -> str:
                 "pull_conflict",
                 "merge_conflict",
                 "rebase_conflict",
+                "merge_in_progress",
+                "rebase_in_progress",
                 "merge_failed",
                 "rebase_failed",
                 "switch_failed",

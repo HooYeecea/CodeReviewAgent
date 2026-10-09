@@ -68,10 +68,14 @@ _COMMAND_EXAMPLES: dict[str, tuple[tuple[str, str, str], ...]] = {
         ("gai merge feature --cn", "Merge feature into the current branch (asks to confirm)", "把 feature 合并进当前分支（需确认）"),
         ("gai merge feature --no-ff --cn", "Merge with an explicit merge commit", "合并并强制生成 merge commit"),
         ("gai merge feature -y --cn", "Merge without interactive confirmation", "合并并跳过交互确认"),
+        ("gai merge --continue --cn", "Continue after resolving merge conflicts", "解决冲突后继续合并"),
+        ("gai merge --abort --cn", "Abort an in-progress merge", "中止进行中的合并"),
     ),
     "rebase": (
         ("gai rebase main --cn", "Rebase current branch onto main (asks to confirm)", "把当前分支变基到 main（需确认）"),
         ("gai rebase origin/main --cn", "Rebase onto a remote-tracking branch", "变基到远程跟踪分支"),
+        ("gai rebase --continue --cn", "Continue after resolving rebase conflicts", "解决冲突后继续变基"),
+        ("gai rebase --abort --cn", "Abort an in-progress rebase", "中止进行中的变基"),
     ),
     "branch": (
         ("gai branch topic --cn", "Create topic without checking it out", "创建 topic 但不签出"),

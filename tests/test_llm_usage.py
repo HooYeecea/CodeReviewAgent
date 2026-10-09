@@ -34,8 +34,8 @@ def test_usage_totals_missing_total_not_estimated():
 
 
 def test_print_llm_usage_not_called(capsys):
-    from gai import cli as cli_mod
-    from gai.cli import _print_llm_usage
+    from gai import cli_common as cli_mod
+    from gai.cli_common import _print_llm_usage
 
     clear_llm_usage()
     cli_mod._LLM_USAGE_PRINTED = False
@@ -49,8 +49,8 @@ def test_print_llm_usage_not_called(capsys):
 
 
 def test_print_llm_usage_called_with_tokens(capsys):
-    from gai import cli as cli_mod
-    from gai.cli import _print_llm_usage
+    from gai import cli_common as cli_mod
+    from gai.cli_common import _print_llm_usage
 
     clear_llm_usage()
     cli_mod._LLM_USAGE_PRINTED = False

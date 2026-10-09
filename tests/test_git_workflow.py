@@ -15,7 +15,13 @@ from gai.git_ops import (
     is_worktree_dirty,
     list_local_branches,
     merge,
+    merge_abort,
+    merge_continue,
+    merge_in_progress,
     rebase,
+    rebase_abort,
+    rebase_continue,
+    rebase_in_progress,
     stash_list,
     stash_pop,
     stash_push,
@@ -87,8 +93,9 @@ def test_merge_conflict(branched_repo: Path) -> None:
     with pytest.raises(GitError) as caught:
         merge("feature", repo)
     assert caught.value.code == "merge_conflict"
-    # Abort so the fixture cleanup stays clean.
-    _git(repo, "merge", "--abort")
+    assert merge_in_progress(repo)
+    merge_abort(repo)
+    assert not merge_in_progress(repo)
 
 
 def test_rebase_onto_main(branched_repo: Path) -> None:
@@ -151,3 +158,84 @@ def test_stash_nothing(branched_repo: Path) -> None:
     with pytest.raises(GitError) as caught:
         stash_push(branched_repo)
     assert caught.value.code == "nothing_to_stash"
+
+
+def test_merge_continue_after_resolve(branched_repo: Path) -> None:
+    repo = branched_repo
+    _commit_file(repo, "conflict.txt", "main side\n", msg="main conflict")
+    _git(repo, "switch", "feature")
+    _commit_file(repo, "conflict.txt", "feature side\n", msg="feature conflict")
+    _git(repo, "switch", BRANCH)
+    with pytest.raises(GitError) as caught:
+        merge("feature", repo)
+    assert caught.value.code == "merge_conflict"
+    (repo / "conflict.txt").write_text("resolved\n", encoding="utf-8")
+    _git(repo, "add", "conflict.txt")
+    merge_continue(repo)
+    assert not merge_in_progress(repo)
+    assert (repo / "conflict.txt").read_text(encoding="utf-8") == "resolved\n"
+
+
+def test_merge_busy_blocks_new_merge(branched_repo: Path) -> None:
+    repo = branched_repo
+    _commit_file(repo, "conflict.txt", "main side\n", msg="main conflict")
+    _git(repo, "switch", "feature")
+    _commit_file(repo, "conflict.txt", "feature side\n", msg="feature conflict")
+    _git(repo, "switch", BRANCH)
+    with pytest.raises(GitError):
+        merge("feature", repo)
+    with pytest.raises(GitError) as caught:
+        merge("feature", repo)
+    assert caught.value.code == "merge_in_progress"
+    merge_abort(repo)
+
+
+def test_merge_abort_when_idle(branched_repo: Path) -> None:
+    with pytest.raises(GitError) as caught:
+        merge_abort(branched_repo)
+    assert caught.value.code == "no_merge_in_progress"
+
+
+def test_rebase_continue_and_abort(branched_repo: Path) -> None:
+    repo = branched_repo
+    _commit_file(repo, "conflict.txt", "main side\n", msg="main conflict")
+    _git(repo, "switch", "feature")
+    _commit_file(repo, "conflict.txt", "feature side\n", msg="feature conflict")
+    with pytest.raises(GitError) as caught:
+        rebase(BRANCH, repo)
+    assert caught.value.code == "rebase_conflict"
+    assert rebase_in_progress(repo)
+    rebase_abort(repo)
+    assert not rebase_in_progress(repo)
+
+    with pytest.raises(GitError):
+        rebase(BRANCH, repo)
+    (repo / "conflict.txt").write_text("resolved\n", encoding="utf-8")
+    _git(repo, "add", "conflict.txt")
+    rebase_continue(repo)
+    assert not rebase_in_progress(repo)
+
+
+def test_cli_merge_continue_abort_flags(branched_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from gai.cli import run
+
+    repo = branched_repo
+    _commit_file(repo, "conflict.txt", "main side\n", msg="main conflict")
+    _git(repo, "switch", "feature")
+    _commit_file(repo, "conflict.txt", "feature side\n", msg="feature conflict")
+    _git(repo, "switch", BRANCH)
+    with pytest.raises(GitError):
+        merge("feature", repo)
+
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr("gai.commands.sync.Confirm.ask", lambda *a, **k: True)
+
+    code = run(["merge", "--abort", "--cn"])
+    assert code == 0
+    assert not merge_in_progress(repo)
+
+    code = run(["merge", "--continue"])
+    assert code == 0
+
+    code = run(["merge", "--continue", "--abort"])
+    assert code == 2

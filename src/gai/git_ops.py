@@ -758,6 +758,83 @@ def commits_ahead_of_head(ref: str, cwd: Path | None = None) -> int:
     return _rev_list_count(f"HEAD..{ref}", cwd)
 
 
+def _git_dir(cwd: Path | None = None) -> Path:
+    ensure_repo(cwd)
+    result = run_git("rev-parse", "--git-dir", cwd=cwd, trace=False)
+    if result.returncode != 0:
+        raise GitError(result.stderr.strip() or "failed to resolve git dir", code="not_repo")
+    path = Path(result.stdout.strip())
+    if not path.is_absolute():
+        base = Path(cwd) if cwd is not None else Path.cwd()
+        path = (base / path).resolve()
+    return path
+
+
+def merge_in_progress(cwd: Path | None = None) -> bool:
+    return (_git_dir(cwd) / "MERGE_HEAD").is_file()
+
+
+def rebase_in_progress(cwd: Path | None = None) -> bool:
+    git_dir = _git_dir(cwd)
+    return (git_dir / "rebase-merge").is_dir() or (git_dir / "rebase-apply").is_dir()
+
+
+def raise_if_sequencer_busy(cwd: Path | None = None) -> None:
+    """Block starting a new merge/rebase/switch while one is in progress."""
+    if merge_in_progress(cwd):
+        raise GitError(
+            "A merge is already in progress. Use `gai merge --continue` or `gai merge --abort`.",
+            code="merge_in_progress",
+        )
+    if rebase_in_progress(cwd):
+        raise GitError(
+            "A rebase is already in progress. Use `gai rebase --continue` or `gai rebase --abort`.",
+            code="rebase_in_progress",
+        )
+
+
+def merge_abort(cwd: Path | None = None) -> None:
+    ensure_repo(cwd)
+    if not merge_in_progress(cwd):
+        raise GitError("No merge in progress to abort.", code="no_merge_in_progress")
+    result = run_git("merge", "--abort", cwd=cwd)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "git merge --abort failed").strip()
+        raise GitError(detail, code="merge_failed")
+
+
+def merge_continue(cwd: Path | None = None) -> None:
+    ensure_repo(cwd)
+    if not merge_in_progress(cwd):
+        raise GitError("No merge in progress to continue.", code="no_merge_in_progress")
+    result = run_git("-c", "core.editor=true", "merge", "--continue", cwd=cwd)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "git merge --continue failed").strip()
+        code = classify_git_failure(detail, kind="merge")
+        raise GitError(detail, code=code if code != "generic" else "merge_failed")
+
+
+def rebase_abort(cwd: Path | None = None) -> None:
+    ensure_repo(cwd)
+    if not rebase_in_progress(cwd):
+        raise GitError("No rebase in progress to abort.", code="no_rebase_in_progress")
+    result = run_git("rebase", "--abort", cwd=cwd)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "git rebase --abort failed").strip()
+        raise GitError(detail, code="rebase_failed")
+
+
+def rebase_continue(cwd: Path | None = None) -> None:
+    ensure_repo(cwd)
+    if not rebase_in_progress(cwd):
+        raise GitError("No rebase in progress to continue.", code="no_rebase_in_progress")
+    result = run_git("-c", "core.editor=true", "rebase", "--continue", cwd=cwd)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "git rebase --continue failed").strip()
+        code = classify_git_failure(detail, kind="rebase")
+        raise GitError(detail, code=code if code != "generic" else "rebase_failed")
+
+
 def merge(
     branch: str,
     cwd: Path | None = None,
@@ -766,6 +843,7 @@ def merge(
 ) -> int:
     """Merge ``branch`` into HEAD. Returns commits brought in (best-effort)."""
     ensure_repo(cwd)
+    raise_if_sequencer_busy(cwd)
     current = get_current_branch(cwd)
     target = branch.strip()
     if not target:
@@ -798,6 +876,7 @@ def merge(
 def rebase(onto: str, cwd: Path | None = None) -> int:
     """Rebase current branch onto ``onto``. Returns commit count being replayed."""
     ensure_repo(cwd)
+    raise_if_sequencer_busy(cwd)
     current = get_current_branch(cwd)
     target = onto.strip()
     if not target:
@@ -861,6 +940,7 @@ def switch_branch(
 ) -> str:
     """Switch to ``name`` (optionally create). Returns the branch switched to."""
     ensure_repo(cwd)
+    raise_if_sequencer_busy(cwd)
     branch = name.strip()
     if not branch:
         raise GitError("branch name is required", code="branch_not_found")

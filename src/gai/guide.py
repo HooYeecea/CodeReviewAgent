@@ -106,22 +106,22 @@ _COMMAND_META: list[dict[str, Any]] = [
         "id": "merge",
         "en": {
             "title": "Merge branch",
-            "blurb": "Merge another branch into HEAD with confirmation and conflict tips.",
+            "blurb": "Merge another branch into HEAD; --continue / --abort after conflicts.",
         },
         "cn": {
             "title": "合并分支",
-            "blurb": "把其他分支合并进当前分支；需确认，冲突时给出提示。",
+            "blurb": "把其他分支合并进当前分支；冲突后可用 --continue / --abort。",
         },
     },
     {
         "id": "rebase",
         "en": {
             "title": "Rebase branch",
-            "blurb": "Rebase onto another ref; warns that history will be rewritten.",
+            "blurb": "Rebase onto another ref (rewrites history); --continue / --abort after conflicts.",
         },
         "cn": {
             "title": "变基",
-            "blurb": "变基到另一引用；会提示改写历史的风险。",
+            "blurb": "变基到另一引用（改写历史）；冲突后可用 --continue / --abort。",
         },
     },
     {

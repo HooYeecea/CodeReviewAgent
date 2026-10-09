@@ -165,7 +165,7 @@ def test_attach_balance_field_per_profile(
     monkeypatch.setenv("GAI_BASE_URL", "https://api.openai.com/v1")
     monkeypatch.setenv("GAI_API_KEY1", "sk-ds-yyyyyyyyyy")
     monkeypatch.setenv("GAI_BASE_URL1", "https://api.deepseek.com/v1")
-    from gai.cli import _attach_profile_balances
+    from gai.commands.setup import _attach_profile_balances
     from gai.llm.balance import BalanceResult
     from gai.llm import balance as balance_mod
 
@@ -181,7 +181,7 @@ def test_attach_balance_field_per_profile(
         )
 
     monkeypatch.setattr(balance_mod, "fetch_balance", fake_fetch)
-    monkeypatch.setattr("gai.cli.fetch_balance", fake_fetch)
+    monkeypatch.setattr("gai.commands.setup.fetch_balance", fake_fetch)
     rows = config.profiles_summary()
     out = _attach_profile_balances(rows, chinese=True)
     by_id = {row["profile"]: row["balance"] for row in out}

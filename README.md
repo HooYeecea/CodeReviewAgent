@@ -125,7 +125,9 @@ gai push --cn             # 仅推送（无可推送时提示，不当成成功�
 gai pull --cn             # 检查后确认再拉取
 gai pull --rebase --cn    # 用 rebase 拉取
 gai merge feature --cn    # 合并分支（需确认）
+gai merge --continue --cn # 解决冲突后继续合并
 gai rebase main --cn      # 变基（需确认；会改写历史）
+gai rebase --abort --cn   # 中止进行中的变基
 gai branch topic --cn     # 创建分支但不签出
 gai switch feature --cn   # 切换分支
 gai stash --cn            # stash 本地改动
@@ -177,8 +179,8 @@ gai report --cn -o .\reports\                # 目录不存在则自动创建
 | `gai devflow` | 引导式串联：AI 暂存建议 → 审查 → 中英提交词 → 推送 |
 | `gai push` | 推送当前分支（先检查是否有可推送内容） |
 | `gai pull` | 拉取远程（先检查；分叉可选 merge / rebase） |
-| `gai merge` | 合并其他分支进当前分支（需确认） |
-| `gai rebase` | 变基到指定引用（需确认；改写历史） |
+| `gai merge` | 合并其他分支进当前分支（需确认）；`--continue` / `--abort` |
+| `gai rebase` | 变基到指定引用（需确认；改写历史）；`--continue` / `--abort` |
 | `gai branch` | 创建分支但不签出 |
 | `gai switch` | 切换 / 创建并切换分支（脏工作区会警告） |
 | `gai stash` | stash 本地改动，或 `--pop` 弹出 |
@@ -339,34 +341,42 @@ gai pull -y
 
 ### `gai merge`
 
-将其他分支合并进当前分支：预览提交数 → 脏工作区警告 → 确认 → `git merge`。冲突时提示解决或 `git merge --abort`。
+将其他分支合并进当前分支：预览提交数 → 脏工作区警告 → 确认 → `git merge`。冲突时用 `gai merge --continue` 继续或 `gai merge --abort` 中止。已有合并进行中时不能再开新的 merge。
 
 ```bash
 gai merge feature --cn
 gai merge feature --no-ff --cn
 gai merge feature -y --cn
+gai merge --continue --cn
+gai merge --abort --cn
 ```
 
 | 参数 | 说明 |
 |------|------|
-| `BRANCH` | 要合并的分支 / 引用 |
+| `BRANCH` | 要合并的分支 / 引用（与 `--continue` / `--abort` 互斥） |
 | `--no-ff` | 强制生成 merge commit |
+| `--continue` | 解决冲突后继续合并 |
+| `--abort` | 中止进行中的合并（需确认，可用 `-y`） |
 | `-y` / `--yes` | 跳过确认（脏工作区仍会拒绝） |
 | `--cn` | 中文提示 |
 | `-t` / `--trace` | 打印 git 链路 |
 
 ### `gai rebase`
 
-把当前分支变基到指定引用。会明确警告「改写历史」；冲突时提示 `git rebase --continue` / `--abort`。
+把当前分支变基到指定引用。会明确警告「改写历史」；冲突时用 `gai rebase --continue` / `gai rebase --abort`。已有变基进行中时不能再开新的 rebase。
 
 ```bash
 gai rebase main --cn
 gai rebase origin/main --cn
+gai rebase --continue --cn
+gai rebase --abort --cn
 ```
 
 | 参数 | 说明 |
 |------|------|
-| `ONTO` | 变基目标（如 `main`、`origin/main`） |
+| `ONTO` | 变基目标（如 `main`、`origin/main`；与 `--continue` / `--abort` 互斥） |
+| `--continue` | 解决冲突后继续变基 |
+| `--abort` | 中止进行中的变基（需确认，可用 `-y`） |
 | `-y` / `--yes` | 跳过确认（脏工作区仍会拒绝） |
 | `--cn` | 中文提示 |
 | `-t` / `--trace` | 打印 git 链路 |
