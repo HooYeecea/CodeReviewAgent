@@ -64,10 +64,16 @@ def test_collect_log_and_plain(repo: Path) -> None:
 def test_write_log_report_overwrites(repo: Path) -> None:
     path1 = write_log_report(chinese=True, max_count=10, graph=True)
     assert path1 == log_report_path(repo)
+    html = path1.read_text(encoding="utf-8")
+    assert "td.when" in html or ".when" in html
+    assert "white-space: nowrap" in html
+    assert 'class="when"' in html
     assert path1.is_file()
     first = path1.read_text(encoding="utf-8")
     assert "feat: first" in first
     assert "gai-log-data" in first
+    assert "branch-select" in first
+    assert "commitsByBranch" in first
 
     (repo / "a.txt").write_text("one\ntwo\nthree\n", encoding="utf-8")
     _git(repo, "add", "a.txt")
@@ -78,6 +84,31 @@ def test_write_log_report_overwrites(repo: Path) -> None:
     assert "fix: second" in second
 
 
+
+def test_write_log_report_embeds_all_local_branches(repo: Path) -> None:
+    import json
+
+    _git(repo, "checkout", "-b", "feature/x")
+    (repo / "x.txt").write_text("x\n", encoding="utf-8")
+    _git(repo, "add", "x.txt")
+    _git(repo, "commit", "-m", "feat: on feature")
+    _git(repo, "checkout", "main")
+
+    path = write_log_report(chinese=True, max_count=20, graph=False)
+    html = path.read_text(encoding="utf-8")
+    raw = html.split('id="gai-log-data"', 1)[1]
+    raw = raw.split(">", 1)[1].split("</script>", 1)[0]
+    data = json.loads(raw)
+    assert data["branch"] == "main"
+    assert "main" in data["branches"]
+    assert "feature/x" in data["branches"]
+    assert "feat: on feature" in {
+        c["subject"] for c in data["commitsByBranch"]["feature/x"]
+    }
+    assert "feat: on feature" not in {c["subject"] for c in data["commits"]}
+    assert 'id="branch-select"' in html
+
+
 def test_cli_status_and_log(repo: Path) -> None:
     assert run(["status", "--cn"]) == 0
     assert run(["status", "-p", "--cn"]) == 0
@@ -85,3 +116,75 @@ def test_cli_status_and_log(repo: Path) -> None:
     assert run(["log", "-p", "-g", "-n", "5", "--cn"]) == 0
     assert run(["log", "--html", "-n", "5", "--cn"]) == 0
     assert log_report_path(repo).is_file()
+
+
+def test_pretty_log_folds_long_subject(repo: Path) -> None:
+    from gai.git_views import _display_width, render_pretty_log
+
+    chunk = "review-fix: add missing APIs and deploy docs. "
+    long = (chunk * 10).strip()
+    (repo / "a.txt").write_text("wrap\n", encoding="utf-8")
+    _git(repo, "add", "a.txt")
+    _git(repo, "commit", "-m", long)
+    # height required: Rich dumb-terminal ignores width unless both are set
+    console = Console(record=True, width=80, height=40)
+    render_pretty_log(console, chinese=False, max_count=3, graph=False)
+    out = console.export_text()
+    # Pre-wrapped across multiple table lines, not ellipsis-cropped.
+    assert out.count("review-fix") >= 3
+    assert "deploy docs." in out
+    assert "HEAD -> main" in out or "HEAD" in out
+    # ASCII grid: every data line same display width, 5 pipes, no soft-wrap.
+    body_lines = [ln for ln in out.splitlines() if ln.startswith("|")]
+    assert len(body_lines) >= 4
+    assert {ln.count("|") for ln in body_lines} == {5}
+    assert len({_display_width(ln) for ln in body_lines}) == 1
+    assert max(_display_width(ln) for ln in body_lines) <= 79
+
+
+def test_pretty_log_cjk_subject_keeps_borders(repo: Path) -> None:
+    from gai.git_views import _display_width, render_pretty_log
+
+    long = "阶段五：完善代码审查与部署文档并补充缺失的接口说明。" * 3
+    (repo / "b.txt").write_text("cjk\n", encoding="utf-8")
+    _git(repo, "add", "b.txt")
+    _git(repo, "commit", "-m", long)
+    console = Console(record=True, width=80, height=40)
+    render_pretty_log(console, chinese=True, max_count=3, graph=False)
+    out = console.export_text()
+    assert "阶段五" in out
+    grid = [ln for ln in out.splitlines() if ln[:1] in "|+"]
+    assert len(grid) >= 5
+    assert len({_display_width(ln) for ln in grid}) == 1
+    assert max(_display_width(ln) for ln in grid) <= 79
+    assert all(ln.endswith("|") or ln.endswith("+") for ln in grid)
+    # No Unicode box-drawing (ambiguous width on Windows CJK).
+    assert not any(ch in out for ch in "│─┌┐└┘├┤┬┴┼")
+
+
+def test_pretty_log_narrow_uses_stacked(repo: Path) -> None:
+    from gai.git_views import render_pretty_log
+
+    console = Console(record=True, width=50, height=24)
+    render_pretty_log(console, chinese=False, max_count=2, graph=False)
+    out = console.export_text()
+    assert "Hash" not in out  # no grid header in stacked mode
+    assert "feat: first" in out or "Tester" in out
+
+
+def test_pretty_log_adapts_to_width(repo: Path) -> None:
+    from gai.git_views import _display_width, render_pretty_log
+
+    long = "阶段二：完善登录鉴权与 RequirePermissionFilter 相关逻辑。" * 2
+    (repo / "c.txt").write_text("w\n", encoding="utf-8")
+    _git(repo, "add", "c.txt")
+    _git(repo, "commit", "-m", long)
+    for width in (60, 80, 100, 120):
+        console = Console(record=True, width=width, height=40)
+        render_pretty_log(console, chinese=True, max_count=2, graph=False)
+        out = console.export_text()
+        assert "阶段二" in out
+        lines = [ln for ln in out.splitlines() if ln[:1] in "|+"]
+        if lines:
+            assert max(_display_width(ln) for ln in lines) <= width
+            assert len({_display_width(ln) for ln in lines}) == 1
