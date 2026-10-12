@@ -9,6 +9,7 @@ from gai.commands.ship import parse_batch_message_lang_spec
 from gai.devflow import (
     CommitBatch,
     fallback_commit_batches,
+    list_staged_paths,
     normalize_commit_batches,
     normalize_path_input,
     parse_bilingual_messages,
@@ -106,6 +107,27 @@ def test_parse_batch_message_lang_spec() -> None:
     assert parse_batch_message_lang_spec("1:中文 2:英文", 2) == ["cn", "en"]
     assert parse_batch_message_lang_spec("en,cn", 3) is None
     assert parse_batch_message_lang_spec("1=en,2=xx", 2) is None
+
+
+def test_list_staged_paths(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "t@example.com"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Tester"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    (tmp_path / "a.txt").write_text("a\n", encoding="utf-8")
+    (tmp_path / "b.txt").write_text("b\n", encoding="utf-8")
+    subprocess.run(["git", "add", "a.txt"], cwd=tmp_path, check=True, capture_output=True)
+    assert list_staged_paths() == ["a.txt"]
 
 
 def test_list_change_entries(tmp_path: Path, monkeypatch) -> None:
