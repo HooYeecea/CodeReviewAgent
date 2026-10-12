@@ -64,6 +64,10 @@ def test_write_graph_report_and_overwrite(repo: Path) -> None:
     html = path1.read_text(encoding="utf-8")
     assert "btn-refresh" in html
     assert "graph-data.js" in html
+    assert "branch-checks" in html
+    assert "btn-current" in html
+    assert "filterCommits" in html
+    assert "layoutLanes" in html
     assert "GAI_GRAPH_DATA" in graph_data_path(repo).read_text(encoding="utf-8")
 
     (repo / "b.txt").write_text("b\n", encoding="utf-8")
