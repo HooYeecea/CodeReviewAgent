@@ -499,7 +499,7 @@ gai log -n 50 -g --html --open --cn
 
 ### `gai graph`
 
-生成类似 Rider / IDEA 的**本地分支链路图**（写入并覆盖 `.gai/graph-report.html` + `graph-data.js`）。默认打开浏览器；非 git 仓库会给出友好错误提示。
+自绘 **IDEA 风格**本地分支链路图（写入并覆盖 `.gai/graph-report.html` + `graph-data.js`）：色轨分叉/汇合、分支标签、线性历史折叠箭头、悬停摘要、点击右侧击穿详情。默认打开浏览器；页内可筛选分支；非 git 仓库会给出友好错误提示。
 
 ```bash
 gai graph --cn
