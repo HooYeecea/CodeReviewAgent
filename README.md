@@ -466,7 +466,7 @@ gai status -p --cn -t
 
 ### `gai log`
 
-包装 `git log`（默认最近 20 条 oneline）。
+包装 `git log`（默认**全部**提交；用 `-n` 才限制条数）。
 
 - `-p` / `--pretty`：Rich 表格美化；与 `-g` 联用时为带样式的拓扑面板  
 - `-g` / `--graph`：提交拓扑（`git log --graph`）  
@@ -474,6 +474,7 @@ gai status -p --cn -t
 
 ```bash
 gai log --cn
+gai log -n 20 --cn
 gai log -p --cn
 gai log -g --cn
 gai log -p -g --cn
@@ -484,7 +485,7 @@ gai log -n 50 -g --html --open --cn
 
 | 参数 | 说明 |
 |------|------|
-| `-n` / `--max-count` | 最多显示提交数，默认 `20` |
+| `-n` / `--max-count` | 限制条数；**省略则显示全部** |
 | `-p` / `--pretty` | 终端美化 |
 | `-g` / `--graph` | 提交拓扑图 |
 | `--html` | 生成/覆盖 `.gai/log-report.html` |

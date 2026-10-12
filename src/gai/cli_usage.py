@@ -113,7 +113,8 @@ _COMMAND_EXAMPLES: dict[str, tuple[tuple[str, str, str], ...]] = {
         ("gai status -p --cn -t", "Pretty status with git trace", "美化 status 并打印 git 链路"),
     ),
     "log": (
-        ("gai log --cn", "Show recent commits (oneline)", "查看近期提交（oneline）"),
+        ("gai log --cn", "Show all commits (oneline)", "查看全部提交（oneline）"),
+        ("gai log -n 20 --cn", "Show only the latest 20 commits", "只显示最近 20 条"),
         ("gai log -p --cn", "Pretty Rich commit table", "Rich 表格美化提交列表"),
         ("gai log -g --cn", "Show commit graph", "显示提交拓扑图"),
         ("gai log -p -g --cn", "Pretty view with commit graph", "美化输出并带拓扑图"),
