@@ -132,6 +132,9 @@ gai branch topic --cn     # 创建分支但不签出
 gai switch feature --cn   # 切换分支
 gai stash --cn            # stash 本地改动
 gai stash --pop --cn      # 弹出最近一条 stash
+gai status -p --cn        # 美化查看工作区状态
+gai log -p -g --cn        # 美化提交列表 + 拓扑图
+gai log --html --serve --cn  # 覆盖写入 .gai/log-report.html 并 HTTP 打开
 gai unadd --cn            # 撤销暂存（需确认）
 gai uncommit --cn         # 撤销最近一次提交（soft，需确认）
 gai report --cn           # 最近 7 天工作总结
@@ -186,6 +189,8 @@ gai report --cn -o .\reports\                # 目录不存在则自动创建
 | `gai branch` | 创建分支但不签出 |
 | `gai switch` | 切换 / 创建并切换分支（脏工作区会警告） |
 | `gai stash` | stash 本地改动，或 `--pop` 弹出 |
+| `gai status` | 查看 git status；`-p/--pretty` 美化 |
+| `gai log` | 查看 git log；`-p` 美化、`-g` 拓扑、`--html` 写入 `.gai/log-report.html` |
 | `gai report` | 根据提交记录写工作总结 |
 | `gai balance` | 查询 API Key 剩余额度（厂商支持时） |
 | `gai usage` | 查看本地记录的大模型 token 用量历史 |
@@ -443,6 +448,51 @@ gai stash -m "wip" --cn
 gai stash --pop --cn
 ```
 
+### `gai status`
+
+包装 `git status`。默认输出与 git 一致；`--pretty` / `-p` 用 Rich 按已暂存 / 未暂存 / 未跟踪分组。
+
+```bash
+gai status --cn
+gai status -p --cn
+gai status -p --cn -t
+```
+
+| 参数 | 说明 |
+|------|------|
+| `-p` / `--pretty` | Rich 美化分组展示 |
+| `--cn` | 中文标签 |
+| `-t` / `--trace` | 打印底层 git 命令链路 |
+
+### `gai log`
+
+包装 `git log`（默认最近 20 条 oneline）。
+
+- `-p` / `--pretty`：Rich 表格美化；与 `-g` 联用时为带样式的拓扑面板  
+- `-g` / `--graph`：提交拓扑（`git log --graph`）  
+- `--html`：写入并**覆盖** `.gai/log-report.html`；可 `--open` / `--serve`（与 guide/history/usage 相同）
+
+```bash
+gai log --cn
+gai log -p --cn
+gai log -g --cn
+gai log -p -g --cn
+gai log --html --cn
+gai log --html --serve --cn
+gai log -n 50 -g --html --open --cn
+```
+
+| 参数 | 说明 |
+|------|------|
+| `-n` / `--max-count` | 最多显示提交数，默认 `20` |
+| `-p` / `--pretty` | 终端美化 |
+| `-g` / `--graph` | 提交拓扑图 |
+| `--html` | 生成/覆盖 `.gai/log-report.html` |
+| `--open` | 浏览器打开 HTML（隐含 `--html`） |
+| `--serve` | 本地 HTTP 打开（隐含 `--html`） |
+| `--cn` | 中文标签；HTML 初始语言为中文 |
+| `-t` / `--trace` | 打印底层 git 命令链路 |
+
 ### `gai report`
 
 根据 `git log` 生成可粘贴的工作总结。
@@ -645,8 +695,9 @@ CodeReviewAgent/
   README.md
   src/gai/
     cli.py           # 入口：注册 commands/*；run()
-    commands/        # stage / ship / sync / insight / setup 子命令
+    commands/        # stage / ship / sync / insight / setup / view 子命令
     cli_common.py    # 共享 Typer app 与输出 helpers
+    git_views.py     # status/log 美化与 log-report.html
     devflow.py       # gai devflow / splitflow：暂存建议、分批计划、中英提交词
     command_history.py # .gai/commands.jsonl 命令执行记录
     history_report.py  # commands.jsonl → .gai/history-report.html
