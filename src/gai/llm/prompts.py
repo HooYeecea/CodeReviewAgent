@@ -129,7 +129,9 @@ Your job:
    say so in `summary` and omit those paths.
 7. Order batches so later commits can build on earlier ones when that matters.
 8. Prefer 2–8 batches for a large tree; avoid one-file-per-batch unless necessary.
-9. Respond with ONLY valid JSON. No markdown fences, no commentary.
+9. If the changes already form ONE coherent commit, return exactly one batch covering them.
+   Only recommend multiple batches when themes/modules clearly diverge.
+10. Respond with ONLY valid JSON. No markdown fences, no commentary.
 
 JSON schema:
 {

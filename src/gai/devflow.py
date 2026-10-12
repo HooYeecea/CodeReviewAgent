@@ -329,45 +329,68 @@ def normalize_commit_batches(
     return out
 
 
+def list_staged_paths(entries: list[ChangeEntry] | None = None) -> list[str]:
+    items = entries if entries is not None else list_change_entries()
+    paths: list[str] = []
+    for e in items:
+        if e.staged and e.path and e.path not in paths:
+            paths.append(e.path)
+    return paths
+
+
 def suggest_commit_batches(
     *,
     settings: Settings | None = None,
     chinese: bool = False,
+    only_staged: bool = False,
 ) -> CommitBatchPlan:
-    """Ask the LLM to split the dirty tree into coherent commit batches."""
+    """Ask the LLM to split changes into coherent commit batches.
+
+    When ``only_staged`` is true, only currently staged paths/diff are considered
+    (used by review/commit/devflow optional split suggestions).
+    """
     settings = settings or load_settings()
     status = porcelain_status().strip()
     if not status:
         raise RuntimeError("Working tree is clean; nothing to split.")
 
     entries = list_change_entries()
-    paths = _stageable_paths(entries)
+    paths = list_staged_paths(entries) if only_staged else _stageable_paths(entries)
     if not paths:
-        raise RuntimeError("No changed paths found to split into commits.")
+        raise RuntimeError(
+            "No staged paths found to split into commits."
+            if only_staged
+            else "No changed paths found to split into commits."
+        )
 
-    # Planning prompt can use a smaller snippet; path list carries the structure.
-    diff, truncated = get_unstaged_diff(
-        ignore_patterns=settings.ignore_patterns,
-        max_chars=min(settings.max_diff_chars, 32_000),
-    )
-    # Include staged content too when the index is already dirty.
-    staged_diff, staged_truncated = get_staged_diff(
-        ignore_patterns=settings.ignore_patterns,
-        max_chars=min(settings.max_diff_chars, 16_000),
-    )
-    if staged_diff.strip():
-        diff = (staged_diff + "\n\n" + diff).strip()
-        truncated = truncated or staged_truncated
-        if len(diff) > min(settings.max_diff_chars, 32_000):
-            limit = min(settings.max_diff_chars, 32_000)
-            diff = (
-                diff[:limit]
-                + "\n\n... [diff truncated by gai due to size limit] ...\n"
-            )
-            truncated = True
+    limit = min(settings.max_diff_chars, 32_000)
+    if only_staged:
+        diff, truncated = get_staged_diff(
+            ignore_patterns=settings.ignore_patterns,
+            max_chars=limit,
+        )
+    else:
+        # Planning prompt can use a smaller snippet; path list carries the structure.
+        diff, truncated = get_unstaged_diff(
+            ignore_patterns=settings.ignore_patterns,
+            max_chars=limit,
+        )
+        staged_diff, staged_truncated = get_staged_diff(
+            ignore_patterns=settings.ignore_patterns,
+            max_chars=min(settings.max_diff_chars, 16_000),
+        )
+        if staged_diff.strip():
+            diff = (staged_diff + "\n\n" + diff).strip()
+            truncated = truncated or staged_truncated
+            if len(diff) > limit:
+                diff = (
+                    diff[:limit]
+                    + "\n\n... [diff truncated by gai due to size limit] ...\n"
+                )
+                truncated = True
 
     set_llm_usage_meta(
-        action_detail="commit-batch-plan",
+        action_detail="commit-batch-plan-staged" if only_staged else "commit-batch-plan",
         branch=current_branch_name(),
         files_count=len(paths),
         diff_chars=len(diff),
