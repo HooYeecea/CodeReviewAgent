@@ -1275,6 +1275,42 @@ class LogEntry:
         }
 
 
+@dataclass(frozen=True)
+class GraphCommit:
+    """One commit node for ``gai graph`` HTML visualization."""
+
+    hash: str
+    short: str
+    parents: tuple[str, ...]
+    author: str
+    date: str
+    subject: str
+    decorations: str = ""
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "hash": self.hash,
+            "short": self.short,
+            "parents": list(self.parents),
+            "author": self.author,
+            "date": self.date,
+            "subject": self.subject,
+            "decorations": self.decorations,
+        }
+
+
+@dataclass(frozen=True)
+class GraphBranch:
+    """Local branch tip for ``gai graph``."""
+
+    name: str
+    tip: str
+    current: bool = False
+
+    def to_dict(self) -> dict[str, object]:
+        return {"name": self.name, "tip": self.tip, "current": self.current}
+
+
 _LOG_FIELD_SEP = "\x1f"
 
 
@@ -1382,3 +1418,77 @@ def log_graph_text(
             code="log_failed",
         )
     return (result.stdout or "").rstrip()
+
+
+def collect_graph_snapshot(
+    cwd: Path | None = None,
+    *,
+    max_count: int | None = None,
+) -> dict[str, object]:
+    """Collect local-branch tips + commits (with parents) for HTML graph viz.
+
+    Uses ``git log --branches`` so remotes are excluded; ``max_count=None`` = all.
+    Raises ``GitError(code=not_repo)`` when cwd is not a repository.
+    """
+    ensure_repo(cwd)
+    current = current_branch_name(cwd)
+    if current == "HEAD":
+        current = ""
+    names = list_local_branches(cwd)
+    if current and current not in names:
+        names = [current, *names]
+    names = sorted(set(names), key=lambda b: (b != current, b.lower()))
+
+    branches: list[GraphBranch] = []
+    for name in names:
+        tip_res = run_git("rev-parse", name, cwd=cwd, trace=False)
+        if tip_res.returncode != 0:
+            continue
+        tip = (tip_res.stdout or "").strip()
+        if not tip:
+            continue
+        branches.append(GraphBranch(name=name, tip=tip, current=(name == current)))
+
+    fmt = (
+        f"%H{_LOG_FIELD_SEP}%P{_LOG_FIELD_SEP}%h{_LOG_FIELD_SEP}"
+        f"%an{_LOG_FIELD_SEP}%aI{_LOG_FIELD_SEP}%s{_LOG_FIELD_SEP}%D"
+    )
+    args: list[str] = ["log", "--branches", "--date-order"]
+    if max_count is not None:
+        args.append(f"-n{max(1, int(max_count))}")
+    args.append(f"--pretty=format:{fmt}")
+    result = run_git(*args, cwd=cwd)
+    if result.returncode != 0:
+        raise GitError(
+            result.stderr.strip() or result.stdout.strip() or "git log failed",
+            code="log_failed",
+        )
+
+    commits: list[GraphCommit] = []
+    for line in (result.stdout or "").splitlines():
+        if not line.strip():
+            continue
+        parts = line.split(_LOG_FIELD_SEP)
+        if len(parts) < 6:
+            continue
+        full, parents_s, short, author, date, subject = parts[:6]
+        deco = parts[6].strip() if len(parts) > 6 else ""
+        parents = tuple(p for p in parents_s.split() if p)
+        commits.append(
+            GraphCommit(
+                hash=full.strip(),
+                short=short.strip(),
+                parents=parents,
+                author=author.strip(),
+                date=date.strip(),
+                subject=subject.strip(),
+                decorations=deco,
+            )
+        )
+
+    return {
+        "branch": current or (branches[0].name if branches else ""),
+        "branches": [b.to_dict() for b in branches],
+        "commits": [c.to_dict() for c in commits],
+        "maxCount": max_count,
+    }
