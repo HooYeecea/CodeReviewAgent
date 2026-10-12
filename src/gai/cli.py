@@ -22,6 +22,7 @@ from gai.commands import setup as _setup  # noqa: F401
 from gai.commands import ship as _ship  # noqa: F401
 from gai.commands import stage as _stage  # noqa: F401
 from gai.commands import sync as _sync  # noqa: F401
+from gai.commands import view as _view  # noqa: F401
 from gai.commands.setup import _attach_profile_balances  # noqa: F401
 
 from gai.llm.balance import fetch_balance  # tests monkeypatch gai.cli.fetch_balance
