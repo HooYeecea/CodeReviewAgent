@@ -126,6 +126,28 @@ _COMMAND_EXAMPLES: dict[str, tuple[tuple[str, str, str], ...]] = {
         ("gai log --html --serve --cn", "Serve log HTML over local HTTP", "以本地 HTTP 打开提交记录页"),
         ("gai log -n 50 -g --html --open --cn", "Graph + HTML + open in browser", "拓扑图 + HTML 并用浏览器打开"),
     ),
+    "graph": (
+        (
+            "gai graph --cn",
+            "Write IDE-like branch graph HTML under .gai and open it",
+            "生成 IDE 风格分支链路 HTML（.gai）并打开浏览器",
+        ),
+        (
+            "gai graph --no-open --cn",
+            "Generate graph HTML without opening a browser",
+            "只生成链路图 HTML，不打开浏览器",
+        ),
+        (
+            "gai graph --serve --cn",
+            "Serve graph HTML over local HTTP (best for Refresh)",
+            "本地 HTTP 打开链路图（刷新更稳）",
+        ),
+        (
+            "gai graph -n 100 --cn -t",
+            "Limit commits and print git trace",
+            "限制提交条数并打印 git 链路",
+        ),
+    ),
     "report": (
         ("gai report --cn", "Summarize recent commits into a work report", "根据近期提交生成工作总结"),
         ("gai report --since 7d --cn", "Report covering the last 7 days", "统计最近 7 天的提交"),

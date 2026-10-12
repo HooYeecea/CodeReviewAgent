@@ -191,6 +191,17 @@ _COMMAND_META: list[dict[str, Any]] = [
         },
     },
     {
+        "id": "graph",
+        "en": {
+            "title": "Branch graph",
+            "blurb": "IDE-like local branch/commit graph HTML under .gai (opens by default; --serve for Refresh).",
+        },
+        "cn": {
+            "title": "分支链路图",
+            "blurb": "IDE 风格本地分支/提交链路 HTML（写入 `.gai`，默认打开；`--serve` 刷新更稳）。",
+        },
+    },
+    {
         "id": "report",
         "en": {
             "title": "Work summary",

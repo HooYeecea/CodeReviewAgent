@@ -1,4 +1,4 @@
-"""gai status / gai log — git status & log wrappers with pretty / HTML views."""
+"""gai status / gai log / gai graph — git views with pretty / HTML reports."""
 
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ from gai.git_views import (
     render_pretty_status,
     write_log_report,
 )
+from gai.graph_report import write_graph_report
 from gai.help_i18n import H
 from gai.local_serve import open_path, serve_gai_page
 
@@ -205,6 +206,110 @@ def log_cmd(
                 console.print(text)
             else:
                 console.print("[yellow]" + ("暂无提交。" if cn else "No commits yet.") + "[/yellow]")
+    except typer.Exit:
+        raise
+    except (GitError, RuntimeError) as exc:
+        _print_error(exc, chinese=cn, trace=trace)
+        raise typer.Exit(code=1) from exc
+    except KeyboardInterrupt:
+        console.print("\n已取消。" if cn else "\nAborted.")
+        raise typer.Exit(code=130) from None
+    finally:
+        _print_footer(trace=trace, chinese=cn)
+
+
+@app.command(
+    "graph",
+    help=H(
+        "Write an IDE-like branch/commit graph HTML under .gai (opens by default).",
+        "在 .gai 生成 IDE 风格的分支/提交链路 HTML（默认打开浏览器）。",
+    ),
+)
+def graph_cmd(
+    max_count: Optional[int] = typer.Option(
+        None,
+        "--max-count",
+        "-n",
+        help=H(
+            "Limit to N commits across local branches; omit for all.",
+            "限制本地分支合计提交条数；省略则全部。",
+        ),
+    ),
+    open_browser: bool = typer.Option(
+        True,
+        "--open/--no-open",
+        help=H(
+            "Open the graph HTML in the default browser (default: open).",
+            "用默认浏览器打开链路图（默认打开）。",
+        ),
+    ),
+    serve: bool = typer.Option(
+        False,
+        "--serve",
+        help=H(
+            "Serve .gai over local HTTP and open the graph page (best for Refresh).",
+            "用本地 HTTP 打开链路图（刷新更稳）。",
+        ),
+    ),
+    cn: bool = typer.Option(
+        False,
+        "--cn",
+        help=H(
+            "Use Simplified Chinese labels / HTML initial language.",
+            "使用简体中文标签；HTML 以中文为初始语言。",
+        ),
+    ),
+    trace: bool = typer.Option(
+        False,
+        "--trace",
+        "-t",
+        help=_TRACE_OPT_HELP,
+    ),
+) -> None:
+    """Generate/overwrite ``.gai/graph-report.html`` for the current repository."""
+    _start_trace(trace)
+    try:
+        n: int | None
+        if max_count is None:
+            n = None
+        else:
+            n = max(1, int(max_count))
+
+        path = write_graph_report(chinese=cn, max_count=n)
+        link = path_to_file_url(path)
+        msg = (
+            f"已更新分支链路图：{path}"
+            if cn
+            else f"Updated branch graph: {path}"
+        )
+        console.print(f"[green]{msg}[/green]")
+
+        if serve:
+            http_tip = (
+                "正在本地 HTTP 服务中（Ctrl+C 结束）…"
+                if cn
+                else "Serving over local HTTP (Ctrl+C to stop)…"
+            )
+            console.print(f"[dim]{http_tip}[/dim]")
+            try:
+                serve_gai_page(path, open_browser=True, hold_seconds=3600)
+            except KeyboardInterrupt:
+                console.print("\n已停止服务。" if cn else "\nStopped server.")
+                raise typer.Exit(code=130) from None
+            return
+
+        label = "浏览器打开：" if cn else "Open in browser:"
+        console.print(
+            f"{label} [link={link}][cyan underline]{link}[/cyan underline][/link]"
+        )
+        if open_browser:
+            open_path(path, prefer_http=False)
+        tip = (
+            "每次执行会覆盖同文件；页面可点「刷新」。刷新不稳时用：gai graph --serve --cn"
+            if cn
+            else "Each run overwrites the same file; use Refresh on the page. If flaky: gai graph --serve"
+        )
+        console.print(f"[dim]{tip}[/dim]")
     except typer.Exit:
         raise
     except (GitError, RuntimeError) as exc:
