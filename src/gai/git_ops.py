@@ -1282,14 +1282,20 @@ def collect_log_entries(
     cwd: Path | None = None,
     *,
     max_count: int | None = None,
+    ref: str | None = None,
 ) -> list[LogEntry]:
-    """Return commits as structured rows. ``max_count=None`` means all commits."""
+    """Return commits as structured rows. ``max_count=None`` means all commits.
+
+    ``ref`` selects a branch/commit (default: current ``HEAD``).
+    """
     ensure_repo(cwd)
     fmt = f"%H{_LOG_FIELD_SEP}%h{_LOG_FIELD_SEP}%an{_LOG_FIELD_SEP}%aI{_LOG_FIELD_SEP}%s{_LOG_FIELD_SEP}%D"
     args: list[str] = ["log"]
     if max_count is not None:
         args.append(f"-n{max(1, int(max_count))}")
     args.append(f"--pretty=format:{fmt}")
+    if ref:
+        args.append(ref)
     result = run_git(*args, cwd=cwd)
     if result.returncode != 0:
         raise GitError(
@@ -1347,6 +1353,7 @@ def log_graph_text(
     cwd: Path | None = None,
     *,
     max_count: int | None = None,
+    ref: str | None = None,
 ) -> str:
     """``git log --graph`` with a parse-friendly pretty format for pretty terminal."""
     ensure_repo(cwd)
@@ -1366,6 +1373,8 @@ def log_graph_text(
             f"--pretty=format:{fmt}",
         ]
     )
+    if ref:
+        args.append(ref)
     result = run_git(*args, cwd=cwd)
     if result.returncode != 0:
         raise GitError(
