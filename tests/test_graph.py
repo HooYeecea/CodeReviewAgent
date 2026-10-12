@@ -88,8 +88,12 @@ def test_write_graph_report_and_overwrite(repo: Path) -> None:
     assert "position: sticky" in html
     assert 'id="repo-name"' in html
     assert "GitgraphJS" not in html
+    assert "btn-long-edges" in html
     app_js = (path1.parent / "graph-app.js").read_text(encoding="utf-8")
-    assert "collapseRows" in app_js
+    assert "buildVisibleModel" in app_js
+    assert "assignCommitColors" in app_js
+    assert "applyLongEdges" in app_js
+    assert "planLinearFolds" in app_js
     assert "paintArrowHead" in app_js
     assert "fold-hit" in app_js
     data_txt = graph_data_path(repo).read_text(encoding="utf-8")
@@ -97,6 +101,7 @@ def test_write_graph_report_and_overwrite(repo: Path) -> None:
     assert "repoName" in data_txt
     assert "GAI_GRAPH_DATA" in data_txt
     assert "collapseMin" in data_txt
+    assert "longEdgeMin" in data_txt
 
     (repo / "b.txt").write_text("b\n", encoding="utf-8")
     _git(repo, "add", "b.txt")
@@ -134,6 +139,23 @@ def test_cli_graph_no_open(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert payload["branch"] == "main"
     assert payload["commits"]
     assert "email" in payload["commits"][0]
+
+
+def test_graph_layout_js_helpers() -> None:
+    """Run Node layout smoke tests when node is available."""
+    script = Path(__file__).resolve().parent / "test_graph_layout.js"
+    node = subprocess.run(
+        ["node", str(script)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if node.returncode == 127 or "not recognized" in (node.stderr or "").lower():
+        pytest.skip("node not available")
+    if node.returncode != 0 and "ENOENT" in (node.stderr or ""):
+        pytest.skip("node not available")
+    assert node.returncode == 0, (node.stdout or "") + (node.stderr or "")
+    assert "OK" in (node.stdout or "")
 
 
 def test_cli_graph_opens_by_default(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
