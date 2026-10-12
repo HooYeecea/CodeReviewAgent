@@ -107,6 +107,20 @@ _COMMAND_EXAMPLES: dict[str, tuple[tuple[str, str, str], ...]] = {
         ("gai stash -m 'wip' --cn", "Stash with a message", "带说明的 stash"),
         ("gai stash --pop --cn", "Pop the latest stash entry", "弹出最近一条 stash"),
     ),
+    "status": (
+        ("gai status --cn", "Show git status", "查看 git status"),
+        ("gai status -p --cn", "Pretty Rich status (staged / unstaged / untracked)", "Rich 美化：按暂存/未暂存/未跟踪分组"),
+        ("gai status -p --cn -t", "Pretty status with git trace", "美化 status 并打印 git 链路"),
+    ),
+    "log": (
+        ("gai log --cn", "Show recent commits (oneline)", "查看近期提交（oneline）"),
+        ("gai log -p --cn", "Pretty Rich commit table", "Rich 表格美化提交列表"),
+        ("gai log -g --cn", "Show commit graph", "显示提交拓扑图"),
+        ("gai log -p -g --cn", "Pretty view with commit graph", "美化输出并带拓扑图"),
+        ("gai log --html --cn", "Write/overwrite .gai/log-report.html", "写入并覆盖 .gai/log-report.html"),
+        ("gai log --html --serve --cn", "Serve log HTML over local HTTP", "以本地 HTTP 打开提交记录页"),
+        ("gai log -n 50 -g --html --open --cn", "Graph + HTML + open in browser", "拓扑图 + HTML 并用浏览器打开"),
+    ),
     "report": (
         ("gai report --cn", "Summarize recent commits into a work report", "根据近期提交生成工作总结"),
         ("gai report --since 7d --cn", "Report covering the last 7 days", "统计最近 7 天的提交"),

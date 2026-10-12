@@ -169,6 +169,28 @@ _COMMAND_META: list[dict[str, Any]] = [
         },
     },
     {
+        "id": "status",
+        "en": {
+            "title": "Git status",
+            "blurb": "Wrap git status; --pretty/-p for a Rich grouped view.",
+        },
+        "cn": {
+            "title": "查看状态",
+            "blurb": "包装 git status；`--pretty/-p` 用 Rich 分组美化。",
+        },
+    },
+    {
+        "id": "log",
+        "en": {
+            "title": "Git log",
+            "blurb": "Wrap git log; --pretty / --graph; --html writes .gai/log-report.html (--serve/--open).",
+        },
+        "cn": {
+            "title": "查看提交",
+            "blurb": "包装 git log；`--pretty` / `--graph`；`--html` 写入 `.gai/log-report.html`（可 --serve/--open）。",
+        },
+    },
+    {
         "id": "report",
         "en": {
             "title": "Work summary",
