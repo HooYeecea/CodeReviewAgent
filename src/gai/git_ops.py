@@ -1286,6 +1286,8 @@ class GraphCommit:
     date: str
     subject: str
     decorations: str = ""
+    email: str = ""
+    body: str = ""
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -1293,8 +1295,10 @@ class GraphCommit:
             "short": self.short,
             "parents": list(self.parents),
             "author": self.author,
+            "email": self.email,
             "date": self.date,
             "subject": self.subject,
+            "body": self.body,
             "decorations": self.decorations,
         }
 
@@ -1449,11 +1453,13 @@ def collect_graph_snapshot(
             continue
         branches.append(GraphBranch(name=name, tip=tip, current=(name == current)))
 
+    # NUL-terminated records so commit bodies may contain newlines safely.
     fmt = (
         f"%H{_LOG_FIELD_SEP}%P{_LOG_FIELD_SEP}%h{_LOG_FIELD_SEP}"
-        f"%an{_LOG_FIELD_SEP}%aI{_LOG_FIELD_SEP}%s{_LOG_FIELD_SEP}%D"
+        f"%an{_LOG_FIELD_SEP}%ae{_LOG_FIELD_SEP}%aI{_LOG_FIELD_SEP}"
+        f"%s{_LOG_FIELD_SEP}%D{_LOG_FIELD_SEP}%b"
     )
-    args: list[str] = ["log", "--branches", "--date-order"]
+    args: list[str] = ["log", "--branches", "--date-order", "-z"]
     if max_count is not None:
         args.append(f"-n{max(1, int(max_count))}")
     args.append(f"--pretty=format:{fmt}")
@@ -1465,14 +1471,15 @@ def collect_graph_snapshot(
         )
 
     commits: list[GraphCommit] = []
-    for line in (result.stdout or "").splitlines():
-        if not line.strip():
+    for record in (result.stdout or "").split("\0"):
+        if not record.strip():
             continue
-        parts = line.split(_LOG_FIELD_SEP)
-        if len(parts) < 6:
+        parts = record.split(_LOG_FIELD_SEP)
+        if len(parts) < 7:
             continue
-        full, parents_s, short, author, date, subject = parts[:6]
-        deco = parts[6].strip() if len(parts) > 6 else ""
+        full, parents_s, short, author, email, date, subject = parts[:7]
+        deco = parts[7].strip() if len(parts) > 7 else ""
+        body = parts[8].strip() if len(parts) > 8 else ""
         parents = tuple(p for p in parents_s.split() if p)
         commits.append(
             GraphCommit(
@@ -1480,15 +1487,34 @@ def collect_graph_snapshot(
                 short=short.strip(),
                 parents=parents,
                 author=author.strip(),
+                email=email.strip(),
                 date=date.strip(),
                 subject=subject.strip(),
+                body=body,
                 decorations=deco,
             )
         )
+
+    root = ensure_repo(cwd)
+    repo_name = root.name
+    remote_name = ""
+    remote_url = ""
+    try:
+        remotes = list_remotes(cwd)
+    except GitError:
+        remotes = []
+    if remotes:
+        remote_name = "origin" if "origin" in remotes else remotes[0]
+        url_res = run_git("remote", "get-url", remote_name, cwd=cwd, trace=False)
+        if url_res.returncode == 0:
+            remote_url = (url_res.stdout or "").strip()
 
     return {
         "branch": current or (branches[0].name if branches else ""),
         "branches": [b.to_dict() for b in branches],
         "commits": [c.to_dict() for c in commits],
         "maxCount": max_count,
+        "repoName": repo_name,
+        "remoteName": remote_name,
+        "remoteUrl": remote_url,
     }
