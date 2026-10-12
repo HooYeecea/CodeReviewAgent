@@ -648,21 +648,33 @@ def devflow_cmd(
             _print_trace(trace=True, chinese=cn)
 
 
-def _print_batch_plan(batches: list[CommitBatch], *, summary: str, chinese: bool) -> None:
+def _print_batch_plan(
+    batches: list[CommitBatch],
+    *,
+    summary: str,
+    chinese: bool,
+    label_prefix: str = "",
+    show_concrete_message: bool = False,
+) -> None:
     if summary:
         label = "拆分概要：" if chinese else "Plan summary:"
         console.print(f"[bold]{label}[/bold] {summary}")
     for idx, batch in enumerate(batches, start=1):
+        tag = f"{label_prefix}{idx}" if label_prefix else str(idx)
         console.print(
-            f"\n[bold cyan]#{idx}[/bold cyan] {batch.title} "
+            f"\n[bold cyan]#{tag}[/bold cyan] {batch.title} "
             f"[dim]({len(batch.paths)} files)[/dim]"
         )
         if batch.reason:
             console.print(f"  [dim]{batch.reason}[/dim]")
         console.print("  " + " ".join(batch.paths))
-        hints = [h for h in (batch.message_hint_en, batch.message_hint_cn) if h]
-        if hints:
-            console.print("  [dim]→ " + " | ".join(hints) + "[/dim]")
+        if show_concrete_message and batch.commit_message:
+            msg_label = "提交词：" if chinese else "Commit message:"
+            console.print(f"  [bold]{msg_label}[/bold] {batch.commit_message}")
+        else:
+            hints = [h for h in (batch.message_hint_en, batch.message_hint_cn) if h]
+            if hints:
+                console.print("  [dim]→ " + " | ".join(hints) + "[/dim]")
 
 
 def _review_language(*, chinese: bool) -> bool:
@@ -681,6 +693,7 @@ def _run_staged_review(
     offer_splitflow: bool = False,
     remote: str | None = None,
     trace: bool = False,
+    auto_continue: bool = False,
 ) -> bool:
     """Run review on the current index. Returns False if user stops."""
     if offer_splitflow and not allow_truncated:
@@ -701,17 +714,82 @@ def _run_staged_review(
             allow_truncated=allow_truncated,
         )
     render_review(result, console, chinese=review_cn)
+    flush("review")
+    if auto_continue:
+        return True
     cont = Confirm.ask(
         "审查完成，继续选择提交信息？"
         if chinese
         else "Review done. Continue to commit message?",
         default=True,
     )
-    flush("review")
     if not cont:
         console.print("已取消。" if chinese else "Aborted.")
         return False
     return True
+
+
+def _commit_fixed_message(
+    message: str,
+    *,
+    chinese: bool,
+    flush,
+    confirm: bool = True,
+) -> bool:
+    """Commit with a preselected message. Returns False if aborted."""
+    text = (message or "").strip()
+    if not text:
+        tip = "提交信息为空，已跳过。" if chinese else "Empty commit message; skipped."
+        err_console.print(f"[yellow]{tip}[/yellow]")
+        flush("commit")
+        return False
+    label = "将使用的提交信息：" if chinese else "Commit message to use:"
+    console.print(f"[bold]{label}[/bold] {text}")
+    if confirm and not Confirm.ask(
+        "确认提交？" if chinese else "Confirm commit?",
+        default=True,
+    ):
+        console.print("已取消提交。" if chinese else "Commit aborted.")
+        flush("commit")
+        return False
+    git_commit(text)
+    console.print(
+        ("[green]已提交：[/green] " if chinese else "[green]Committed:[/green] ")
+        + text
+    )
+    flush("commit")
+    return True
+
+
+def _print_level2_plan(
+    batches: list[CommitBatch],
+    *,
+    parent_idx: int,
+    parent_title: str,
+    summary: str,
+    chinese: bool,
+    message_lang: str,
+) -> None:
+    lang_tag = ("中文" if message_lang == "cn" else "英文") if chinese else message_lang.upper()
+    console.print(
+        (
+            f"\n[yellow]一级 #{parent_idx}「{parent_title}」Diff 仍过大，"
+            f"拆成 {len(batches)} 个二级批次（提交词语言：{lang_tag}）：[/yellow]"
+            if chinese
+            else (
+                f"\n[yellow]Level-1 #{parent_idx} '{parent_title}' is still too large; "
+                f"splitting into {len(batches)} level-2 batches "
+                f"(message language: {lang_tag}):[/yellow]"
+            )
+        )
+    )
+    _print_batch_plan(
+        batches,
+        summary=summary,
+        chinese=chinese,
+        label_prefix=f"{parent_idx}.",
+        show_concrete_message=True,
+    )
 
 
 def _normalize_msg_lang(token: str) -> str | None:
@@ -1116,26 +1194,16 @@ def _run_splitflow(
     total = len(plan.batches)
 
     for idx, batch in enumerate(plan.batches, start=1):
+        prefer_lang = message_langs[idx - 1]
         step(
             idx,
             (
-                f"批次 {idx}/{total}：{batch.title}"
+                f"一级批次 {idx}/{total}：{batch.title}"
                 if chinese
-                else f"Batch {idx}/{total}: {batch.title}"
+                else f"Level-1 batch {idx}/{total}: {batch.title}"
             ),
         )
         console.print("[dim]" + " ".join(batch.paths) + "[/dim]")
-        if not Confirm.ask(
-            "开始本批次？" if chinese else "Start this batch?",
-            default=True,
-        ):
-            console.print(
-                "[yellow]已跳过本批次。[/yellow]"
-                if chinese
-                else "[yellow]Skipped this batch.[/yellow]"
-            )
-            flush(f"batch-{idx}")
-            continue
 
         if has_staged_changes():
             git_unadd(["."])
@@ -1154,6 +1222,125 @@ def _run_splitflow(
             console.print("[dim]" + status + "[/dim]")
         flush(f"batch-{idx}-add")
 
+        _, _, exceeds = staged_diff_size()
+        if exceeds and len(batch.paths) >= 2:
+            # Level-2 re-split (max depth 2): unstage, plan, confirm once, auto-run.
+            git_unadd(["."])
+            status_text = (
+                "一级批次仍过大，正在拆二级批次并生成提交词..."
+                if chinese
+                else "Level-1 batch still too large; planning level-2 batches + messages..."
+            )
+            with console.status(f"[bold]{status_text}[/bold]"):
+                l2_plan = suggest_commit_batches(
+                    chinese=chinese,
+                    paths=list(batch.paths),
+                    message_lang=prefer_lang,
+                    require_concrete_messages=True,
+                )
+            if len(l2_plan.batches) < 2:
+                # Cannot usefully split further; fall back to truncated single batch.
+                tip = (
+                    "无法再拆成多个二级批次，将对本一级批次继续（可能截断审查）。"
+                    if chinese
+                    else "Could not split into multiple level-2 batches; continuing this level-1 batch (review may truncate)."
+                )
+                console.print(f"[yellow]{tip}[/yellow]")
+                git_add(batch.paths)
+                if not _run_staged_review(
+                    chinese=chinese,
+                    review_cn=review_cn,
+                    flush=flush,
+                    allow_truncated=True,
+                ):
+                    raise typer.Exit(code=0)
+                if not _pick_and_commit_message(
+                    chinese=chinese,
+                    flush=flush,
+                    hint_en=batch.message_hint_en,
+                    hint_cn=batch.message_hint_cn,
+                    allow_truncated=True,
+                    prefer_lang=prefer_lang,
+                ):
+                    raise typer.Exit(code=0)
+                committed += 1
+                continue
+
+            _print_level2_plan(
+                l2_plan.batches,
+                parent_idx=idx,
+                parent_title=batch.title,
+                summary=l2_plan.summary,
+                chinese=chinese,
+                message_lang=prefer_lang,
+            )
+            if not Confirm.ask(
+                (
+                    f"确认按以上 {len(l2_plan.batches)} 个二级批次依次审查并提交？"
+                    if chinese
+                    else f"Confirm these {len(l2_plan.batches)} level-2 batches (review+commit each)?"
+                ),
+                default=True,
+            ):
+                console.print(
+                    "[yellow]已跳过该一级批次。[/yellow]"
+                    if chinese
+                    else "[yellow]Skipped this level-1 batch.[/yellow]"
+                )
+                flush(f"batch-{idx}-l2-skip")
+                continue
+
+            for j, sub in enumerate(l2_plan.batches, start=1):
+                step(
+                    f"{idx}.{j}",
+                    (
+                        f"二级 {idx}.{j}/{len(l2_plan.batches)}：{sub.title}"
+                        if chinese
+                        else f"Level-2 {idx}.{j}/{len(l2_plan.batches)}: {sub.title}"
+                    ),
+                )
+                console.print("[dim]" + " ".join(sub.paths) + "[/dim]")
+                if sub.commit_message:
+                    console.print(
+                        (
+                            f"[dim]提交词：{sub.commit_message}[/dim]"
+                            if chinese
+                            else f"[dim]Message: {sub.commit_message}[/dim]"
+                        )
+                    )
+                if has_staged_changes():
+                    git_unadd(["."])
+                git_add(sub.paths)
+                if not has_staged_changes():
+                    tip = (
+                        "该二级批次暂存后为空，已跳过。"
+                        if chinese
+                        else "Nothing staged for this level-2 batch; skipped."
+                    )
+                    err_console.print(f"[yellow]{tip}[/yellow]")
+                    flush(f"batch-{idx}-{j}-add")
+                    continue
+                flush(f"batch-{idx}-{j}-add")
+                # Max depth 2: allow truncated review; no per-batch confirms.
+                if not _run_staged_review(
+                    chinese=chinese,
+                    review_cn=review_cn,
+                    flush=flush,
+                    allow_truncated=True,
+                    auto_continue=True,
+                ):
+                    raise typer.Exit(code=0)
+                if not _commit_fixed_message(
+                    sub.commit_message,
+                    chinese=chinese,
+                    flush=flush,
+                    confirm=False,
+                ):
+                    raise typer.Exit(code=0)
+                committed += 1
+            continue
+
+        # Level-1 fits (or single oversized path): review + pick message.
         if not _run_staged_review(
             chinese=chinese,
             review_cn=review_cn,
@@ -1168,7 +1355,7 @@ def _run_splitflow(
             hint_en=batch.message_hint_en,
             hint_cn=batch.message_hint_cn,
             allow_truncated=True,
-            prefer_lang=message_langs[idx - 1],
+            prefer_lang=prefer_lang,
         ):
             raise typer.Exit(code=0)
         committed += 1
