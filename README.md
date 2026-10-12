@@ -135,6 +135,8 @@ gai stash --pop --cn      # 弹出最近一条 stash
 gai status -p --cn        # 美化查看工作区状态
 gai log -p -g --cn        # 美化提交列表 + 拓扑图
 gai log --html --serve --cn  # 覆盖写入 .gai/log-report.html 并 HTTP 打开
+gai graph --cn            # IDE 风格分支链路图（写入 .gai 并默认打开）
+gai graph --serve --cn    # 本地 HTTP 打开链路图（刷新更稳）
 gai unadd --cn            # 撤销暂存（需确认）
 gai uncommit --cn         # 撤销最近一次提交（soft，需确认）
 gai report --cn           # 最近 7 天工作总结
@@ -191,6 +193,7 @@ gai report --cn -o .\reports\                # 目录不存在则自动创建
 | `gai stash` | stash 本地改动，或 `--pop` 弹出 |
 | `gai status` | 查看 git status；`-p/--pretty` 美化 |
 | `gai log` | 查看 git log；`-p` 美化、`-g` 拓扑、`--html` 写入 `.gai/log-report.html` |
+| `gai graph` | IDE 风格分支/提交链路图；写入 `.gai/graph-report.html`（默认打开浏览器） |
 | `gai report` | 根据提交记录写工作总结 |
 | `gai balance` | 查询 API Key 剩余额度（厂商支持时） |
 | `gai usage` | 查看本地记录的大模型 token 用量历史 |
@@ -491,6 +494,25 @@ gai log -n 50 -g --html --open --cn
 | `--html` | 生成/覆盖 `.gai/log-report.html` |
 | `--open` | 浏览器打开 HTML（隐含 `--html`） |
 | `--serve` | 本地 HTTP 打开（隐含 `--html`） |
+| `--cn` | 中文标签；HTML 初始语言为中文 |
+| `-t` / `--trace` | 打印底层 git 命令链路 |
+
+### `gai graph`
+
+生成类似 Rider / IDEA 的**本地分支链路图**（写入并覆盖 `.gai/graph-report.html` + `graph-data.js`）。默认打开浏览器；非 git 仓库会给出友好错误提示。
+
+```bash
+gai graph --cn
+gai graph --no-open --cn
+gai graph --serve --cn
+gai graph -n 100 --cn -t
+```
+
+| 参数 | 说明 |
+|------|------|
+| `-n` / `--max-count` | 限制本地分支合计提交条数；**省略则全部** |
+| `--open` / `--no-open` | 是否打开浏览器（**默认打开**） |
+| `--serve` | 本地 HTTP 打开（刷新更稳） |
 | `--cn` | 中文标签；HTML 初始语言为中文 |
 | `-t` / `--trace` | 打印底层 git 命令链路 |
 
