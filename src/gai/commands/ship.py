@@ -22,6 +22,8 @@ from gai.cli_common import (
 )
 from gai.devflow import (
     CommitBatch,
+    CommitBatchPlan,
+    list_staged_paths,
     normalize_path_input,
     stageable_paths_summary,
     suggest_bilingual_messages,
@@ -71,12 +73,21 @@ def _offer_splitflow_instead(
     remote: str | None = None,
     trace: bool = False,
     interactive: bool = True,
+    plan: CommitBatchPlan | None = None,
+    required: bool = True,
 ) -> None:
-    """Ask to switch to splitflow; always ends with ``typer.Exit``."""
-    chars, limit, exceeds = staged_diff_size()
-    if not exceeds:
-        return
-    _print_diff_too_large(chars=chars, limit=limit, chinese=chinese)
+    """Ask to switch to splitflow.
+
+    When ``required`` is true (diff would truncate), declining aborts.
+    When false (optional AI split tip), declining returns and the caller continues.
+    Switching always ends with ``typer.Exit(0)``.
+    """
+    if required:
+        chars, limit, exceeds = staged_diff_size()
+        if not exceeds and plan is None:
+            return
+        if exceeds:
+            _print_diff_too_large(chars=chars, limit=limit, chinese=chinese)
     if not interactive:
         tip = (
             "请改跑：gai splitflow --cn"
@@ -85,23 +96,82 @@ def _offer_splitflow_instead(
         )
         err_console.print(f"[red]{tip}[/red]")
         raise typer.Exit(code=1)
-    if Confirm.ask(
-        "是否切换到 splitflow？" if chinese else "Switch to splitflow now?",
-        default=True,
-    ):
+    ask = (
+        "是否切换到 splitflow？"
+        if chinese
+        else "Switch to splitflow now?"
+    )
+    if Confirm.ask(ask, default=required):
         console.print(
             "[green]已切换到 splitflow。[/green]"
             if chinese
             else "[green]Switching to splitflow.[/green]"
         )
-        _run_splitflow(chinese=chinese, remote=remote, trace=trace)
+        _run_splitflow(chinese=chinese, remote=remote, trace=trace, plan=plan)
         raise typer.Exit(code=0)
+    if required:
+        console.print(
+            "已取消（未对截断 Diff 继续审查）。"
+            if chinese
+            else "Aborted (will not review a truncated diff)."
+        )
+        raise typer.Exit(code=1)
     console.print(
-        "已取消（未对截断 Diff 继续审查）。"
+        "[dim]继续整包审查/提交。[/dim]"
         if chinese
-        else "Aborted (will not review a truncated diff)."
+        else "[dim]Continuing with a single review/commit.[/dim]"
     )
-    raise typer.Exit(code=1)
+
+
+def _maybe_suggest_optional_splitflow(
+    *,
+    chinese: bool,
+    remote: str | None = None,
+    trace: bool = False,
+    interactive: bool = True,
+) -> None:
+    """If AI finds multiple coherent batches (even when diff fits), offer splitflow."""
+    _, _, exceeds = staged_diff_size()
+    if exceeds:
+        return  # hard path handled by caller
+    staged_paths = list_staged_paths()
+    if len(staged_paths) < 2:
+        return
+    if not interactive:
+        return
+
+    status_text = (
+        "正在分析是否适合拆成多次提交..."
+        if chinese
+        else "Checking whether changes should be split into multiple commits..."
+    )
+    with console.status(f"[bold]{status_text}[/bold]"):
+        plan = suggest_commit_batches(chinese=chinese, only_staged=True)
+
+    # Only trust a real model plan with 2+ batches (ignore directory fallback noise).
+    if not plan.parsed_ok or len(plan.batches) < 2:
+        return
+
+    console.print(
+        (
+            f"[yellow]AI 建议拆成 {len(plan.batches)} 个更清晰的提交"
+            "（当前 Diff 虽未超限，但主题可分开）。[/yellow]"
+            if chinese
+            else (
+                f"[yellow]AI suggests {len(plan.batches)} clearer commits "
+                "(diff fits the limit, but themes can be separated).[/yellow]"
+            )
+        )
+    )
+    _print_batch_plan(plan.batches, summary=plan.summary, chinese=chinese)
+    _offer_splitflow_instead(
+        chinese=chinese,
+        remote=remote,
+        trace=trace,
+        interactive=True,
+        plan=plan,
+        required=False,
+    )
 
 
 @app.command(
@@ -168,6 +238,10 @@ def review_cmd(
                 err_console.print(f"[red]{tip}[/red]")
                 raise typer.Exit(code=1)
             _offer_splitflow_instead(chinese=cn, trace=trace, interactive=True)
+        elif not as_json:
+            _maybe_suggest_optional_splitflow(
+                chinese=cn, trace=trace, interactive=True
+            )
 
         status_text = "正在调用大模型审查..." if cn else "Calling LLM for code review..."
         with console.status(f"[bold]{status_text}[/bold]"):
@@ -315,6 +389,13 @@ def commit_cmd(
             _, _, exceeds = staged_diff_size()
             if exceeds:
                 _offer_splitflow_instead(
+                    chinese=cn,
+                    remote=remote,
+                    trace=trace,
+                    interactive=not yes,
+                )
+            else:
+                _maybe_suggest_optional_splitflow(
                     chinese=cn,
                     remote=remote,
                     trace=trace,
@@ -606,6 +687,10 @@ def _run_staged_review(
         _, _, exceeds = staged_diff_size()
         if exceeds:
             _offer_splitflow_instead(
+                chinese=chinese, remote=remote, trace=trace, interactive=True
+            )
+        else:
+            _maybe_suggest_optional_splitflow(
                 chinese=chinese, remote=remote, trace=trace, interactive=True
             )
     status_text = "正在调用大模型审查..." if chinese else "Calling LLM for code review..."
@@ -933,7 +1018,13 @@ def _pick_and_commit_message(
     return True
 
 
-def _run_splitflow(*, chinese: bool, remote: str | None, trace: bool = False) -> None:
+def _run_splitflow(
+    *,
+    chinese: bool,
+    remote: str | None,
+    trace: bool = False,
+    plan: CommitBatchPlan | None = None,
+) -> None:
     """Plan coherent commit batches, then review→commit each; optional push at end."""
     step = lambda n, title: console.print(
         f"\n[bold cyan]━━ {n}. {title} ━━[/bold cyan]"
@@ -974,35 +1065,48 @@ def _run_splitflow(*, chinese: bool, remote: str | None, trace: bool = False) ->
             "[green]已清空暂存区。[/green]" if chinese else "[green]Index cleared.[/green]"
         )
 
-    status_text = (
-        "正在让 AI 按主题拆分 commit 边界..."
-        if chinese
-        else "Asking AI to split coherent commit batches..."
-    )
-    with console.status(f"[bold]{status_text}[/bold]"):
-        plan = suggest_commit_batches(chinese=chinese)
-
-    if not plan.parsed_ok:
+    reused_plan = plan is not None and bool(plan.batches)
+    if reused_plan:
         console.print(
-            f"[yellow]{plan.summary}[/yellow]"
-            if plan.summary
-            else (
-                "[yellow]模型计划不可用，已使用回退分组。[/yellow]"
-                if chinese
-                else "[yellow]Model plan unavailable; using fallback groups.[/yellow]"
-            )
+            "[dim]沿用刚才的分批建议。[/dim]"
+            if chinese
+            else "[dim]Reusing the suggested batch plan.[/dim]"
         )
-    _print_batch_plan(plan.batches, summary=plan.summary, chinese=chinese)
+        assert plan is not None
+    else:
+        status_text = (
+            "正在让 AI 按主题拆分 commit 边界..."
+            if chinese
+            else "Asking AI to split coherent commit batches..."
+        )
+        with console.status(f"[bold]{status_text}[/bold]"):
+            plan = suggest_commit_batches(chinese=chinese)
 
-    if not Confirm.ask(
-        f"按以上 {len(plan.batches)} 个批次依次审查并提交？"
-        if chinese
-        else f"Proceed with these {len(plan.batches)} batches (review+commit each)?",
-        default=True,
-    ):
-        console.print("已取消。" if chinese else "Aborted.")
-        flush("plan")
-        raise typer.Exit(code=0)
+        if not plan.parsed_ok:
+            console.print(
+                f"[yellow]{plan.summary}[/yellow]"
+                if plan.summary
+                else (
+                    "[yellow]模型计划不可用，已使用回退分组。[/yellow]"
+                    if chinese
+                    else "[yellow]Model plan unavailable; using fallback groups.[/yellow]"
+                )
+            )
+
+    assert plan is not None
+    if not reused_plan:
+        _print_batch_plan(plan.batches, summary=plan.summary, chinese=chinese)
+        if not Confirm.ask(
+            f"按以上 {len(plan.batches)} 个批次依次审查并提交？"
+            if chinese
+            else f"Proceed with these {len(plan.batches)} batches (review+commit each)?",
+            default=True,
+        ):
+            console.print("已取消。" if chinese else "Aborted.")
+            flush("plan")
+            raise typer.Exit(code=0)
+    else:
+        _print_batch_plan(plan.batches, summary=plan.summary, chinese=chinese)
 
     message_langs = _ask_splitflow_message_langs(plan.batches, chinese=chinese)
     flush("plan")
