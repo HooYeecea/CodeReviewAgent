@@ -1,7 +1,9 @@
 /**
  * IDEA-like VCS Log graph painter for gai graph.
- * Geometry follows JetBrains SimpleGraphCellPainter:
- * vertical/diagonal edges, dashed+arrow for collapsed linear segments.
+ *
+ * Pipeline:
+ *   filter → color-by-branch → find linear folds → re-lane visible commits
+ *   → long-edge arrows → paint cells (up/down edges dock like SimpleGraphCellPainter)
  */
 (function (global) {
   "use strict";
@@ -23,9 +25,11 @@
   var NODE_W = 13;
   var LINE_W = 1.6;
   var CIRCLE_R = 3.6;
-  var ARROW_LEN = 0.32; /* fraction of row height */
+  var ARROW_LEN = 0.32;
   var ARROW_COS2 = 0.7;
   var COLLAPSE_MIN = 3;
+  /** Visible through-rows before a lane becomes a long-edge arrow (IDEA default). */
+  var LONG_EDGE_MIN = 6;
 
   function colorOf(i) {
     return COLORS[((i % COLORS.length) + COLORS.length) % COLORS.length];
@@ -79,6 +83,46 @@
     return tips;
   }
 
+  function indexByHash(commits) {
+    var map = {};
+    (commits || []).forEach(function (c) {
+      map[c.hash] = c;
+    });
+    return map;
+  }
+
+  /**
+   * Stable commit colors from branch identity (current branch paints shared history first).
+   */
+  function assignCommitColors(commits, branches) {
+    var bmap = branchColorMap(branches);
+    var byH = indexByHash(commits);
+    var color = {};
+    var ordered = (branches || []).slice().sort(function (a, b) {
+      return (b.current ? 1 : 0) - (a.current ? 1 : 0);
+    });
+    ordered.forEach(function (b) {
+      var col = bmap[b.name] || colorOf(0);
+      var stack = [b.tip];
+      var seen = {};
+      while (stack.length) {
+        var h = stack.pop();
+        if (!h || seen[h]) continue;
+        seen[h] = true;
+        if (!color[h]) color[h] = col;
+        var c = byH[h];
+        if (!c) continue;
+        (c.parents || []).forEach(function (p) {
+          stack.push(p);
+        });
+      }
+    });
+    (commits || []).forEach(function (c, i) {
+      if (!color[c.hash]) color[c.hash] = colorOf(i);
+    });
+    return color;
+  }
+
   function refsFor(commit, tips) {
     var refs = [];
     var seen = {};
@@ -119,10 +163,7 @@
     });
     if (!chosen.length) return [];
     if (chosen.length === (branches || []).length) return commits.slice();
-    var map = {};
-    (commits || []).forEach(function (c) {
-      map[c.hash] = c;
-    });
+    var map = indexByHash(commits);
     var keep = {};
     var stack = chosen.map(function (b) {
       return b.tip;
@@ -153,66 +194,6 @@
     return children;
   }
 
-  /** Newest-first lane assignment (IDEA / git metro). */
-  function assignLanes(commits) {
-    var map = {};
-    commits.forEach(function (c) {
-      map[c.hash] = c;
-    });
-    var columns = [];
-    var rows = [];
-    var prevAfter = [];
-    commits.forEach(function (c) {
-      var arrivedFromAbove = columns.indexOf(c.hash) >= 0;
-      var col = columns.indexOf(c.hash);
-      if (col < 0) {
-        col = columns.indexOf(null);
-        if (col < 0) {
-          col = columns.length;
-          columns.push(c.hash);
-        } else {
-          columns[col] = c.hash;
-        }
-      }
-      var before = columns.slice();
-      var next = columns.slice();
-      next[col] = null;
-      var parents = (c.parents || []).filter(function (p) {
-        return !!map[p];
-      });
-      var placedFirst = false;
-      parents.forEach(function (p) {
-        if (next.indexOf(p) >= 0) return;
-        if (!placedFirst) {
-          next[col] = p;
-          placedFirst = true;
-        } else {
-          var free = next.indexOf(null);
-          if (free < 0) next.push(p);
-          else next[free] = p;
-        }
-      });
-      while (next.length && next[next.length - 1] === null) next.pop();
-      var parentCols = parents.map(function (p) {
-        var idx = next.indexOf(p);
-        return idx < 0 ? col : idx;
-      });
-      rows.push({
-        commit: c,
-        col: col,
-        before: before,
-        after: next.slice(),
-        prevAfter: prevAfter.slice(),
-        arrivedFromAbove: arrivedFromAbove,
-        parents: parents,
-        parentCols: parentCols,
-      });
-      prevAfter = next.slice();
-      columns = next;
-    });
-    return rows;
-  }
-
   function isOrdinary(commit, children, tips) {
     if ((tips[commit.hash] || []).length) return false;
     if ((commit.parents || []).length !== 1) return false;
@@ -224,44 +205,328 @@
   }
 
   /**
-   * Collapse linear middles: remove them from visible rows and attach a
-   * dashed+arrow down-edge on the commit above each folded segment (IDEA style).
+   * Newest-first lane assignment with per-lane color identity.
+   * commitColors[hash] drives new lane / node color; first-parent keeps lane color.
    */
-  function collapseRows(rows, children, tips, collapseMin, expanded) {
+  function assignLanes(commits, commitColors) {
+    commitColors = commitColors || {};
+    var map = indexByHash(commits);
+    var columns = [];
+    var laneColors = [];
+    var rows = [];
+    var prevAfter = [];
+    var prevColors = [];
+
+    commits.forEach(function (c) {
+      var arrivedFromAbove = columns.indexOf(c.hash) >= 0;
+      var col = columns.indexOf(c.hash);
+      var nodeColor = commitColors[c.hash] || colorOf(col < 0 ? columns.length : col);
+      if (col < 0) {
+        col = columns.indexOf(null);
+        if (col < 0) {
+          col = columns.length;
+          columns.push(c.hash);
+          laneColors.push(nodeColor);
+        } else {
+          columns[col] = c.hash;
+          laneColors[col] = nodeColor;
+        }
+      } else if (!arrivedFromAbove) {
+        laneColors[col] = nodeColor;
+      } else if (!laneColors[col]) {
+        laneColors[col] = nodeColor;
+      }
+
+      var before = columns.slice();
+      var colorsBefore = laneColors.slice();
+      var next = columns.slice();
+      var colorsNext = laneColors.slice();
+      next[col] = null;
+
+      var parents = (c.parents || []).filter(function (p) {
+        return !!map[p];
+      });
+      var placedFirst = false;
+      var parentCols = [];
+      var parentEdgeColors = [];
+
+      parents.forEach(function (p) {
+        var existing = next.indexOf(p);
+        var pColor = commitColors[p] || laneColors[col] || nodeColor;
+        if (existing >= 0) {
+          parentCols.push(existing);
+          parentEdgeColors.push(colorsNext[existing] || pColor);
+          return;
+        }
+        if (!placedFirst) {
+          next[col] = p;
+          colorsNext[col] = colorsBefore[col] || pColor;
+          parentCols.push(col);
+          parentEdgeColors.push(colorsNext[col]);
+          placedFirst = true;
+        } else {
+          var free = next.indexOf(null);
+          var slot;
+          if (free < 0) {
+            slot = next.length;
+            next.push(p);
+            colorsNext.push(pColor);
+          } else {
+            slot = free;
+            next[free] = p;
+            colorsNext[free] = pColor;
+          }
+          parentCols.push(slot);
+          parentEdgeColors.push(colorsNext[slot]);
+        }
+      });
+
+      while (next.length && next[next.length - 1] === null) {
+        next.pop();
+        colorsNext.pop();
+      }
+
+      rows.push({
+        commit: c,
+        col: col,
+        color: colorsBefore[col] || nodeColor,
+        before: before,
+        after: next.slice(),
+        colorsBefore: colorsBefore.slice(),
+        colorsAfter: colorsNext.slice(),
+        prevAfter: prevAfter.slice(),
+        prevColors: prevColors.slice(),
+        arrivedFromAbove: arrivedFromAbove,
+        parents: parents,
+        parentCols: parentCols,
+        parentEdgeColors: parentEdgeColors,
+        fold: null,
+        longDown: null,
+        longUp: null,
+        skipThrough: {},
+      });
+      prevAfter = next.slice();
+      prevColors = colorsNext.slice();
+      columns = next;
+      laneColors = colorsNext;
+    });
+    return rows;
+  }
+
+  /**
+   * Find linear folds on the FULL filtered list, return hidden hashes + fold
+   * attachments keyed by the visible commit ABOVE each run.
+   */
+  function planLinearFolds(commits, children, tips, collapseMin, expanded) {
     var min = Math.max(1, collapseMin || COLLAPSE_MIN);
-    var out = [];
+    var hidden = {};
+    var foldsByAbove = {};
     var i = 0;
-    while (i < rows.length) {
-      if (!isOrdinary(rows[i].commit, children, tips)) {
-        out.push(Object.assign({ type: "commit", fold: null }, rows[i]));
+    while (i < commits.length) {
+      if (!isOrdinary(commits[i], children, tips)) {
         i++;
         continue;
       }
       var start = i;
-      while (i < rows.length && isOrdinary(rows[i].commit, children, tips)) i++;
+      while (i < commits.length && isOrdinary(commits[i], children, tips)) i++;
       var run = i - start;
-      if (run < min) {
-        for (var k = start; k < i; k++) out.push(Object.assign({ type: "commit", fold: null }, rows[k]));
-        continue;
-      }
+      if (run < min) continue;
       var hashes = [];
-      for (var k2 = start; k2 < i; k2++) hashes.push(rows[k2].commit.hash);
+      for (var k = start; k < i; k++) hashes.push(commits[k].hash);
       var sid = hashes[0] + ".." + hashes[hashes.length - 1];
-      if (expanded[sid]) {
-        for (var k3 = start; k3 < i; k3++) out.push(Object.assign({ type: "commit", fold: null }, rows[k3]));
+      if (expanded[sid]) continue;
+      for (var k2 = start; k2 < i; k2++) hidden[hashes[k2 - start]] = true;
+      /* above = last commit before the run; if none, keep first of run visible */
+      var aboveHash = start > 0 ? commits[start - 1].hash : null;
+      if (aboveHash) {
+        foldsByAbove[aboveHash] = {
+          id: sid,
+          count: run,
+          hashes: hashes,
+          belowHash: i < commits.length ? commits[i].hash : null,
+        };
       } else {
-        /* Attach fold marker to previous visible commit if any; else keep first of run visible with arrow down. */
-        var fold = { id: sid, count: run, hashes: hashes, col: rows[start].col };
-        if (out.length && out[out.length - 1].type === "commit") {
-          out[out.length - 1].fold = fold;
+        /* keep first visible, hide the rest */
+        delete hidden[hashes[0]];
+        foldsByAbove[hashes[0]] = {
+          id: sid,
+          count: run - 1,
+          hashes: hashes.slice(1),
+          belowHash: i < commits.length ? commits[i].hash : null,
+        };
+        for (var k3 = 1; k3 < hashes.length; k3++) hidden[hashes[k3]] = true;
+      }
+    }
+    return { hidden: hidden, foldsByAbove: foldsByAbove };
+  }
+
+  /**
+   * After re-laning visible rows, compress long inactive lanes into arrows
+   * (IDEA "Show Long Edges" off).
+   */
+  function applyLongEdges(rows, longEdgeMin, enabled) {
+    if (!enabled) return rows;
+    var min = Math.max(2, longEdgeMin || LONG_EDGE_MIN);
+    var maxCol = 0;
+    rows.forEach(function (r) {
+      maxCol = Math.max(maxCol, r.col, (r.after || []).length, (r.prevAfter || []).length);
+    });
+
+    for (var col = 0; col <= maxCol; col++) {
+      var i = 0;
+      while (i < rows.length) {
+        /* Find a row that emits this lane downward (node on col or through). */
+        var start = -1;
+        for (; i < rows.length; i++) {
+          var r = rows[i];
+          var emits =
+            r.col === col ||
+            (r.after && r.after[col] != null) ||
+            (r.prevAfter && r.prevAfter[col] != null && r.col !== col);
+          if (emits) {
+            start = i;
+            break;
+          }
+        }
+        if (start < 0) break;
+
+        /* Walk while lane stays active without another node on this col. */
+        var end = start;
+        for (var j = start + 1; j < rows.length; j++) {
+          var rj = rows[j];
+          var active =
+            (rj.prevAfter && rj.prevAfter[col] != null) ||
+            (rj.after && rj.after[col] != null) ||
+            rj.col === col;
+          if (!active) break;
+          end = j;
+          if (rj.col === col) break; /* landed on next node */
+        }
+
+        var span = end - start;
+        if (span >= min && rows[end].col === col && start !== end) {
+          /* Arrow on start (down) and end (up); skip through in between. */
+          var color =
+            (rows[start].colorsAfter && rows[start].colorsAfter[col]) ||
+            (rows[start].colorsBefore && rows[start].colorsBefore[col]) ||
+            rows[start].color;
+          rows[start].longDown = {
+            col: col,
+            color: color,
+            gap: span - 1,
+            targetHash: rows[end].commit.hash,
+          };
+          rows[end].longUp = {
+            col: col,
+            color: color,
+            gap: span - 1,
+            sourceHash: rows[start].commit.hash,
+          };
+          for (var m = start + 1; m < end; m++) {
+            rows[m].skipThrough[col] = true;
+          }
+          i = end + 1;
         } else {
-          var keep = Object.assign({ type: "commit", fold: fold }, rows[start]);
-          out.push(keep);
-          /* skip the rest of the run (already represented by fold) */
+          i = start + 1;
         }
       }
     }
-    return out;
+    return rows;
+  }
+
+  /**
+   * Walk through hidden commits to the next visible ancestor (linear folds are
+   * single-parent, so first-parent walk is enough; also skips gaps).
+   */
+  function resolveVisibleAncestor(startHash, hidden, visibleSet, byAll) {
+    var h = startHash;
+    var guard = 0;
+    while (h && guard++ < 10000) {
+      if (visibleSet[h] && !hidden[h]) return h;
+      var c = byAll[h];
+      if (!c || !(c.parents || []).length) return null;
+      h = c.parents[0];
+    }
+    return null;
+  }
+
+  /** Clone visible commits with parents rewritten past hidden linear middles. */
+  function rewriteVisibleCommits(commits, hidden) {
+    var byAll = indexByHash(commits);
+    var visibleSet = {};
+    commits.forEach(function (c) {
+      if (!hidden[c.hash]) visibleSet[c.hash] = true;
+    });
+    return commits
+      .filter(function (c) {
+        return !hidden[c.hash];
+      })
+      .map(function (c) {
+        var parents = [];
+        var seen = {};
+        (c.parents || []).forEach(function (p) {
+          var v = resolveVisibleAncestor(p, hidden, visibleSet, byAll);
+          if (v && !seen[v]) {
+            seen[v] = true;
+            parents.push(v);
+          }
+        });
+        return {
+          hash: c.hash,
+          short: c.short,
+          parents: parents,
+          author: c.author,
+          email: c.email,
+          date: c.date,
+          subject: c.subject,
+          body: c.body,
+          decorations: c.decorations,
+        };
+      });
+  }
+
+  /**
+   * Full visible geometry: fold → rewrite parents → re-lane → attach folds → long edges.
+   */
+  function buildVisibleModel(commits, branches, tips, opts) {
+    opts = opts || {};
+    var children = buildChildren(commits);
+    var commitColors = assignCommitColors(commits, branches);
+    var collapseOn = opts.collapseLinear !== false;
+    var expanded = opts.expanded || {};
+    var hidden = {};
+    var foldsByAbove = {};
+
+    if (collapseOn) {
+      var plan = planLinearFolds(
+        commits,
+        children,
+        tips,
+        opts.collapseMin || COLLAPSE_MIN,
+        expanded
+      );
+      hidden = plan.hidden;
+      foldsByAbove = plan.foldsByAbove;
+    }
+
+    var visibleCommits = rewriteVisibleCommits(commits, hidden);
+    var rows = assignLanes(visibleCommits, commitColors);
+    rows.forEach(function (r) {
+      var fold = foldsByAbove[r.commit.hash];
+      if (fold && fold.count > 0) {
+        r.fold = {
+          id: fold.id,
+          count: fold.count,
+          hashes: fold.hashes,
+          belowHash: fold.belowHash,
+          col: r.col,
+          color: r.color,
+        };
+      }
+    });
+
+    applyLongEdges(rows, opts.longEdgeMin || LONG_EDGE_MIN, opts.hideLongEdges !== false);
+    return { rows: rows, commitColors: commitColors, hidden: hidden };
   }
 
   function laneX(col) {
@@ -318,15 +583,45 @@
     );
   }
 
+  function strokeLine(parts, x1, y1, x2, y2, color, dashed) {
+    parts.push(
+      '<line x1="' +
+        x1 +
+        '" y1="' +
+        y1 +
+        '" x2="' +
+        x2 +
+        '" y2="' +
+        y2 +
+        '" stroke="' +
+        color +
+        '" stroke-width="' +
+        LINE_W +
+        '" stroke-linecap="round"' +
+        (dashed ? ' stroke-dasharray="2.5 2.5"' : "") +
+        "/>"
+    );
+  }
+
   /**
-   * Paint one graph cell like SimpleGraphCellPainter.
-   * Diagonals extend half a row so adjacent cells dock.
+   * Paint one cell. Down edges extend to y=h+h/2; up edges to y=-h/2 so neighbors dock.
    */
   function drawCellSvg(row, opts) {
     opts = opts || {};
-    var before = row.before || [];
     var after = row.after || [];
-    var laneCount = Math.max(before.length, after.length, row.col + 1, 1);
+    var prevAfter = row.prevAfter || [];
+    var colorsBefore = row.colorsBefore || [];
+    var colorsAfter = row.colorsAfter || [];
+    var prevColors = row.prevColors || [];
+    var laneCount = Math.max(
+      after.length,
+      prevAfter.length,
+      (row.parentCols || []).reduce(function (m, c) {
+        return Math.max(m, c + 1);
+      }, 0),
+      row.col + 1,
+      1
+    );
     var w = Math.max(NODE_W * laneCount + 4, NODE_W + 4);
     var h = ROW_H;
     var mid = h / 2;
@@ -340,123 +635,103 @@
         w +
         " " +
         h +
-        '" class="graph-svg">'
+        '" class="graph-svg" style="overflow:visible">'
     );
 
-    function colColor(j) {
-      return colorOf(j);
-    }
+    var skip = row.skipThrough || {};
+    var hasFoldArrow = !!(row.fold && row.fold.count);
 
-    /* Pass 1: through-lanes (not the commit's own column). */
-    var prevAfter = row.prevAfter || [];
-    var maxL = Math.max(before.length, after.length, prevAfter.length, 1);
-    for (var j = 0; j < maxL; j++) {
+    /* Through-lanes (not own column), unless long-edge skipped. */
+    for (var j = 0; j < laneCount; j++) {
       if (j === row.col) continue;
+      if (skip[j]) continue;
+      if (row.longUp && row.longUp.col === j) continue;
+      if (row.longDown && row.longDown.col === j) continue;
       var top = prevAfter[j] != null;
       var bot = after[j] != null;
       if (!top && !bot) continue;
       var x = laneX(j);
-      var c = colColor(j);
-      if (top && bot) {
-        parts.push(
-          '<line x1="' +
-            x +
-            '" y1="0" x2="' +
-            x +
-            '" y2="' +
-            h +
-            '" stroke="' +
-            c +
-            '" stroke-width="' +
-            LINE_W +
-            '"/>'
-        );
-      } else if (top) {
-        parts.push(
-          '<line x1="' +
-            x +
-            '" y1="0" x2="' +
-            x +
-            '" y2="' +
-            mid +
-            '" stroke="' +
-            c +
-            '" stroke-width="' +
-            LINE_W +
-            '"/>'
-        );
-      } else {
-        parts.push(
-          '<line x1="' +
-            x +
-            '" y1="' +
-            mid +
-            '" x2="' +
-            x +
-            '" y2="' +
-            h +
-            '" stroke="' +
-            c +
-            '" stroke-width="' +
-            LINE_W +
-            '"/>'
-        );
-      }
+      var c = (top ? prevColors[j] : colorsAfter[j]) || colorsBefore[j] || colorOf(j);
+      if (top && bot) strokeLine(parts, x, 0, x, h, c, false);
+      else if (top) strokeLine(parts, x, 0, x, mid, c, false);
+      else strokeLine(parts, x, mid, x, h, c, false);
     }
 
     var cx = laneX(row.col);
-    var main = colColor(row.col);
-    var fold = row.fold;
-    var hasFoldArrow = !!(fold && fold.count);
+    var main = row.color || colorsBefore[row.col] || colorOf(row.col);
 
-    /* Incoming vertical only when this commit continues a lane from above. */
-    if (row.arrivedFromAbove) {
+    /* Up edge into node (from previous row). */
+    if (row.longUp && row.longUp.col === row.col) {
+      var upC = row.longUp.color || main;
+      var yUp = CIRCLE_R / 2 + 1;
+      strokeLine(parts, cx, mid, cx, yUp, upC, true);
+      paintArrowHead(parts, cx, mid, cx, yUp, upC);
       parts.push(
-        '<line x1="' +
-          cx +
-          '" y1="0" x2="' +
-          cx +
-          '" y2="' +
+        '<rect class="fold-hit" data-fold="long:' +
+          escapeHtml(row.longUp.sourceHash || "") +
+          '" data-count="' +
+          (row.longUp.gap || 0) +
+          '" data-kind="long" x="' +
+          (cx - 7) +
+          '" y="0" width="14" height="' +
           mid +
-          '" stroke="' +
-          main +
-          '" stroke-width="' +
-          LINE_W +
-          '"/>'
+          '" fill="transparent" style="cursor:pointer"/>'
       );
+    } else if (row.arrivedFromAbove) {
+      strokeLine(parts, cx, 0, cx, mid, main, false);
     }
 
-    /* Down edges to parents (IDEA: vertical or diagonal into next row). */
-    var parentCols = row.parentCols || [];
-    if (!parentCols.length && !hasFoldArrow) {
-      /* root: no down edge */
-    } else if (hasFoldArrow) {
-      /* Collapsed linear: dotted vertical + down arrow (IDEA Collapse Linear Branches). */
-      var arrowGap = CIRCLE_R / 2 + 1;
-      var yTip = h - arrowGap;
-      parts.push(
-        '<line x1="' +
-          cx +
-          '" y1="' +
-          mid +
-          '" x2="' +
-          cx +
-          '" y2="' +
-          yTip +
-          '" stroke="' +
-          main +
-          '" stroke-width="' +
-          LINE_W +
-          '" stroke-dasharray="2.5 2.5"/>'
-      );
-      paintArrowHead(parts, cx, mid, cx, yTip, main);
-      /* Invisible fat hit target for the arrow */
+    /* Incoming diagonal stubs from previous row's down-diagonals (up half). */
+    if (opts.prevRow && !row.longUp) {
+      var prev = opts.prevRow;
+      var prevParents = prev.parentCols || [];
+      var prevColorsE = prev.parentEdgeColors || [];
+      if (!(prev.fold && prev.fold.count) && !prev.longDown) {
+        prevParents.forEach(function (pc, idx) {
+          if (pc === prev.col) return;
+          if (pc !== row.col && prev.col !== row.col) {
+            /* only draw up-half if this row is the landing column */
+          }
+          if (pc !== row.col) return;
+          var fromX = laneX(prev.col);
+          var toX = laneX(pc);
+          var ec = prevColorsE[idx] || prev.color || main;
+          /* Up line from mid toward previous mid: (toX, mid) → (fromX, -h/2) */
+          strokeLine(parts, toX, mid, fromX, -h / 2, ec, false);
+        });
+      }
+    }
+
+    /* Down edges */
+    if (hasFoldArrow) {
+      var fc = (row.fold && row.fold.color) || main;
+      var yTip = h - (CIRCLE_R / 2 + 1);
+      strokeLine(parts, cx, mid, cx, yTip, fc, true);
+      paintArrowHead(parts, cx, mid, cx, yTip, fc);
       parts.push(
         '<rect class="fold-hit" data-fold="' +
-          escapeHtml(fold.id) +
+          escapeHtml(row.fold.id) +
           '" data-count="' +
-          fold.count +
-          '" x="' +
+          row.fold.count +
+          '" data-kind="linear" x="' +
+          (cx - 7) +
+          '" y="' +
+          (mid + 2) +
+          '" width="14" height="' +
+          (h - mid - 2) +
+          '" fill="transparent" style="cursor:pointer"/>'
+      );
+    } else if (row.longDown && row.longDown.col === row.col) {
+      var ldC = row.longDown.color || main;
+      var yTip2 = h - (CIRCLE_R / 2 + 1);
+      strokeLine(parts, cx, mid, cx, yTip2, ldC, true);
+      paintArrowHead(parts, cx, mid, cx, yTip2, ldC);
+      parts.push(
+        '<rect class="fold-hit" data-fold="long:' +
+          escapeHtml(row.commit.hash) +
+          '" data-count="' +
+          (row.longDown.gap || 0) +
+          '" data-kind="long" x="' +
           (cx - 7) +
           '" y="' +
           (mid + 2) +
@@ -465,48 +740,38 @@
           '" fill="transparent" style="cursor:pointer"/>'
       );
     } else {
-      parentCols.forEach(function (pc) {
+      var parentCols = row.parentCols || [];
+      var edgeColors = row.parentEdgeColors || [];
+      parentCols.forEach(function (pc, idx) {
         var px = laneX(pc);
-        var c2 = colColor(pc);
+        var c2 = edgeColors[idx] || colorsAfter[pc] || main;
         if (pc === row.col) {
-          parts.push(
-            '<line x1="' +
-              cx +
-              '" y1="' +
-              mid +
-              '" x2="' +
-              cx +
-              '" y2="' +
-              h +
-              '" stroke="' +
-              c2 +
-              '" stroke-width="' +
-              LINE_W +
-              '"/>'
-          );
+          strokeLine(parts, cx, mid, cx, h, c2, false);
         } else {
-          /* Diagonal down spanning into next cell (y = h + h/2), clipped visually by overflow visible */
-          var y2 = h + h / 2;
-          parts.push(
-            '<line x1="' +
-              cx +
-              '" y1="' +
-              mid +
-              '" x2="' +
-              px +
-              '" y2="' +
-              y2 +
-              '" stroke="' +
-              c2 +
-              '" stroke-width="' +
-              LINE_W +
-              '" stroke-linecap="round"/>'
-          );
+          /* Down diagonal into next row mid (IDEA paintDownLine). */
+          strokeLine(parts, cx, mid, px, h + h / 2, c2, false);
         }
       });
     }
 
-    /* Node circle on top */
+    /* Long-edge down on a through column (arrow from a side lane). */
+    if (row.longDown && row.longDown.col !== row.col) {
+      var lc = row.longDown.col;
+      var lx = laneX(lc);
+      var lcol = row.longDown.color || colorOf(lc);
+      var yT = h - (CIRCLE_R / 2 + 1);
+      strokeLine(parts, lx, 0, lx, yT, lcol, true);
+      paintArrowHead(parts, lx, 0, lx, yT, lcol);
+    }
+    if (row.longUp && row.longUp.col !== row.col) {
+      var lc2 = row.longUp.col;
+      var lx2 = laneX(lc2);
+      var lcol2 = row.longUp.color || colorOf(lc2);
+      var yU = CIRCLE_R / 2 + 1;
+      strokeLine(parts, lx2, mid, lx2, yU, lcol2, true);
+      paintArrowHead(parts, lx2, mid, lx2, yU, lcol2);
+    }
+
     parts.push(
       '<circle cx="' +
         cx +
@@ -546,7 +811,9 @@
     var activeHash = null;
     var byHash = {};
     var data = options.data || {};
-    var collapseAll = true;
+    var collapseLinear = true;
+    var hideLongEdges = true;
+    var showLongEdgesExpanded = {}; /* long:hash → expanded */
 
     function bootData() {
       if (global.GAI_GRAPH_DATA) return global.GAI_GRAPH_DATA;
@@ -599,8 +866,9 @@
 
     function buildFilterUI(branches) {
       var box = document.getElementById("branch-checks");
+      var bmap = branchColorMap(branches);
       box.innerHTML = "";
-      (branches || []).forEach(function (b, i) {
+      (branches || []).forEach(function (b) {
         if (selected[b.name] === undefined) selected[b.name] = true;
         var lab = document.createElement("label");
         if (b.current) lab.className = "current";
@@ -611,7 +879,7 @@
           (selected[b.name] ? " checked" : "") +
           " />" +
           '<span class="dot" style="background:' +
-          colorOf(i) +
+          (bmap[b.name] || colorOf(0)) +
           '"></span>' +
           "<span>" +
           escapeHtml(b.name) +
@@ -634,9 +902,13 @@
         else if (mode === "none") selected[b.name] = false;
         else selected[b.name] = !!b.current;
       });
-      if (mode === "current" && !branches.some(function (b) {
-        return selected[b.name];
-      }) && branches[0]) {
+      if (
+        mode === "current" &&
+        !branches.some(function (b) {
+          return selected[b.name];
+        }) &&
+        branches[0]
+      ) {
         selected[branches[0].name] = true;
       }
       buildFilterUI(branches);
@@ -697,11 +969,16 @@
       var tips = tipMap(data.branches);
       var refs = refsFor(c, tips);
       var bmap = branchColorMap(data.branches);
+      var ccolors = assignCommitColors(data.commits || [], data.branches || []);
       var refHtml = refs.length
         ? refs
             .map(function (r) {
-              var col = r.kind === "tag" ? "#9b6bdf" : bmap[r.name] || colorOf(0);
-              if (r.kind === "head") col = "#6e6e6e";
+              var col =
+                r.kind === "tag"
+                  ? "#9b6bdf"
+                  : r.kind === "head"
+                    ? "#6e6e6e"
+                    : bmap[r.name] || ccolors[c.hash] || colorOf(0);
               return (
                 '<span class="ref-pill' +
                 (r.kind === "head" ? " head" : "") +
@@ -827,37 +1104,38 @@
       table.hidden = false;
 
       var tips = tipMap(data.branches);
-      var children = buildChildren(commits);
-      var lanes = assignLanes(commits);
-      var expMap = collapseAll ? expanded : {};
-      /* If expand-all mode: treat every segment as expanded */
-      if (!collapseAll) {
-        expMap = {};
-        /* force expand by marking all potential sids — easier: skip collapse */
-      }
-      var visible = collapseAll
-        ? collapseRows(lanes, children, tips, data.collapseMin || COLLAPSE_MIN, expanded)
-        : lanes.map(function (r) {
-            return Object.assign({ type: "commit", fold: null }, r);
-          });
-
+      var model = buildVisibleModel(commits, data.branches || [], tips, {
+        collapseLinear: collapseLinear,
+        expanded: expanded,
+        collapseMin: data.collapseMin || COLLAPSE_MIN,
+        hideLongEdges: hideLongEdges,
+        longEdgeMin: data.longEdgeMin || LONG_EDGE_MIN,
+      });
+      var visible = model.rows;
       var bmap = branchColorMap(data.branches);
       var dict = I18N();
       var maxGraphW = NODE_W + 4;
 
-      visible.forEach(function (row) {
+      visible.forEach(function (row, idx) {
         var c = row.commit;
         var tr = document.createElement("tr");
         tr.className = "commit-row" + (activeHash === c.hash ? " active" : "");
         tr.setAttribute("data-hash", c.hash);
-        var painted = drawCellSvg(row, { selected: activeHash === c.hash });
+        var painted = drawCellSvg(row, {
+          selected: activeHash === c.hash,
+          prevRow: idx > 0 ? visible[idx - 1] : null,
+        });
         if (painted.width > maxGraphW) maxGraphW = painted.width;
 
         var refs = refsFor(c, tips);
         var pills = refs
           .map(function (r) {
-            var col = r.kind === "tag" ? "#9b6bdf" : bmap[r.name] || colorOf(0);
-            if (r.kind === "head") col = "#6e6e6e";
+            var col =
+              r.kind === "tag"
+                ? "#9b6bdf"
+                : r.kind === "head"
+                  ? "#6e6e6e"
+                  : bmap[r.name] || row.color || colorOf(0);
             return (
               '<span class="ref-pill' +
               (r.kind === "head" ? " head" : "") +
@@ -902,15 +1180,27 @@
           paint();
         });
 
-        var hit = tr.querySelector(".fold-hit");
-        if (hit) {
+        tr.querySelectorAll(".fold-hit").forEach(function (hit) {
           hit.addEventListener("mouseenter", function (ev) {
             ev.stopPropagation();
             var n = hit.getAttribute("data-count");
-            var msg = (dict.expand || "Expand {n} commits").replace("{n}", n);
-            showTooltip('<div class="t-sub">' + escapeHtml(msg) + "</div><div class=\"t-meta\">" +
-              escapeHtml(dict.collapse_hint || "") +
-              "</div>", ev);
+            var kind = hit.getAttribute("data-kind");
+            var msg =
+              kind === "long"
+                ? (dict.long_edge || "Jump over {n} commits").replace("{n}", n)
+                : (dict.expand || "Expand {n} commits").replace("{n}", n);
+            showTooltip(
+              '<div class="t-sub">' +
+                escapeHtml(msg) +
+                '</div><div class="t-meta">' +
+                escapeHtml(
+                  kind === "long"
+                    ? dict.long_edge_hint || ""
+                    : dict.collapse_hint || ""
+                ) +
+                "</div>",
+              ev
+            );
           });
           hit.addEventListener("mousemove", function (ev) {
             ev.stopPropagation();
@@ -923,11 +1213,19 @@
           hit.addEventListener("click", function (ev) {
             ev.preventDefault();
             ev.stopPropagation();
-            expanded[hit.getAttribute("data-fold")] = true;
+            var kind = hit.getAttribute("data-kind");
+            var fid = hit.getAttribute("data-fold");
+            if (kind === "long") {
+              /* Reveal long edges globally for this session (like enabling Show Long Edges). */
+              hideLongEdges = false;
+              showLongEdgesExpanded[fid] = true;
+            } else {
+              expanded[fid] = true;
+            }
             hideTooltip();
             paint();
           });
-        }
+        });
 
         tbody.appendChild(tr);
       });
@@ -937,7 +1235,6 @@
       });
 
       if (activeHash && byHash[activeHash]) {
-        /* refresh highlight without rebuilding drawer content thrash */
         document.querySelectorAll("tr.commit-row").forEach(function (tr) {
           tr.classList.toggle("active", tr.getAttribute("data-hash") === activeHash);
         });
@@ -999,15 +1296,29 @@
     var btnExpand = document.getElementById("btn-expand");
     if (btnCollapse) {
       btnCollapse.addEventListener("click", function () {
-        collapseAll = true;
+        collapseLinear = true;
         expanded = {};
         paint();
       });
     }
     if (btnExpand) {
       btnExpand.addEventListener("click", function () {
-        collapseAll = false;
+        collapseLinear = false;
         paint();
+      });
+    }
+    var btnLong = document.getElementById("btn-long-edges");
+    if (btnLong) {
+      btnLong.addEventListener("click", function () {
+        hideLongEdges = !hideLongEdges;
+        paint();
+        applyI18n();
+        var dict = I18N();
+        showToast(
+          hideLongEdges
+            ? dict.long_edges_hidden || "Long edges collapsed"
+            : dict.long_edges_shown || "Long edges shown"
+        );
       });
     }
 
@@ -1038,5 +1349,14 @@
     render(data);
   }
 
-  global.GaiGraphApp = { createApp: createApp, COLORS: COLORS };
+  global.GaiGraphApp = {
+    createApp: createApp,
+    COLORS: COLORS,
+    /* exported for tests / debugging */
+    assignCommitColors: assignCommitColors,
+    assignLanes: assignLanes,
+    planLinearFolds: planLinearFolds,
+    buildVisibleModel: buildVisibleModel,
+    applyLongEdges: applyLongEdges,
+  };
 })(typeof window !== "undefined" ? window : this);

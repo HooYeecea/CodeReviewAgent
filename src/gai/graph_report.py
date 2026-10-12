@@ -78,6 +78,7 @@ def write_graph_report(
         "remoteName": snap.get("remoteName") or "",
         "remoteUrl": snap.get("remoteUrl") or "",
         "collapseMin": 3,
+        "longEdgeMin": 6,
         "i18n": {
             "cn": {
                 "title": "gai 分支链路图",
@@ -99,6 +100,11 @@ def write_graph_report(
                 "select_current": "仅当前",
                 "collapse_linear": "折叠线性分支",
                 "expand_linear": "展开线性分支",
+                "long_edges": "长边",
+                "long_edge": "跨越 {n} 个提交",
+                "long_edge_hint": "点击显示完整长边（IDEA：Show Long Edges）",
+                "long_edges_hidden": "已折叠长边",
+                "long_edges_shown": "已显示长边",
                 "expand": "展开 {n} 个提交",
                 "collapse_hint": "点击箭头展开（IDEA：Collapse Linear Branches）",
                 "detail_title": "提交详情",
@@ -114,7 +120,7 @@ def write_graph_report(
                 "col_author": "作者",
                 "col_date": "时间",
                 "col_hash": "Hash",
-                "footer": "对齐 IDEA Log：色轨/斜线汇合、虚线箭头折叠线性历史、悬停摘要、点击击穿。每次 gai graph 覆盖本文件；推荐 --serve 刷新。",
+                "footer": "对齐 IDEA Log：分支色轨、斜线对接、线性折叠箭头、长边压缩、悬停摘要、点击击穿。每次 gai graph 覆盖本文件；推荐 --serve 刷新。",
             },
             "en": {
                 "title": "gai branch graph",
@@ -136,6 +142,11 @@ def write_graph_report(
                 "select_current": "Current only",
                 "collapse_linear": "Collapse linear branches",
                 "expand_linear": "Expand linear branches",
+                "long_edges": "Long edges",
+                "long_edge": "Skip {n} commits",
+                "long_edge_hint": "Click to show full long edges (IDEA: Show Long Edges)",
+                "long_edges_hidden": "Long edges collapsed",
+                "long_edges_shown": "Long edges shown",
                 "expand": "Expand {n} commits",
                 "collapse_hint": "Click the arrow to expand (IDEA: Collapse Linear Branches)",
                 "detail_title": "Commit detail",
@@ -151,7 +162,7 @@ def write_graph_report(
                 "col_author": "Author",
                 "col_date": "Date",
                 "col_hash": "Hash",
-                "footer": "IDEA Log style: metro lanes, merge diagonals, dashed-arrow collapse, hover + click detail. Each gai graph overwrites this file; prefer --serve for refresh.",
+                "footer": "IDEA Log style: branch-owned colors, docked diagonals, linear-fold arrows, long-edge compression, hover + click detail. Each gai graph overwrites this file; prefer --serve for refresh.",
             },
         },
     }
@@ -353,6 +364,7 @@ def _render_graph_html(payload: dict[str, Any]) -> str:
         <div class="toolbar">
           <button type="button" id="btn-collapse"><span class="cn" data-i="collapse_linear"></span><span class="en" data-i="collapse_linear"></span></button>
           <button type="button" id="btn-expand"><span class="cn" data-i="expand_linear"></span><span class="en" data-i="expand_linear"></span></button>
+          <button type="button" id="btn-long-edges"><span class="cn" data-i="long_edges"></span><span class="en" data-i="long_edges"></span></button>
           <button type="button" id="btn-refresh"><span class="cn" data-i="refresh"></span><span class="en" data-i="refresh"></span></button>
           <button type="button" id="btn-lang">EN / 中文</button>
           <button type="button" id="btn-theme">Theme</button>
