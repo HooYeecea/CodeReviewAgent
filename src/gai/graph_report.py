@@ -1,9 +1,11 @@
-"""HTML branch/commit graph report for ``gai graph`` (IDE-like lanes)."""
+"""HTML IDEA-like branch/commit graph for ``gai graph`` (hover + click + collapse)."""
 
 from __future__ import annotations
 
 import json
+import shutil
 from datetime import datetime, timezone
+from importlib import resources
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +16,7 @@ from gai.web_prefs import PREF_LANG, PREF_THEME, early_prefs_script
 
 _GRAPH_HTML_RELATIVE = Path(".gai") / "graph-report.html"
 _GRAPH_DATA_RELATIVE = Path(".gai") / "graph-data.js"
+_GRAPH_APP_JS = "graph-app.js"
 
 __all__ = [
     "graph_data_path",
@@ -31,30 +34,59 @@ def graph_data_path(cwd: Path | None = None) -> Path:
     return project_root(cwd) / _GRAPH_DATA_RELATIVE
 
 
+def _vendor_graph_app(dest_dir: Path) -> Path:
+    """Copy packaged graph painter next to the HTML report."""
+    dest = dest_dir / _GRAPH_APP_JS
+    try:
+        src = resources.files("gai").joinpath("static", _GRAPH_APP_JS)
+        with resources.as_file(src) as path:
+            shutil.copyfile(path, dest)
+    except (FileNotFoundError, OSError, TypeError):
+        fallback = Path(__file__).resolve().parent / "static" / _GRAPH_APP_JS
+        if not fallback.is_file():
+            raise RuntimeError(
+                f"missing {_GRAPH_APP_JS}; reinstall gai package"
+            ) from None
+        shutil.copyfile(fallback, dest)
+    return dest
+
+
 def write_graph_report(
     *,
     chinese: bool = False,
     max_count: int | None = None,
     path: Path | None = None,
 ) -> Path:
-    """Write/overwrite ``.gai/graph-report.html`` + ``graph-data.js``."""
+    """Write/overwrite ``.gai/graph-report.html`` + data + graph-app.js."""
     target = path or graph_report_path()
     target.parent.mkdir(parents=True, exist_ok=True)
     data_path = target.parent / _GRAPH_DATA_RELATIVE.name
+    _vendor_graph_app(target.parent)
 
     snap = collect_graph_snapshot(max_count=max_count)
+    commits = list(snap.get("commits") or [])
+    branches = list(snap.get("branches") or [])
     generated = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S %z")
     payload: dict[str, Any] = {
         "initialLang": "cn" if chinese else "en",
         "generated": generated,
-        **snap,
+        "branch": snap.get("branch") or "",
+        "branches": branches,
+        "commits": commits,
+        "maxCount": snap.get("maxCount"),
+        "repoName": snap.get("repoName") or "",
+        "remoteName": snap.get("remoteName") or "",
+        "remoteUrl": snap.get("remoteUrl") or "",
+        "collapseMin": 3,
         "i18n": {
             "cn": {
                 "title": "gai 分支链路图",
                 "branch": "当前分支",
                 "generated": "生成时间",
+                "repo": "仓库",
+                "remote": "远程",
+                "no_remote": "（无远程）",
                 "refresh": "刷新",
-                "refreshing": "刷新中…",
                 "refresh_ok": "已加载最新链路图数据",
                 "refresh_fail": "刷新失败：找不到 graph-data.js",
                 "refresh_fail_file": "刷新失败：file:// 可能被拦截。请改用 gai graph --serve，或重新执行 gai graph。",
@@ -65,18 +97,33 @@ def write_graph_report(
                 "select_all": "全选",
                 "select_none": "全不选",
                 "select_current": "仅当前",
-                "hash": "Hash",
-                "subject": "说明",
-                "author": "作者",
-                "when": "时间",
-                "footer": "由 gai graph 生成；每次执行覆盖本文件。勾选分支可过滤脉络；推荐 gai graph --serve 以便刷新。",
+                "collapse_linear": "折叠线性分支",
+                "expand_linear": "展开线性分支",
+                "expand": "展开 {n} 个提交",
+                "collapse_hint": "点击箭头展开（IDEA：Collapse Linear Branches）",
+                "detail_title": "提交详情",
+                "detail_close": "关闭",
+                "detail_hash": "提交",
+                "detail_author": "作者",
+                "detail_date": "时间",
+                "detail_parents": "父提交",
+                "detail_refs": "引用",
+                "detail_body": "说明",
+                "detail_none": "（无）",
+                "col_message": "提交说明",
+                "col_author": "作者",
+                "col_date": "时间",
+                "col_hash": "Hash",
+                "footer": "对齐 IDEA Log：色轨/斜线汇合、虚线箭头折叠线性历史、悬停摘要、点击击穿。每次 gai graph 覆盖本文件；推荐 --serve 刷新。",
             },
             "en": {
                 "title": "gai branch graph",
                 "branch": "Current branch",
                 "generated": "Generated",
+                "repo": "Repo",
+                "remote": "Remote",
+                "no_remote": "(no remote)",
                 "refresh": "Refresh",
-                "refreshing": "Refreshing…",
                 "refresh_ok": "Graph data updated",
                 "refresh_fail": "Refresh failed: graph-data.js missing",
                 "refresh_fail_file": "Refresh failed: browsers may block file:// reloads. Use gai graph --serve, or re-run gai graph.",
@@ -87,20 +134,31 @@ def write_graph_report(
                 "select_all": "All",
                 "select_none": "None",
                 "select_current": "Current only",
-                "hash": "Hash",
-                "subject": "Subject",
-                "author": "Author",
-                "when": "When",
-                "footer": "Generated by gai graph; each run overwrites this file. Tick branches to filter the flow. Prefer gai graph --serve for refresh.",
+                "collapse_linear": "Collapse linear branches",
+                "expand_linear": "Expand linear branches",
+                "expand": "Expand {n} commits",
+                "collapse_hint": "Click the arrow to expand (IDEA: Collapse Linear Branches)",
+                "detail_title": "Commit detail",
+                "detail_close": "Close",
+                "detail_hash": "Commit",
+                "detail_author": "Author",
+                "detail_date": "Date",
+                "detail_parents": "Parents",
+                "detail_refs": "Refs",
+                "detail_body": "Message",
+                "detail_none": "(none)",
+                "col_message": "Message",
+                "col_author": "Author",
+                "col_date": "Date",
+                "col_hash": "Hash",
+                "footer": "IDEA Log style: metro lanes, merge diagonals, dashed-arrow collapse, hover + click detail. Each gai graph overwrites this file; prefer --serve for refresh.",
             },
         },
     }
-    data_js = (
-        "window.GAI_GRAPH_DATA = "
-        + json.dumps(payload, ensure_ascii=False)
-        + ";\n"
+    data_path.write_text(
+        "window.GAI_GRAPH_DATA = " + json.dumps(payload, ensure_ascii=False) + ";\n",
+        encoding="utf-8",
     )
-    data_path.write_text(data_js, encoding="utf-8")
     target.write_text(_render_graph_html(payload), encoding="utf-8")
     return target
 
@@ -119,120 +177,188 @@ def _render_graph_html(payload: dict[str, Any]) -> str:
   </script>
   <style>
     :root {{
-      --bg: #f4f6f8; --fg: #1a1d23; --muted: #5c6570; --card: #fff;
-      --line: #d8dde3; --accent: #0b6e4f; --row-h: 36px;
-      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      --bg: #f2f2f2; --fg: #000; --muted: #6c6c6c; --card: #fff;
+      --line: #c6c6c6; --row-line: #e6e6e6; --accent: #3574f0;
+      --hover: #edf3ff; --sel: #d4e5ff;
+      --mono: "JetBrains Mono", "Cascadia Mono", Consolas, ui-monospace, monospace;
+      --ui: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      --row-h: 24px;
     }}
     html[data-theme="dark"] {{
-      --bg: #12151a; --fg: #e8eaed; --muted: #9aa3ad; --card: #1b2028;
-      --line: #2c3440; --accent: #3dcf9a;
+      --bg: #1e1f22; --fg: #dfdfdf; --muted: #9a9a9a; --card: #2b2d30;
+      --line: #43454a; --row-line: #3a3c40; --accent: #548af7;
+      --hover: #2e4369; --sel: #2d4a75;
     }}
     * {{ box-sizing: border-box; }}
     body {{
-      margin: 0; font-family: "Segoe UI", system-ui, sans-serif;
-      background: var(--bg); color: var(--fg); line-height: 1.4;
+      margin: 0; font-family: var(--ui); font-size: 13px;
+      background: var(--bg); color: var(--fg); line-height: 1.35;
+    }}
+    .chrome {{
+      position: sticky; top: 0; z-index: 20;
+      background: var(--card); border-bottom: 1px solid var(--line);
     }}
     header {{
-      display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
-      justify-content: space-between; padding: 14px 18px;
-      border-bottom: 1px solid var(--line); background: var(--card);
-      position: sticky; top: 0; z-index: 5;
+      display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start;
+      justify-content: space-between; padding: 10px 12px 6px;
     }}
-    h1 {{ margin: 0; font-size: 1.2rem; }}
-    .meta {{ color: var(--muted); font-size: 0.86rem; margin-top: 4px; }}
-    .toolbar {{ display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }}
-    .toolbar button, .filter-actions button {{
-      border: 1px solid var(--line); background: var(--bg); color: var(--fg);
-      border-radius: 8px; padding: 5px 10px; cursor: pointer; font: inherit;
+    h1 {{ margin: 0; font-size: 15px; font-weight: 600; }}
+    .meta {{ color: var(--muted); font-size: 12px; margin-top: 2px; }}
+    .header-right {{
+      display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-start;
+      justify-content: flex-end; text-align: right;
     }}
-    .toolbar button:hover, .filter-actions button:hover {{ border-color: var(--accent); }}
-    .toolbar button:disabled {{ opacity: .6; cursor: wait; }}
-    .toast {{
-      position: fixed; right: 16px; bottom: 16px; z-index: 20;
-      background: var(--card); border: 1px solid var(--line); border-radius: 10px;
-      padding: 10px 14px; box-shadow: 0 8px 24px rgba(0,0,0,.12);
-      display: none; max-width: min(420px, 90vw); font-size: 0.9rem;
+    .repo-meta {{ font-size: 12px; color: var(--muted); max-width: min(420px, 70vw); }}
+    .repo-meta .name {{ color: var(--fg); font-weight: 600; }}
+    .repo-meta .remote {{
+      font-family: var(--mono); font-size: 11px; word-break: break-all; margin-top: 2px;
     }}
-    .toast.show {{ display: block; }}
-    main {{ padding: 14px 18px 36px; max-width: 1280px; margin: 0 auto; }}
-    .filter-panel {{
-      background: var(--card); border: 1px solid var(--line); border-radius: 12px;
-      padding: 10px 12px; margin-bottom: 12px;
+    .toolbar, .filter-actions {{ display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }}
+    .toolbar button, .filter-actions button, .drawer-head button {{
+      border: 1px solid var(--line); background: var(--card); color: var(--fg);
+      border-radius: 4px; padding: 3px 8px; cursor: pointer; font: inherit; font-size: 12px;
     }}
+    .toolbar button:hover, .filter-actions button:hover, .drawer-head button:hover {{
+      border-color: var(--accent); background: var(--hover);
+    }}
+    .toolbar button:disabled {{ opacity: .55; cursor: wait; }}
+    .filter-panel {{ padding: 0 12px 8px; }}
     .filter-head {{
       display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center;
-      justify-content: space-between; margin-bottom: 8px;
+      justify-content: space-between; margin-bottom: 4px;
     }}
-    .filter-title {{ font-size: 0.88rem; color: var(--muted); font-weight: 600; }}
-    .filter-actions {{ display: flex; flex-wrap: wrap; gap: 6px; }}
-    .branch-checks {{
-      display: flex; flex-wrap: wrap; gap: 8px 14px;
-    }}
+    .filter-title {{ font-size: 12px; color: var(--muted); font-weight: 600; }}
+    .branch-checks {{ display: flex; flex-wrap: wrap; gap: 6px 12px; }}
     .branch-checks label {{
-      display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
-      font-size: 0.86rem; user-select: none;
+      display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+      font-size: 12px; user-select: none;
     }}
-    .branch-checks .dot {{
-      width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto;
-    }}
-    .branch-checks input {{ accent-color: var(--accent); }}
+    .branch-checks .dot {{ width: 8px; height: 8px; border-radius: 50%; }}
     .branch-checks label.current {{ font-weight: 600; }}
+    .branch-checks input {{ accent-color: var(--accent); }}
+    .layout {{
+      display: grid; grid-template-columns: 1fr minmax(280px, 340px);
+      gap: 0; align-items: stretch; min-height: 40vh;
+    }}
+    .layout.no-detail {{ grid-template-columns: 1fr; }}
+    main {{ padding: 8px 10px 28px; }}
     .board {{
-      background: var(--card); border: 1px solid var(--line); border-radius: 12px;
-      overflow: auto;
+      background: var(--card); border: 1px solid var(--line); border-radius: 2px;
+      overflow: auto; min-height: 200px;
     }}
-    .row {{
-      display: grid; grid-template-columns: var(--graph-w, 140px) minmax(0, 1fr);
-      min-height: var(--row-h); border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
-      align-items: stretch;
+    table.idea {{
+      border-collapse: collapse; width: 100%; font-size: 12px;
     }}
-    .row:last-child {{ border-bottom: none; }}
-    .row:hover {{ background: color-mix(in srgb, var(--accent) 7%, transparent); }}
-    .graph-cell {{ position: relative; min-height: var(--row-h); background: color-mix(in srgb, var(--bg) 35%, var(--card)); }}
-    .graph-cell svg {{ display: block; }}
-    .info {{
-      display: grid; grid-template-columns: 5.2rem minmax(0, 1fr) 7.5rem 9.2rem;
-      gap: 8px; padding: 6px 12px; align-items: center; font-size: 0.88rem;
+    table.idea thead th {{
+      position: sticky; top: 0; z-index: 5;
+      background: var(--card); border-bottom: 1px solid var(--line);
+      text-align: left; padding: 5px 8px; color: var(--muted); font-weight: 600;
+      white-space: nowrap; font-size: 11px;
     }}
-    .hash {{ font-family: var(--mono); color: var(--accent); white-space: nowrap; font-size: 0.82rem; }}
-    .subject {{ overflow-wrap: anywhere; word-break: break-word; }}
-    .refs {{ display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: 6px; }}
+    table.idea th.graph-h {{ padding: 0; }}
+    table.idea td {{
+      border-bottom: 1px solid var(--row-line); padding: 0 8px; vertical-align: middle;
+      height: var(--row-h); white-space: nowrap;
+    }}
+    table.idea tr.commit-row {{ cursor: pointer; }}
+    table.idea tr.commit-row:hover {{ background: var(--hover); }}
+    table.idea tr.commit-row.active {{ background: var(--sel); }}
+    td.graph-cell {{
+      padding: 0 !important; width: 1%; overflow: visible; position: relative;
+    }}
+    td.graph-cell svg.graph-svg {{
+      display: block; overflow: visible;
+    }}
+    .msg {{
+      display: inline-flex; align-items: center; gap: 5px; max-width: 56vw;
+      overflow: hidden; text-overflow: ellipsis;
+    }}
+    .msg .subject {{ overflow: hidden; text-overflow: ellipsis; }}
     .ref-pill {{
-      font-size: 0.7rem; padding: 0 7px; border-radius: 999px; line-height: 1.5;
-      border: 1px solid var(--line); color: var(--muted); white-space: nowrap;
-      background: color-mix(in srgb, var(--bg) 60%, transparent);
+      display: inline-block; font-size: 10px; line-height: 14px; padding: 0 5px;
+      border-radius: 3px; color: #fff; font-weight: 600; flex-shrink: 0;
     }}
-    .ref-pill.current {{ border-color: var(--accent); color: var(--accent); font-weight: 600; }}
-    .author, .when {{ color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
-    .when {{ font-variant-numeric: tabular-nums; }}
+    .ref-pill.head {{ background: #6e6e6e !important; }}
+    .author, .date, .hash {{ color: var(--muted); font-size: 12px; }}
+    .hash {{ font-family: var(--mono); font-size: 11px; }}
     .empty {{ color: var(--muted); padding: 28px; text-align: center; }}
-    footer {{ margin-top: 12px; color: var(--muted); font-size: 0.84rem; }}
+    footer {{ margin-top: 8px; color: var(--muted); font-size: 12px; }}
+    .toast {{
+      position: fixed; right: 14px; bottom: 14px; z-index: 40;
+      background: var(--card); border: 1px solid var(--line); border-radius: 6px;
+      padding: 8px 12px; box-shadow: 0 6px 18px rgba(0,0,0,.14);
+      display: none; max-width: min(420px, 90vw); font-size: 12px;
+    }}
+    .toast.show {{ display: block; }}
+    #tooltip {{
+      position: fixed; z-index: 50; display: none; pointer-events: none;
+      background: var(--card); border: 1px solid var(--line); border-radius: 4px;
+      padding: 7px 9px; box-shadow: 0 8px 22px rgba(0,0,0,.18);
+      max-width: min(420px, 90vw); font-size: 12px;
+    }}
+    #tooltip .t-sub {{ font-weight: 600; margin-bottom: 3px; word-break: break-word; }}
+    #tooltip .t-meta {{ color: var(--muted); font-family: var(--mono); font-size: 11px; }}
+    .drawer {{
+      border-left: 1px solid var(--line); background: var(--card);
+      display: none; flex-direction: column; min-height: 100%;
+      position: sticky; top: 0; max-height: 100vh; overflow: auto;
+    }}
+    .layout:not(.no-detail) .drawer {{ display: flex; }}
+    .drawer-head {{
+      display: flex; justify-content: space-between; align-items: center;
+      gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line);
+      position: sticky; top: 0; background: var(--card); z-index: 2;
+    }}
+    .drawer-head h2 {{ margin: 0; font-size: 13px; }}
+    .drawer-body {{ padding: 10px 12px 20px; font-size: 12px; }}
+    .drawer-body .k {{ color: var(--muted); font-size: 11px; margin-top: 10px; }}
+    .drawer-body .v {{ margin-top: 2px; word-break: break-word; }}
+    .drawer-body .v.mono {{ font-family: var(--mono); font-size: 11px; }}
+    .drawer-body .parent-link {{
+      color: var(--accent); cursor: pointer; text-decoration: underline;
+      display: block; margin-top: 2px;
+    }}
+    .drawer-body pre.body {{
+      white-space: pre-wrap; margin: 0; font-family: inherit; font-size: 12px;
+    }}
     [data-lang="cn"] .en {{ display: none; }}
     [data-lang="en"] .cn {{ display: none; }}
-    @media (max-width: 860px) {{
-      .info {{ grid-template-columns: 4.5rem minmax(0, 1fr); }}
-      .author, .when {{ grid-column: 2; }}
+    @media (max-width: 900px) {{
+      .layout {{ grid-template-columns: 1fr; }}
+      .drawer {{
+        border-left: none; border-top: 1px solid var(--line);
+        position: relative; max-height: none;
+      }}
     }}
   </style>
 </head>
 <body>
-  <header>
-    <div>
-      <h1><span class="cn" data-i="title"></span><span class="en" data-i="title"></span></h1>
-      <div class="meta">
-        <span class="cn" data-i="branch"></span><span class="en" data-i="branch"></span>:
-        <strong id="branch"></strong>
-        · <span class="cn" data-i="generated"></span><span class="en" data-i="generated"></span>:
-        <span id="generated"></span>
+  <div class="chrome">
+    <header>
+      <div>
+        <h1><span class="cn" data-i="title"></span><span class="en" data-i="title"></span></h1>
+        <div class="meta">
+          <span class="cn" data-i="branch"></span><span class="en" data-i="branch"></span>:
+          <strong id="branch"></strong>
+          · <span class="cn" data-i="generated"></span><span class="en" data-i="generated"></span>:
+          <span id="generated"></span>
+        </div>
       </div>
-    </div>
-    <div class="toolbar">
-      <button type="button" id="btn-refresh"><span class="cn" data-i="refresh"></span><span class="en" data-i="refresh"></span></button>
-      <button type="button" id="btn-lang">EN / 中文</button>
-      <button type="button" id="btn-theme">Theme</button>
-    </div>
-  </header>
-  <main>
+      <div class="header-right">
+        <div class="repo-meta">
+          <div><span class="cn" data-i="repo"></span><span class="en" data-i="repo"></span>:
+            <span class="name" id="repo-name"></span></div>
+          <div class="remote" id="repo-remote"></div>
+        </div>
+        <div class="toolbar">
+          <button type="button" id="btn-collapse"><span class="cn" data-i="collapse_linear"></span><span class="en" data-i="collapse_linear"></span></button>
+          <button type="button" id="btn-expand"><span class="cn" data-i="expand_linear"></span><span class="en" data-i="expand_linear"></span></button>
+          <button type="button" id="btn-refresh"><span class="cn" data-i="refresh"></span><span class="en" data-i="refresh"></span></button>
+          <button type="button" id="btn-lang">EN / 中文</button>
+          <button type="button" id="btn-theme">Theme</button>
+        </div>
+      </div>
+    </header>
     <section class="filter-panel" aria-label="branch filter">
       <div class="filter-head">
         <div class="filter-title"><span class="cn" data-i="branches"></span><span class="en" data-i="branches"></span></div>
@@ -244,405 +370,53 @@ def _render_graph_html(payload: dict[str, Any]) -> str:
       </div>
       <div class="branch-checks" id="branch-checks"></div>
     </section>
-    <div class="board" id="board">
-      <div class="empty" id="empty" hidden>
-        <span id="empty-text"></span>
+  </div>
+  <main>
+    <div class="layout no-detail" id="layout">
+      <div class="board">
+        <div class="empty" id="empty" hidden><span id="empty-text"></span></div>
+        <table class="idea" id="graph-table" hidden>
+          <colgroup>
+            <col class="graph-col" />
+            <col />
+            <col />
+            <col />
+            <col />
+          </colgroup>
+          <thead>
+            <tr>
+              <th class="graph-h"></th>
+              <th><span class="cn" data-i="col_message"></span><span class="en" data-i="col_message"></span></th>
+              <th><span class="cn" data-i="col_author"></span><span class="en" data-i="col_author"></span></th>
+              <th><span class="cn" data-i="col_date"></span><span class="en" data-i="col_date"></span></th>
+              <th><span class="cn" data-i="col_hash"></span><span class="en" data-i="col_hash"></span></th>
+            </tr>
+          </thead>
+          <tbody id="graph-body"></tbody>
+        </table>
       </div>
-      <div id="rows"></div>
+      <aside class="drawer" id="drawer" aria-label="commit detail">
+        <div class="drawer-head">
+          <h2><span class="cn" data-i="detail_title"></span><span class="en" data-i="detail_title"></span></h2>
+          <button type="button" id="btn-close-detail"><span class="cn" data-i="detail_close"></span><span class="en" data-i="detail_close"></span></button>
+        </div>
+        <div class="drawer-body" id="drawer-body"></div>
+      </aside>
     </div>
     <footer>
       <span class="cn" data-i="footer"></span><span class="en" data-i="footer"></span>
     </footer>
   </main>
+  <div id="tooltip" role="tooltip"></div>
   <div class="toast" id="toast" role="status"></div>
   <script id="gai-graph-bootstrap" type="application/json">{bootstrap}</script>
   <script src="graph-data.js"></script>
+  <script src="{_GRAPH_APP_JS}"></script>
   <script>
-  (function() {{
-    var COLORS = [
-      '#2ea44f', '#0969da', '#cf222e', '#8250df', '#bf3989',
-      '#bf8700', '#1b7c83', '#d1242f', '#0550ae', '#953800'
-    ];
-    var ROW_H = 36;
-    var COL_W = 18;
-    var PAD_X = 16;
-    var STROKE = 2.25;
-    var selected = {{}};
-
-    function bootData() {{
-      if (window.GAI_GRAPH_DATA) return window.GAI_GRAPH_DATA;
-      try {{
-        return JSON.parse(document.getElementById('gai-graph-bootstrap').textContent);
-      }} catch (e) {{ return {{ commits: [], branches: [], i18n: {{}} }}; }}
-    }}
-
-    var data = bootData();
-
-    function I18N() {{
-      var lang = document.documentElement.getAttribute('data-lang') || 'en';
-      return (data.i18n && data.i18n[lang]) || (data.i18n && data.i18n.en) || {{}};
-    }}
-
-    function applyI18n() {{
-      var dict = I18N();
-      document.querySelectorAll('[data-i]').forEach(function(el) {{
-        var key = el.getAttribute('data-i');
-        if (dict[key]) el.textContent = dict[key];
-      }});
-    }}
-
-    function showToast(msg) {{
-      var el = document.getElementById('toast');
-      el.textContent = msg;
-      el.classList.add('show');
-      clearTimeout(showToast._t);
-      showToast._t = setTimeout(function() {{ el.classList.remove('show'); }}, 3200);
-    }}
-
-    function fmtDate(iso) {{
-      if (!iso) return '';
-      try {{
-        var d = new Date(iso);
-        if (isNaN(d.getTime())) return iso;
-        var p = function(n) {{ return String(n).padStart(2, '0'); }};
-        return d.getFullYear() + '-' + p(d.getMonth()+1) + '-' + p(d.getDate())
-          + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
-      }} catch (e) {{ return iso; }}
-    }}
-
-    function escapeHtml(s) {{
-      return String(s).replace(/[&<>"']/g, function(ch) {{
-        return ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}})[ch];
-      }});
-    }}
-
-    function colorFor(i) {{ return COLORS[((i % COLORS.length) + COLORS.length) % COLORS.length]; }}
-
-    function branchColorMap(branches) {{
-      var map = {{}};
-      (branches || []).forEach(function(b, i) {{ map[b.name] = colorFor(i); }});
-      return map;
-    }}
-
-    function tipIndex(branches) {{
-      var tips = {{}};
-      (branches || []).forEach(function(b) {{
-        if (!tips[b.tip]) tips[b.tip] = [];
-        tips[b.tip].push(b);
-      }});
-      return tips;
-    }}
-
-    /** Commits reachable from selected branch tips (walk parents). */
-    function filterCommits(allCommits, branches, sel) {{
-      var chosen = (branches || []).filter(function(b) {{ return sel[b.name]; }});
-      if (!chosen.length) return [];
-      if (chosen.length === (branches || []).length) return allCommits.slice();
-
-      var byHash = {{}};
-      (allCommits || []).forEach(function(c) {{ byHash[c.hash] = c; }});
-      var keep = {{}};
-      var stack = chosen.map(function(b) {{ return b.tip; }});
-      while (stack.length) {{
-        var h = stack.pop();
-        if (!h || keep[h]) continue;
-        keep[h] = true;
-        var c = byHash[h];
-        if (!c) continue;
-        (c.parents || []).forEach(function(p) {{ stack.push(p); }});
-      }}
-      return (allCommits || []).filter(function(c) {{ return keep[c.hash]; }});
-    }}
-
-    /**
-     * IDEA-style streaming lane layout (newest-first).
-     * Each row exposes top/bottom segments so rails continue across rows.
-     */
-    function layoutLanes(commits) {{
-      var lanes = [];      // expected hash per column
-      var laneColor = [];  // stable color index per column
-      var nextColor = 0;
-      var rows = [];
-
-      function alloc(expected) {{
-        var free = lanes.indexOf(null);
-        if (free >= 0) {{
-          lanes[free] = expected;
-          if (laneColor[free] == null) laneColor[free] = nextColor++;
-          return free;
-        }}
-        lanes.push(expected);
-        laneColor.push(nextColor++);
-        return lanes.length - 1;
-      }}
-
-      commits.forEach(function(c) {{
-        var joins = [];
-        for (var i = 0; i < lanes.length; i++) {{
-          if (lanes[i] === c.hash) joins.push(i);
-        }}
-        var col;
-        if (joins.length) {{
-          col = joins[0];
-        }} else {{
-          col = alloc(c.hash);
-          joins = [col];
-        }}
-
-        // Top half: rails into this row (from children above).
-        var top = [];
-        for (var t = 0; t < lanes.length; t++) {{
-          if (lanes[t] == null) continue;
-          if (lanes[t] === c.hash) {{
-            top.push({{ from: t, to: col, color: laneColor[t] }});
-          }} else {{
-            top.push({{ from: t, to: t, color: laneColor[t] }});
-          }}
-        }}
-
-        // Clear all lanes that were waiting for this commit (merged into node).
-        for (var j = 0; j < lanes.length; j++) {{
-          if (lanes[j] === c.hash) lanes[j] = null;
-        }}
-        lanes[col] = c.hash; // temporarily occupied by node
-
-        var parents = (c.parents || []).filter(Boolean);
-        var bottom = [];
-        var forks = [];
-
-        if (!parents.length) {{
-          lanes[col] = null;
-        }} else {{
-          // First parent continues this lane.
-          lanes[col] = parents[0];
-          if (laneColor[col] == null) laneColor[col] = nextColor++;
-          bottom.push({{ from: col, to: col, color: laneColor[col] }});
-
-          // Extra parents (merge) fork to other lanes.
-          for (var pi = 1; pi < parents.length; pi++) {{
-            var p = parents[pi];
-            var existing = lanes.indexOf(p);
-            var dest;
-            if (existing >= 0) {{
-              dest = existing;
-            }} else {{
-              dest = alloc(p);
-            }}
-            forks.push(dest);
-            bottom.push({{ from: col, to: dest, color: laneColor[dest] }});
-          }}
-
-          // Through rails for unrelated active lanes.
-          for (var u = 0; u < lanes.length; u++) {{
-            if (lanes[u] == null) continue;
-            if (u === col) continue;
-            if (forks.indexOf(u) >= 0) continue;
-            bottom.push({{ from: u, to: u, color: laneColor[u] }});
-          }}
-        }}
-
-        while (lanes.length && lanes[lanes.length - 1] == null) {{
-          lanes.pop();
-          laneColor.pop();
-        }}
-
-        var width = Math.max(col + 1, lanes.length, 1);
-        top.forEach(function(s) {{ width = Math.max(width, s.from + 1, s.to + 1); }});
-        bottom.forEach(function(s) {{ width = Math.max(width, s.from + 1, s.to + 1); }});
-
-        rows.push({{
-          commit: c,
-          col: col,
-          color: laneColor[col] != null ? laneColor[col] : 0,
-          top: top,
-          bottom: bottom,
-          width: width
-        }});
-      }});
-      return rows;
-    }}
-
-    function xAt(col) {{ return PAD_X + col * COL_W + COL_W / 2; }}
-
-    function svgForRow(row, maxCols) {{
-      var w = PAD_X * 2 + maxCols * COL_W;
-      var h = ROW_H;
-      var mid = h / 2;
-      var parts = [];
-      function stroke(seg) {{
-        return 'stroke="'+colorFor(seg.color)+'" stroke-width="'+STROKE+'" stroke-linecap="round"';
-      }}
-      (row.top || []).forEach(function(s) {{
-        var x1 = xAt(s.from), x2 = xAt(s.to);
-        if (x1 === x2) {{
-          parts.push('<line x1="'+x1+'" y1="0" x2="'+x2+'" y2="'+mid+'" '+stroke(s)+' />');
-        }} else {{
-          parts.push('<path d="M '+x1+' 0 C '+x1+' '+(mid*0.4)+', '+x2+' '+(mid*0.6)+', '+x2+' '+mid+'" fill="none" '+stroke(s)+' />');
-        }}
-      }});
-      (row.bottom || []).forEach(function(s) {{
-        var x1 = xAt(s.from), x2 = xAt(s.to);
-        if (x1 === x2) {{
-          parts.push('<line x1="'+x1+'" y1="'+mid+'" x2="'+x2+'" y2="'+h+'" '+stroke(s)+' />');
-        }} else {{
-          var y1 = mid, y2 = h, dy = y2 - y1;
-          parts.push('<path d="M '+x1+' '+y1+' C '+x1+' '+(y1+dy*0.4)+', '+x2+' '+(y1+dy*0.6)+', '+x2+' '+y2+'" fill="none" '+stroke(s)+' />');
-        }}
-      }});
-      var cx = xAt(row.col);
-      parts.push('<circle cx="'+cx+'" cy="'+mid+'" r="4.5" fill="'+colorFor(row.color)+'" stroke="var(--card)" stroke-width="2" />');
-      return '<svg viewBox="0 0 '+w+' '+h+'" width="'+w+'" height="'+h+'" aria-hidden="true">'+parts.join('')+'</svg>';
-    }}
-
-    function buildFilterUI(branches, cmap) {{
-      var box = document.getElementById('branch-checks');
-      box.innerHTML = '';
-      (branches || []).forEach(function(b) {{
-        if (selected[b.name] === undefined) selected[b.name] = true;
-        var lab = document.createElement('label');
-        if (b.current) lab.className = 'current';
-        lab.innerHTML =
-          '<input type="checkbox" data-branch="'+escapeHtml(b.name)+'"'+(selected[b.name]?' checked':'')+' />' +
-          '<span class="dot" style="background:'+(cmap[b.name]||'#888')+'"></span>' +
-          '<span>'+escapeHtml(b.name)+(b.current?' ★':'')+'</span>';
-        box.appendChild(lab);
-      }});
-      box.querySelectorAll('input[type=checkbox]').forEach(function(inp) {{
-        inp.addEventListener('change', function() {{
-          selected[inp.getAttribute('data-branch')] = inp.checked;
-          paint();
-        }});
-      }});
-    }}
-
-    function setSelection(mode) {{
-      var branches = data.branches || [];
-      branches.forEach(function(b) {{
-        if (mode === 'all') selected[b.name] = true;
-        else if (mode === 'none') selected[b.name] = false;
-        else selected[b.name] = !!b.current;
-      }});
-      // If current missing, keep first branch
-      if (mode === 'current' && !branches.some(function(b) {{ return selected[b.name]; }}) && branches[0]) {{
-        selected[branches[0].name] = true;
-      }}
-      buildFilterUI(branches, branchColorMap(branches));
-      paint();
-    }}
-
-    function paint() {{
-      document.getElementById('branch').textContent = data.branch || '—';
-      document.getElementById('generated').textContent = data.generated || '';
-      var branches = data.branches || [];
-      var cmap = branchColorMap(branches);
-      var tips = tipIndex(branches);
-      var commits = filterCommits(data.commits || [], branches, selected);
-      var empty = document.getElementById('empty');
-      var emptyText = document.getElementById('empty-text');
-      var rowsEl = document.getElementById('rows');
-      rowsEl.innerHTML = '';
-
-      if (!(data.commits || []).length) {{
-        empty.hidden = false;
-        emptyText.textContent = I18N().empty || 'Empty';
-        return;
-      }}
-      if (!commits.length) {{
-        empty.hidden = false;
-        emptyText.textContent = I18N().empty_filter || I18N().empty || 'Empty';
-        return;
-      }}
-      empty.hidden = true;
-
-      var layouts = layoutLanes(commits);
-      var maxCols = 1;
-      layouts.forEach(function(L) {{ maxCols = Math.max(maxCols, L.width); }});
-      var graphW = PAD_X * 2 + maxCols * COL_W;
-      document.documentElement.style.setProperty('--graph-w', Math.max(graphW, 72) + 'px');
-
-      layouts.forEach(function(L) {{
-        var c = L.commit;
-        var tipBranches = (tips[c.hash] || []).filter(function(b) {{ return selected[b.name] !== false; }});
-        var pills = tipBranches.map(function(b) {{
-          return '<span class="ref-pill'+(b.current?' current':'')+'" style="border-color:'+(cmap[b.name]||'')+';color:'+(cmap[b.name]||'')+'">'
-            + escapeHtml(b.name) + '</span>';
-        }}).join('');
-        var row = document.createElement('div');
-        row.className = 'row';
-        row.innerHTML =
-          '<div class="graph-cell">' + svgForRow(L, maxCols) + '</div>' +
-          '<div class="info">' +
-            '<div class="hash">' + escapeHtml(c.short || '') + '</div>' +
-            '<div class="subject">' + escapeHtml(c.subject || '') +
-              (pills ? '<span class="refs">' + pills + '</span>' : '') + '</div>' +
-            '<div class="author" title="'+escapeHtml(c.author||'')+'">' + escapeHtml(c.author || '') + '</div>' +
-            '<div class="when">' + escapeHtml(fmtDate(c.date || '')) + '</div>' +
-          '</div>';
-        rowsEl.appendChild(row);
-      }});
-    }}
-
-    function render(d) {{
-      data = d || data;
-      var branches = data.branches || [];
-      var cmap = branchColorMap(branches);
-      // Preserve selection across refresh when possible.
-      branches.forEach(function(b) {{
-        if (selected[b.name] === undefined) selected[b.name] = true;
-      }});
-      buildFilterUI(branches, cmap);
-      paint();
-    }}
-
-    function refreshHint() {{
-      var dict = I18N();
-      return location.protocol === 'file:'
-        ? (dict.refresh_fail_file || dict.refresh_fail || 'Failed')
-        : (dict.refresh_fail_http || dict.refresh_fail || 'Failed');
-    }}
-
-    function refreshData() {{
-      var btn = document.getElementById('btn-refresh');
-      var dict = I18N();
-      if (btn) btn.disabled = true;
-      var s = document.createElement('script');
-      s.src = 'graph-data.js?t=' + Date.now();
-      s.onload = function() {{
-        if (window.GAI_GRAPH_DATA) render(window.GAI_GRAPH_DATA);
-        applyI18n();
-        showToast(dict.refresh_ok || 'OK');
-        if (btn) btn.disabled = false;
-        s.remove();
-      }};
-      s.onerror = function() {{
-        showToast(refreshHint());
-        if (btn) btn.disabled = false;
-        s.remove();
-      }};
-      document.head.appendChild(s);
-    }}
-
-    document.getElementById('btn-refresh').addEventListener('click', refreshData);
-    document.getElementById('btn-all').addEventListener('click', function() {{ setSelection('all'); }});
-    document.getElementById('btn-none').addEventListener('click', function() {{ setSelection('none'); }});
-    document.getElementById('btn-current').addEventListener('click', function() {{ setSelection('current'); }});
-    document.getElementById('btn-lang').addEventListener('click', function() {{
-      var cur = document.documentElement.getAttribute('data-lang') === 'cn' ? 'en' : 'cn';
-      document.documentElement.setAttribute('data-lang', cur);
-      document.documentElement.lang = cur === 'cn' ? 'zh-CN' : 'en';
-      try {{ localStorage.setItem('{PREF_LANG}', cur); }} catch (e) {{}}
-      applyI18n();
-      paint();
-    }});
-    document.getElementById('btn-theme').addEventListener('click', function() {{
-      var cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-      document.documentElement.setAttribute('data-theme', cur);
-      try {{ localStorage.setItem('{PREF_THEME}', cur); }} catch (e) {{}}
-    }});
-
-    applyI18n();
-    render(data);
-  }})();
+  GaiGraphApp.createApp({{
+    prefLang: "{PREF_LANG}",
+    prefTheme: "{PREF_THEME}"
+  }});
   </script>
 </body>
 </html>
