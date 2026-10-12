@@ -211,6 +211,8 @@ def build_commit_batch_user_prompt(
     truncated: bool = False,
     max_diff_chars: int = 80_000,
     chinese: bool = False,
+    message_lang: str | None = None,
+    require_concrete_messages: bool = False,
 ) -> str:
     notes: list[str] = [
         f"CONSTRAINT: Prefer each batch's staged diff to fit under ~{max_diff_chars} characters.",
@@ -224,10 +226,24 @@ def build_commit_batch_user_prompt(
     if chinese:
         notes.append(
             "LANGUAGE: Write `summary`, each batch `title`, and `reason` in Simplified Chinese. "
-            "Keep commit_message type/scope in English."
+            "Keep commit message type/scope in English."
         )
     else:
         notes.append("LANGUAGE: Write `summary`, `title`, and `reason` in English.")
+    lang = (message_lang or "").strip().lower()
+    if require_concrete_messages:
+        if lang == "cn":
+            notes.append(
+                "REQUIRED: For EVERY batch fill `commit_message_cn` with a final "
+                "Conventional Commits message the user can commit as-is "
+                "(type(scope): 中文说明). Also fill `commit_message_en` if possible."
+            )
+        else:
+            notes.append(
+                "REQUIRED: For EVERY batch fill `commit_message_en` with a final "
+                "Conventional Commits message the user can commit as-is "
+                "(type(scope): english subject). Also fill `commit_message_cn` if possible."
+            )
     header = "\n".join(notes)
     path_lines = "\n".join(f"- {p}" for p in paths) or "- (none)"
     body = (
