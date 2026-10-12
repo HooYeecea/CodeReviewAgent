@@ -240,7 +240,7 @@ gai uncommit --cn
 
 ### `gai review`
 
-只审查，不提交。只看 **已暂存** 内容。若 diff 超过 `max_diff_chars`，会提示改用 `gai splitflow` 并询问是否切换（`--json` 只提示不切换）。
+只审查，不提交。只看 **已暂存** 内容。若 diff 超过 `max_diff_chars`，会提示改用 `gai splitflow` 并询问是否切换（`--json` 只提示不切换）。即使未超限，若 AI 判断主题可拆成多次提交，也会给出分批建议（可拒绝后继续整包审查）。
 
 | 参数 | 说明 |
 |------|------|
@@ -256,7 +256,7 @@ gai review --json
 
 ### `gai commit`
 
-审查 → 生成 Message → 确认 → 提交。Diff 过大时同样会提示切换到 `gai splitflow`（`-y` 时只提示并退出，不自动切换）。
+审查 → 生成 Message → 确认 → 提交。Diff 过大时强制提示切换 `splitflow`；未超限但 AI 认为可拆批时也会建议（`-y` / 非交互不自动切换）。
 
 | 参数 | 说明 |
 |------|------|
@@ -278,7 +278,7 @@ gai commit --no-ai -m "chore: release"
 
 ### `gai devflow`
 
-一条命令串联日常流程：**AI 暂存建议 → 审查 → 中英提交词自选 → 确认推送**。每一步仍由你决定，不会全自动一把梭。若暂存后 diff 过大，会提示改用 `gai splitflow` 并询问是否切换。
+一条命令串联日常流程：**AI 暂存建议 → 审查 → 中英提交词自选 → 确认推送**。每一步仍由你决定，不会全自动一把梭。若暂存后 diff 过大，或 AI 认为主题可拆开，会提示改用 `gai splitflow` 并询问是否切换。
 
 1. **add**：AI 建议暂存路径；`y` 采纳建议，`.` 全部暂存，`n` 手输路径  
 2. **review**：审查 staged diff（带 `--cn` 时审查文案为中文；不带则可自选 cn/en）  
