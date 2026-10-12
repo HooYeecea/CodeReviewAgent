@@ -81,6 +81,17 @@ _COMMAND_META: list[dict[str, Any]] = [
         },
     },
     {
+        "id": "splitflow",
+        "en": {
+            "title": "Split into coherent commits",
+            "blurb": "Huge dirty tree: AI plans batches; pick all-EN / all-CN / per-batch message language; then review+commit.",
+        },
+        "cn": {
+            "title": "分批拆分提交",
+            "blurb": "改动过大时：AI 拆 commit 边界；可全英/全中/按批指定提交词语言，再分批审查提交。",
+        },
+    },
+    {
         "id": "push",
         "en": {
             "title": "Push branch",

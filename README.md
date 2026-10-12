@@ -142,6 +142,7 @@ gai history --serve --cn  # 同步命令执行报告并以本地 HTTP 打开
 gai guide --cn --open     # 生成 .gai/guide.html 并用浏览器打开
 gai usage --serve --cn    # 同步用量报告并以本地 HTTP 打开（刷新更稳）
 gai devflow --cn          # 引导式：AI 暂存建议 → 审查 → 中英提交词 → 推送
+gai splitflow --cn        # 改动很大时：AI 拆 commit 边界 → 分批审查/提交
 gai add --cn -t           # 暂存并打印底层 git 链路
 ```
 
@@ -177,6 +178,7 @@ gai report --cn -o .\reports\                # 目录不存在则自动创建
 | `gai review` | 审查已暂存变更，不提交 |
 | `gai commit` | 审查 → 建议信息 → 确认 → 提交 |
 | `gai devflow` | 引导式串联：AI 暂存建议 → 审查 → 中英提交词 → 推送 |
+| `gai splitflow` | 大量未提交改动：AI 按主题拆 commit → 分批审查/提交 → 可选推送 |
 | `gai push` | 推送当前分支（先检查是否有可推送内容） |
 | `gai pull` | 拉取远程（先检查；分叉可选 merge / rebase） |
 | `gai merge` | 合并其他分支进当前分支（需确认）；`--continue` / `--abort` |
@@ -238,7 +240,7 @@ gai uncommit --cn
 
 ### `gai review`
 
-只审查，不提交。只看 **已暂存** 内容。
+只审查，不提交。只看 **已暂存** 内容。若 diff 超过 `max_diff_chars`，会提示改用 `gai splitflow` 并询问是否切换（`--json` 只提示不切换）。
 
 | 参数 | 说明 |
 |------|------|
@@ -254,7 +256,7 @@ gai review --json
 
 ### `gai commit`
 
-审查 → 生成 Message → 确认 → 提交。
+审查 → 生成 Message → 确认 → 提交。Diff 过大时同样会提示切换到 `gai splitflow`（`-y` 时只提示并退出，不自动切换）。
 
 | 参数 | 说明 |
 |------|------|
@@ -276,7 +278,7 @@ gai commit --no-ai -m "chore: release"
 
 ### `gai devflow`
 
-一条命令串联日常流程：**AI 暂存建议 → 审查 → 中英提交词自选 → 确认推送**。每一步仍由你决定，不会全自动一把梭。
+一条命令串联日常流程：**AI 暂存建议 → 审查 → 中英提交词自选 → 确认推送**。每一步仍由你决定，不会全自动一把梭。若暂存后 diff 过大，会提示改用 `gai splitflow` 并询问是否切换。
 
 1. **add**：AI 建议暂存路径；`y` 采纳建议，`.` 全部暂存，`n` 手输路径  
 2. **review**：审查 staged diff（带 `--cn` 时审查文案为中文；不带则可自选 cn/en）  
@@ -293,6 +295,29 @@ gai devflow --cn -r origin
 |------|------|
 | `--cn` | 界面与审查用简体中文；提交词仍提供中英两种 |
 | `-r` / `--remote` | 最后一步 push 的远程名 |
+| `-t` / `--trace` | 每一步结束后打印该步执行的 git 命令 |
+
+### `gai splitflow`
+
+当一次堆了很多未提交改动、整包 diff 过大时使用。目标是**按可独立理解的 commit 边界拆批**，而不是按字符硬切：
+
+1. **plan**：AI 查看工作区路径与 diff 片段，建议若干批次（标题 / 路径 / 理由 / 可选提交词提示）；解析失败时按目录回退分组
+2. **提交词语言**：确认计划后选择全部英文 / 全部中文 / 按批次指定（如 `en,cn,en` 或 `1=en,2=cn`）
+3. **每批**：确认 → 暂存该批路径 → 审查 → 按预设语言选用提交词（仍可改选）→ 确认提交（可跳过某一批）
+4. **push**：全部批次结束后再确认是否统一推送
+
+粒度是**文件级**（同一文件不会拆进多个 commit）。若开始时已有暂存内容，会先询问是否清空暂存区。
+
+```bash
+gai splitflow --cn
+gai splitflow --cn -t
+gai splitflow --cn -r origin
+```
+
+| 参数 | 说明 |
+|------|------|
+| `--cn` | 界面与审查用简体中文；提交词仍提供中英两种 |
+| `-r` / `--remote` | 全部完成后 push 的远程名 |
 | `-t` / `--trace` | 每一步结束后打印该步执行的 git 命令 |
 
 ### `gai push`
@@ -619,8 +644,10 @@ CodeReviewAgent/
   pyproject.toml
   README.md
   src/gai/
-    cli.py           # 入口：add / unadd / uncommit / review / commit / devflow / push / pull / report / usage / history / guide / balance / config / completion
-    devflow.py       # gai devflow：暂存建议与中英提交词
+    cli.py           # 入口：注册 commands/*；run()
+    commands/        # stage / ship / sync / insight / setup 子命令
+    cli_common.py    # 共享 Typer app 与输出 helpers
+    devflow.py       # gai devflow / splitflow：暂存建议、分批计划、中英提交词
     command_history.py # .gai/commands.jsonl 命令执行记录
     history_report.py  # commands.jsonl → .gai/history-report.html
     guide.py         # .gai/guide.html 可视化使用指南（中英双语）
