@@ -1281,13 +1281,16 @@ _LOG_FIELD_SEP = "\x1f"
 def collect_log_entries(
     cwd: Path | None = None,
     *,
-    max_count: int = 20,
+    max_count: int | None = None,
 ) -> list[LogEntry]:
-    """Return recent commits as structured rows."""
+    """Return commits as structured rows. ``max_count=None`` means all commits."""
     ensure_repo(cwd)
-    n = max(1, int(max_count))
     fmt = f"%H{_LOG_FIELD_SEP}%h{_LOG_FIELD_SEP}%an{_LOG_FIELD_SEP}%aI{_LOG_FIELD_SEP}%s{_LOG_FIELD_SEP}%D"
-    result = run_git("log", f"-n{n}", f"--pretty=format:{fmt}", cwd=cwd)
+    args: list[str] = ["log"]
+    if max_count is not None:
+        args.append(f"-n{max(1, int(max_count))}")
+    args.append(f"--pretty=format:{fmt}")
+    result = run_git(*args, cwd=cwd)
     if result.returncode != 0:
         raise GitError(
             result.stderr.strip() or result.stdout.strip() or "git log failed",
@@ -1318,13 +1321,14 @@ def collect_log_entries(
 def log_plain(
     cwd: Path | None = None,
     *,
-    max_count: int = 20,
+    max_count: int | None = None,
     graph: bool = False,
 ) -> str:
-    """Raw ``git log`` text (optional ``--graph --decorate``)."""
+    """Raw ``git log`` text (optional ``--graph --decorate``). ``max_count=None`` = all."""
     ensure_repo(cwd)
-    n = max(1, int(max_count))
-    args: list[str] = ["log", f"-n{n}"]
+    args: list[str] = ["log"]
+    if max_count is not None:
+        args.append(f"-n{max(1, int(max_count))}")
     if graph:
         args.extend(["--graph", "--decorate", "--oneline"])
     else:
@@ -1342,23 +1346,27 @@ def log_plain(
 def log_graph_text(
     cwd: Path | None = None,
     *,
-    max_count: int = 20,
+    max_count: int | None = None,
 ) -> str:
     """``git log --graph`` with a parse-friendly pretty format for pretty terminal."""
     ensure_repo(cwd)
-    n = max(1, int(max_count))
     # Keep graph prefixes; fields after the hash for light styling.
     fmt = "%C(auto)%h %s %C(dim)(%an, %ar)%C(reset)%C(auto)%d"
-    result = run_git(
+    args: list[str] = [
         "-c",
         "color.ui=always",
         "log",
-        f"-n{n}",
-        "--graph",
-        "--decorate",
-        f"--pretty=format:{fmt}",
-        cwd=cwd,
+    ]
+    if max_count is not None:
+        args.append(f"-n{max(1, int(max_count))}")
+    args.extend(
+        [
+            "--graph",
+            "--decorate",
+            f"--pretty=format:{fmt}",
+        ]
     )
+    result = run_git(*args, cwd=cwd)
     if result.returncode != 0:
         raise GitError(
             result.stderr.strip() or result.stdout.strip() or "git log --graph failed",

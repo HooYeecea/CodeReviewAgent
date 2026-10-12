@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Optional
+
 import typer
 
 from gai.cli_common import (
@@ -83,11 +85,14 @@ def status_cmd(
     ),
 )
 def log_cmd(
-    max_count: int = typer.Option(
-        20,
+    max_count: Optional[int] = typer.Option(
+        None,
         "--max-count",
         "-n",
-        help=H("Max commits to show (default 20).", "最多显示的提交数（默认 20）。"),
+        help=H(
+            "Limit to N commits; omit to show all.",
+            "限制为 N 条；省略则显示全部提交。",
+        ),
     ),
     pretty: bool = typer.Option(
         False,
@@ -150,7 +155,11 @@ def log_cmd(
     _start_trace(trace)
     try:
         want_html = as_html or open_browser or serve
-        n = max(1, int(max_count))
+        n: int | None
+        if max_count is None:
+            n = None
+        else:
+            n = max(1, int(max_count))
 
         if want_html:
             path = write_log_report(chinese=cn, max_count=n, graph=graph)

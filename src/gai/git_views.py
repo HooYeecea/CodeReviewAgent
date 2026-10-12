@@ -116,16 +116,23 @@ def render_pretty_log(
     console: Console,
     *,
     chinese: bool = False,
-    max_count: int = 20,
+    max_count: int | None = None,
     graph: bool = False,
 ) -> None:
     """Rich log table, or colored graph text when ``graph`` is set."""
     branch = get_current_branch()
-    title = (
-        f"提交记录 · {branch}（最近 {max_count}）"
-        if chinese
-        else f"Commits · {branch} (last {max_count})"
-    )
+    if max_count is None:
+        title = (
+            f"提交记录 · {branch}（全部）"
+            if chinese
+            else f"Commits · {branch} (all)"
+        )
+    else:
+        title = (
+            f"提交记录 · {branch}（最近 {max_count}）"
+            if chinese
+            else f"Commits · {branch} (last {max_count})"
+        )
     if graph:
         text = log_graph_text(max_count=max_count)
         if not text:
@@ -161,7 +168,7 @@ def render_pretty_log(
 def write_log_report(
     *,
     chinese: bool = False,
-    max_count: int = 20,
+    max_count: int | None = None,
     graph: bool = False,
     path: Path | None = None,
 ) -> Path:
