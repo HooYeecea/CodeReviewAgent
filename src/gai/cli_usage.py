@@ -54,6 +54,23 @@ _COMMAND_EXAMPLES: dict[str, tuple[tuple[str, str, str], ...]] = {
             "跑完整流程，最后推送到 origin",
         ),
     ),
+    "splitflow": (
+        (
+            "gai splitflow --cn",
+            "AI-split a large dirty tree; choose all-EN / all-CN / per-batch commit message language",
+            "AI 按主题拆分大量未提交改动；可全英/全中/按批指定提交词语言",
+        ),
+        (
+            "gai splitflow --cn -t",
+            "Same flow with per-step git traces",
+            "同上流程，并打印每步 git 链路",
+        ),
+        (
+            "gai splitflow --cn -r origin",
+            "Split/review/commit batches, then push to origin",
+            "分批审查提交后，统一推送到 origin",
+        ),
+    ),
     "push": (
         ("gai push --cn", "Push current branch (checks there is something to push)", "推送当前分支（先检查是否有可推送内容）"),
         ("gai push -y --cn", "Push without interactive confirmation", "推送并跳过交互确认"),
