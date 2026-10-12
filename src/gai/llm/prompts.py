@@ -112,6 +112,41 @@ JSON schema:
 """
 
 
+COMMIT_BATCH_SYSTEM_PROMPT = """\
+You help a developer split a large dirty working tree into several focused git commits.
+
+Your job:
+1. Read the working-tree status (paths + optional diff snippet).
+2. Propose an ordered list of commit batches. Each batch is one coherent commit.
+3. Optimize for reviewability: each batch should be understandable on its own and
+   small enough that a full review of that batch is feasible (prefer staying under
+   the provided max_diff_chars budget when possible).
+4. Split by theme / module / concern (e.g. core logic vs docs vs tests), NOT by
+   blindly chopping the diff at a character limit.
+5. Paths are file-level only (you cannot split hunks inside one file). Put each
+   path in at most one batch.
+6. Prefer covering all provided changed paths. If you intentionally leave WIP out,
+   say so in `summary` and omit those paths.
+7. Order batches so later commits can build on earlier ones when that matters.
+8. Prefer 2–8 batches for a large tree; avoid one-file-per-batch unless necessary.
+9. Respond with ONLY valid JSON. No markdown fences, no commentary.
+
+JSON schema:
+{
+  "summary": "one short sentence describing the overall split plan",
+  "batches": [
+    {
+      "title": "short batch title",
+      "paths": ["path/to/file.py", "README.md"],
+      "reason": "why these paths belong in one commit",
+      "commit_message_en": "type(scope): optional english subject hint",
+      "commit_message_cn": "type(scope): 可选中文说明"
+    }
+  ]
+}
+"""
+
+
 BILINGUAL_MESSAGE_SYSTEM_PROMPT = """\
 You write Conventional Commits messages for a staged git diff.
 
@@ -163,6 +198,53 @@ def build_stage_user_prompt(
             "```\n"
         )
     body += "\nProduce the JSON staging suggestion now."
+    return body
+
+
+def build_commit_batch_user_prompt(
+    *,
+    status_text: str,
+    paths: list[str],
+    diff_snippet: str = "",
+    truncated: bool = False,
+    max_diff_chars: int = 80_000,
+    chinese: bool = False,
+) -> str:
+    notes: list[str] = [
+        f"CONSTRAINT: Prefer each batch's staged diff to fit under ~{max_diff_chars} characters.",
+        "CONSTRAINT: Each path in at most one batch; use only paths from the list below.",
+    ]
+    if truncated:
+        notes.append(
+            "NOTE: The working-tree diff snippet was truncated due to size; "
+            "rely more on path grouping and status."
+        )
+    if chinese:
+        notes.append(
+            "LANGUAGE: Write `summary`, each batch `title`, and `reason` in Simplified Chinese. "
+            "Keep commit_message type/scope in English."
+        )
+    else:
+        notes.append("LANGUAGE: Write `summary`, `title`, and `reason` in English.")
+    header = "\n".join(notes)
+    path_lines = "\n".join(f"- {p}" for p in paths) or "- (none)"
+    body = (
+        f"{header}\n\n"
+        "Changed paths to cover:\n"
+        f"{path_lines}\n\n"
+        "Git status --porcelain follows:\n"
+        "```\n"
+        f"{status_text.strip() or '(empty)'}\n"
+        "```\n"
+    )
+    if diff_snippet.strip():
+        body += (
+            "\nWorking-tree diff snippet (context only; may be incomplete):\n"
+            "```diff\n"
+            f"{diff_snippet}\n"
+            "```\n"
+        )
+    body += "\nProduce the JSON commit-batch plan now."
     return body
 
 

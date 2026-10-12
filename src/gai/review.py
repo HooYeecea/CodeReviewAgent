@@ -32,6 +32,33 @@ _SEVERITY_STYLE = {
 }
 
 
+class DiffTooLargeError(RuntimeError):
+    """Staged diff exceeds ``max_diff_chars``; prefer ``gai splitflow``."""
+
+    def __init__(self, *, chars: int, limit: int) -> None:
+        self.chars = chars
+        self.limit = limit
+        super().__init__(
+            f"Staged diff is too large ({chars} chars > limit {limit}). "
+            "Use `gai splitflow` to review in coherent batches."
+        )
+
+
+def staged_diff_size(
+    *,
+    settings: Settings | None = None,
+) -> tuple[int, int, bool]:
+    """Return ``(chars, limit, exceeds)`` for the current staged diff."""
+    settings = settings or load_settings()
+    diff, _ = get_staged_diff(
+        ignore_patterns=settings.ignore_patterns,
+        max_chars=None,
+    )
+    chars = len(diff)
+    limit = settings.max_diff_chars
+    return chars, limit, chars > limit
+
+
 @dataclass
 class ReviewItem:
     severity: Severity
@@ -163,12 +190,21 @@ def run_review(
     message_only: bool = False,
     review_only: bool = False,
     chinese: bool = False,
+    allow_truncated: bool = False,
 ) -> ReviewResult:
-    """Load staged diff and ask the LLM for review + commit message."""
+    """Load staged diff and ask the LLM for review + commit message.
+
+    When the staged diff exceeds ``max_diff_chars`` and ``allow_truncated`` is
+    false, raises ``DiffTooLargeError`` so the CLI can offer ``gai splitflow``.
+    """
     settings = settings or load_settings()
 
     if not has_staged_changes():
         raise RuntimeError("No staged changes. Run `git add` first.")
+
+    chars, limit, exceeds = staged_diff_size(settings=settings)
+    if exceeds and not allow_truncated:
+        raise DiffTooLargeError(chars=chars, limit=limit)
 
     diff, truncated = get_staged_diff(
         ignore_patterns=settings.ignore_patterns,
