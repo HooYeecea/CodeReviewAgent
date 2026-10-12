@@ -470,7 +470,7 @@ gai status -p --cn -t
 
 - `-p` / `--pretty`：Rich 表格美化；与 `-g` 联用时为带样式的拓扑面板  
 - `-g` / `--graph`：提交拓扑（`git log --graph`）  
-- `--html`：写入并**覆盖** `.gai/log-report.html`；可 `--open` / `--serve`（与 guide/history/usage 相同）
+- `--html`：写入并**覆盖** `.gai/log-report.html`；页内可下拉切换全部**本地分支**（默认当前分支）；可 `--open` / `--serve`（与 guide/history/usage 相同）
 
 ```bash
 gai log --cn

@@ -118,7 +118,11 @@ _COMMAND_EXAMPLES: dict[str, tuple[tuple[str, str, str], ...]] = {
         ("gai log -p --cn", "Pretty Rich commit table", "Rich 表格美化提交列表"),
         ("gai log -g --cn", "Show commit graph", "显示提交拓扑图"),
         ("gai log -p -g --cn", "Pretty view with commit graph", "美化输出并带拓扑图"),
-        ("gai log --html --cn", "Write/overwrite .gai/log-report.html", "写入并覆盖 .gai/log-report.html"),
+        (
+            "gai log --html --cn",
+            "Write/overwrite .gai/log-report.html (branch switcher for all local branches)",
+            "写入并覆盖 .gai/log-report.html（页内可切换全部本地分支）",
+        ),
         ("gai log --html --serve --cn", "Serve log HTML over local HTTP", "以本地 HTTP 打开提交记录页"),
         ("gai log -n 50 -g --html --open --cn", "Graph + HTML + open in browser", "拓扑图 + HTML 并用浏览器打开"),
     ),
