@@ -8,6 +8,7 @@ from pathlib import Path
 from gai.commands.ship import parse_batch_message_lang_spec
 from gai.devflow import (
     CommitBatch,
+    apply_message_lang_to_batches,
     fallback_commit_batches,
     list_staged_paths,
     normalize_commit_batches,
@@ -107,6 +108,22 @@ def test_parse_batch_message_lang_spec() -> None:
     assert parse_batch_message_lang_spec("1:中文 2:英文", 2) == ["cn", "en"]
     assert parse_batch_message_lang_spec("en,cn", 3) is None
     assert parse_batch_message_lang_spec("1=en,2=xx", 2) is None
+
+
+def test_apply_message_lang_to_batches() -> None:
+    batches = [
+        CommitBatch(
+            title="cli",
+            paths=["a.py"],
+            reason="",
+            message_hint_en="refactor(cli): split",
+            message_hint_cn="refactor(cli): 拆分",
+        )
+    ]
+    en = apply_message_lang_to_batches(batches, message_lang="en")
+    cn = apply_message_lang_to_batches(batches, message_lang="cn")
+    assert en[0].commit_message == "refactor(cli): split"
+    assert cn[0].commit_message == "refactor(cli): 拆分"
 
 
 def test_list_staged_paths(tmp_path: Path, monkeypatch) -> None:
