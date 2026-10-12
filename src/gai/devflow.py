@@ -53,6 +53,7 @@ class CommitBatch:
     reason: str
     message_hint_en: str = ""
     message_hint_cn: str = ""
+    commit_message: str = ""  # concrete message (e.g. level-2 plan)
 
 
 @dataclass(frozen=True)
@@ -225,6 +226,7 @@ def parse_commit_batch_plan(text: str) -> CommitBatchPlan:
             cn = str(
                 item.get("commit_message_cn") or item.get("message_cn") or ""
             ).strip()
+            concrete = str(item.get("commit_message") or "").strip()
             batches.append(
                 CommitBatch(
                     title=title,
@@ -232,6 +234,7 @@ def parse_commit_batch_plan(text: str) -> CommitBatchPlan:
                     reason=reason,
                     message_hint_en=en,
                     message_hint_cn=cn,
+                    commit_message=concrete,
                 )
             )
     return CommitBatchPlan(
@@ -311,6 +314,7 @@ def normalize_commit_batches(
                 reason=batch.reason,
                 message_hint_en=batch.message_hint_en,
                 message_hint_cn=batch.message_hint_cn,
+                commit_message=batch.commit_message,
             )
         )
     leftover = [p for p in allowed_paths if p not in seen]
@@ -338,16 +342,50 @@ def list_staged_paths(entries: list[ChangeEntry] | None = None) -> list[str]:
     return paths
 
 
+def apply_message_lang_to_batches(
+    batches: list[CommitBatch],
+    *,
+    message_lang: str,
+) -> list[CommitBatch]:
+    """Fill ``commit_message`` from EN/CN hints according to ``message_lang``."""
+    prefer = (message_lang or "en").strip().lower()
+    if prefer not in {"en", "cn"}:
+        prefer = "en"
+    out: list[CommitBatch] = []
+    for batch in batches:
+        if prefer == "cn":
+            msg = batch.message_hint_cn or batch.commit_message or batch.message_hint_en
+        else:
+            msg = batch.message_hint_en or batch.commit_message or batch.message_hint_cn
+        if not msg:
+            msg = f"chore: {batch.title}"
+        out.append(
+            CommitBatch(
+                title=batch.title,
+                paths=list(batch.paths),
+                reason=batch.reason,
+                message_hint_en=batch.message_hint_en,
+                message_hint_cn=batch.message_hint_cn,
+                commit_message=msg,
+            )
+        )
+    return out
+
+
 def suggest_commit_batches(
     *,
     settings: Settings | None = None,
     chinese: bool = False,
     only_staged: bool = False,
+    paths: list[str] | None = None,
+    message_lang: str | None = None,
+    require_concrete_messages: bool = False,
 ) -> CommitBatchPlan:
     """Ask the LLM to split changes into coherent commit batches.
 
     When ``only_staged`` is true, only currently staged paths/diff are considered
     (used by review/commit/devflow optional split suggestions).
+    When ``paths`` is set, only those paths are planned (e.g. level-2 re-split).
     """
     settings = settings or load_settings()
     status = porcelain_status().strip()
@@ -355,8 +393,22 @@ def suggest_commit_batches(
         raise RuntimeError("Working tree is clean; nothing to split.")
 
     entries = list_change_entries()
-    paths = list_staged_paths(entries) if only_staged else _stageable_paths(entries)
-    if not paths:
+    if paths is not None:
+        wanted = {p.replace("\\", "/") for p in paths if p}
+        selected = []
+        for e in entries:
+            key = e.path.replace("\\", "/")
+            if key in wanted and e.path not in selected:
+                selected.append(e.path)
+        # Keep caller order when possible.
+        order = {p.replace("\\", "/"): i for i, p in enumerate(paths)}
+        selected.sort(key=lambda p: order.get(p.replace("\\", "/"), 10_000))
+        plan_paths = selected or list(paths)
+    elif only_staged:
+        plan_paths = list_staged_paths(entries)
+    else:
+        plan_paths = _stageable_paths(entries)
+    if not plan_paths:
         raise RuntimeError(
             "No staged paths found to split into commits."
             if only_staged
@@ -364,7 +416,7 @@ def suggest_commit_batches(
         )
 
     limit = min(settings.max_diff_chars, 32_000)
-    if only_staged:
+    if only_staged and paths is None:
         diff, truncated = get_staged_diff(
             ignore_patterns=settings.ignore_patterns,
             max_chars=limit,
@@ -389,10 +441,15 @@ def suggest_commit_batches(
                 )
                 truncated = True
 
+    detail = "commit-batch-plan"
+    if paths is not None:
+        detail = "commit-batch-plan-l2"
+    elif only_staged:
+        detail = "commit-batch-plan-staged"
     set_llm_usage_meta(
-        action_detail="commit-batch-plan-staged" if only_staged else "commit-batch-plan",
+        action_detail=detail,
         branch=current_branch_name(),
-        files_count=len(paths),
+        files_count=len(plan_paths),
         diff_chars=len(diff),
         truncated=truncated,
     )
@@ -401,16 +458,20 @@ def suggest_commit_batches(
         system=COMMIT_BATCH_SYSTEM_PROMPT,
         user=build_commit_batch_user_prompt(
             status_text=status,
-            paths=paths,
+            paths=plan_paths,
             diff_snippet=diff,
             truncated=truncated,
             max_diff_chars=settings.max_diff_chars,
             chinese=chinese,
+            message_lang=message_lang,
+            require_concrete_messages=require_concrete_messages,
         ),
     )
     plan = parse_commit_batch_plan(raw)
     if not plan.parsed_ok:
-        batches = fallback_commit_batches(paths, chinese=chinese)
+        batches = fallback_commit_batches(plan_paths, chinese=chinese)
+        if message_lang:
+            batches = apply_message_lang_to_batches(batches, message_lang=message_lang)
         return CommitBatchPlan(
             batches=batches,
             summary=(
@@ -423,10 +484,12 @@ def suggest_commit_batches(
         )
 
     batches = normalize_commit_batches(
-        plan.batches, allowed_paths=paths, chinese=chinese
+        plan.batches, allowed_paths=plan_paths, chinese=chinese
     )
     if not batches:
-        batches = fallback_commit_batches(paths, chinese=chinese)
+        batches = fallback_commit_batches(plan_paths, chinese=chinese)
+        if message_lang:
+            batches = apply_message_lang_to_batches(batches, message_lang=message_lang)
         return CommitBatchPlan(
             batches=batches,
             summary=(
@@ -436,6 +499,10 @@ def suggest_commit_batches(
             ),
             raw_text=raw,
             parsed_ok=False,
+        )
+    if message_lang or require_concrete_messages:
+        batches = apply_message_lang_to_batches(
+            batches, message_lang=message_lang or ("cn" if chinese else "en")
         )
     return CommitBatchPlan(
         batches=batches,
