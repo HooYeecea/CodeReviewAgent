@@ -1239,3 +1239,129 @@ def format_commits_for_prompt(
         text = text[:max_chars] + "\n\n... [commit list truncated by gai] ...\n"
         truncated = True
     return text, truncated
+
+
+def status_plain(cwd: Path | None = None) -> str:
+    """Full ``git status`` output (human-readable)."""
+    ensure_repo(cwd)
+    result = run_git("status", cwd=cwd)
+    if result.returncode != 0:
+        raise GitError(
+            result.stderr.strip() or result.stdout.strip() or "git status failed",
+            code="status_failed",
+        )
+    return (result.stdout or "").rstrip()
+
+
+@dataclass(frozen=True)
+class LogEntry:
+    """One commit row for ``gai log`` pretty / HTML views."""
+
+    hash: str
+    short: str
+    author: str
+    date: str
+    subject: str
+    decorations: str = ""
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "hash": self.hash,
+            "short": self.short,
+            "author": self.author,
+            "date": self.date,
+            "subject": self.subject,
+            "decorations": self.decorations,
+        }
+
+
+_LOG_FIELD_SEP = "\x1f"
+
+
+def collect_log_entries(
+    cwd: Path | None = None,
+    *,
+    max_count: int = 20,
+) -> list[LogEntry]:
+    """Return recent commits as structured rows."""
+    ensure_repo(cwd)
+    n = max(1, int(max_count))
+    fmt = f"%H{_LOG_FIELD_SEP}%h{_LOG_FIELD_SEP}%an{_LOG_FIELD_SEP}%aI{_LOG_FIELD_SEP}%s{_LOG_FIELD_SEP}%D"
+    result = run_git("log", f"-n{n}", f"--pretty=format:{fmt}", cwd=cwd)
+    if result.returncode != 0:
+        raise GitError(
+            result.stderr.strip() or result.stdout.strip() or "git log failed",
+            code="log_failed",
+        )
+    entries: list[LogEntry] = []
+    for line in (result.stdout or "").splitlines():
+        if not line.strip():
+            continue
+        parts = line.split(_LOG_FIELD_SEP)
+        if len(parts) < 5:
+            continue
+        full, short, author, date, subject = parts[:5]
+        deco = parts[5].strip() if len(parts) > 5 else ""
+        entries.append(
+            LogEntry(
+                hash=full.strip(),
+                short=short.strip(),
+                author=author.strip(),
+                date=date.strip(),
+                subject=subject.strip(),
+                decorations=deco,
+            )
+        )
+    return entries
+
+
+def log_plain(
+    cwd: Path | None = None,
+    *,
+    max_count: int = 20,
+    graph: bool = False,
+) -> str:
+    """Raw ``git log`` text (optional ``--graph --decorate``)."""
+    ensure_repo(cwd)
+    n = max(1, int(max_count))
+    args: list[str] = ["log", f"-n{n}"]
+    if graph:
+        args.extend(["--graph", "--decorate", "--oneline"])
+    else:
+        args.append("--oneline")
+        args.append("--decorate")
+    result = run_git(*args, cwd=cwd)
+    if result.returncode != 0:
+        raise GitError(
+            result.stderr.strip() or result.stdout.strip() or "git log failed",
+            code="log_failed",
+        )
+    return (result.stdout or "").rstrip()
+
+
+def log_graph_text(
+    cwd: Path | None = None,
+    *,
+    max_count: int = 20,
+) -> str:
+    """``git log --graph`` with a parse-friendly pretty format for pretty terminal."""
+    ensure_repo(cwd)
+    n = max(1, int(max_count))
+    # Keep graph prefixes; fields after the hash for light styling.
+    fmt = "%C(auto)%h %s %C(dim)(%an, %ar)%C(reset)%C(auto)%d"
+    result = run_git(
+        "-c",
+        "color.ui=always",
+        "log",
+        f"-n{n}",
+        "--graph",
+        "--decorate",
+        f"--pretty=format:{fmt}",
+        cwd=cwd,
+    )
+    if result.returncode != 0:
+        raise GitError(
+            result.stderr.strip() or result.stdout.strip() or "git log --graph failed",
+            code="log_failed",
+        )
+    return (result.stdout or "").rstrip()
