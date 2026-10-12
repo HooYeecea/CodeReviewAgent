@@ -1,4 +1,4 @@
-"""Tests for gai graph HTML branch visualization."""
+"""Tests for gai graph HTML IDEA-like branch visualization."""
 
 from __future__ import annotations
 
@@ -10,7 +10,11 @@ import pytest
 
 from gai.cli import run
 from gai.git_ops import GitError, collect_graph_snapshot
-from gai.graph_report import graph_data_path, graph_report_path, write_graph_report
+from gai.graph_report import (
+    graph_data_path,
+    graph_report_path,
+    write_graph_report,
+)
 
 
 def _git(cwd: Path, *args: str) -> None:
@@ -35,7 +39,7 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     _git(root, "config", "user.name", "Tester")
     (root / "a.txt").write_text("one\n", encoding="utf-8")
     _git(root, "add", "a.txt")
-    _git(root, "commit", "-m", "feat: first")
+    _git(root, "commit", "-m", "feat: first\n\nbody line")
     return root
 
 
@@ -45,15 +49,22 @@ def test_collect_graph_snapshot_multi_branch(repo: Path) -> None:
     _git(repo, "add", "x.txt")
     _git(repo, "commit", "-m", "feat: on feature")
     _git(repo, "checkout", "main")
+    _git(repo, "remote", "add", "origin", "https://example.com/demo.git")
 
     snap = collect_graph_snapshot(max_count=20)
     assert snap["branch"] == "main"
+    assert snap["repoName"] == repo.name
+    assert snap["remoteName"] == "origin"
+    assert snap["remoteUrl"] == "https://example.com/demo.git"
     names = {b["name"] for b in snap["branches"]}  # type: ignore[index]
     assert "main" in names and "feature/x" in names
     subjects = {c["subject"] for c in snap["commits"]}  # type: ignore[index]
     assert "feat: first" in subjects
     assert "feat: on feature" in subjects
     assert all("parents" in c for c in snap["commits"])  # type: ignore[union-attr]
+    first = next(c for c in snap["commits"] if c["subject"] == "feat: first")  # type: ignore[index]
+    assert first["email"] == "t@example.com"
+    assert "body line" in str(first.get("body") or "")
 
 
 def test_write_graph_report_and_overwrite(repo: Path) -> None:
@@ -64,20 +75,35 @@ def test_write_graph_report_and_overwrite(repo: Path) -> None:
     html = path1.read_text(encoding="utf-8")
     assert "btn-refresh" in html
     assert "graph-data.js" in html
+    assert "graph-app.js" in html
+    assert (path1.parent / "graph-app.js").is_file()
+    assert "graph-table" in html
+    assert "drawer" in html
+    assert "tooltip" in html
+    assert "btn-collapse" in html
+    assert "btn-expand" in html
+    assert "GaiGraphApp.createApp" in html
     assert "branch-checks" in html
-    assert "btn-current" in html
-    assert "filterCommits" in html
-    assert "layoutLanes" in html
-    assert "GAI_GRAPH_DATA" in graph_data_path(repo).read_text(encoding="utf-8")
+    assert 'class="chrome"' in html
+    assert "position: sticky" in html
+    assert 'id="repo-name"' in html
+    assert "GitgraphJS" not in html
+    app_js = (path1.parent / "graph-app.js").read_text(encoding="utf-8")
+    assert "collapseRows" in app_js
+    assert "paintArrowHead" in app_js
+    assert "fold-hit" in app_js
+    data_txt = graph_data_path(repo).read_text(encoding="utf-8")
+    assert "commits" in data_txt
+    assert "repoName" in data_txt
+    assert "GAI_GRAPH_DATA" in data_txt
+    assert "collapseMin" in data_txt
 
     (repo / "b.txt").write_text("b\n", encoding="utf-8")
     _git(repo, "add", "b.txt")
     _git(repo, "commit", "-m", "feat: second")
     path2 = write_graph_report(chinese=False, max_count=10)
     assert path2 == path1
-    data_txt = graph_data_path(repo).read_text(encoding="utf-8")
-    assert "feat: second" in data_txt
-    assert "initialLang" in data_txt
+    assert "feat: second" in graph_data_path(repo).read_text(encoding="utf-8")
 
 
 def test_graph_not_repo_friendly(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -106,6 +132,8 @@ def test_cli_graph_no_open(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     payload = json.loads(raw.split("=", 1)[1].strip().rstrip(";"))
     assert payload["initialLang"] == "cn"
     assert payload["branch"] == "main"
+    assert payload["commits"]
+    assert "email" in payload["commits"][0]
 
 
 def test_cli_graph_opens_by_default(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
