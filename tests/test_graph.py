@@ -1,4 +1,4 @@
-"""Tests for gai graph HTML IDEA-like branch visualization."""
+"""Tests for gai graph HTML ECharts node-link visualization."""
 
 from __future__ import annotations
 
@@ -77,31 +77,24 @@ def test_write_graph_report_and_overwrite(repo: Path) -> None:
     assert "graph-data.js" in html
     assert "graph-app.js" in html
     assert (path1.parent / "graph-app.js").is_file()
-    assert "graph-table" in html
+    assert "graph-chart" in html
+    assert "echarts" in html
     assert "drawer" in html
-    assert "tooltip" in html
     assert "btn-collapse" in html
     assert "btn-expand" in html
     assert "GaiGraphApp.createApp" in html
     assert "branch-checks" in html
     assert 'class="chrome"' in html
-    assert "position: sticky" in html
     assert 'id="repo-name"' in html
     assert "GitgraphJS" not in html
-    assert "btn-long-edges" in html
     app_js = (path1.parent / "graph-app.js").read_text(encoding="utf-8")
+    assert "toEchartsGraph" in app_js
     assert "buildVisibleModel" in app_js
-    assert "assignCommitColors" in app_js
-    assert "applyLongEdges" in app_js
-    assert "planLinearFolds" in app_js
-    assert "paintArrowHead" in app_js
-    assert "fold-hit" in app_js
+    assert "type: \"graph\"" in app_js or "type: 'graph'" in app_js
     data_txt = graph_data_path(repo).read_text(encoding="utf-8")
     assert "commits" in data_txt
     assert "repoName" in data_txt
     assert "GAI_GRAPH_DATA" in data_txt
-    assert "collapseMin" in data_txt
-    assert "longEdgeMin" in data_txt
 
     (repo / "b.txt").write_text("b\n", encoding="utf-8")
     _git(repo, "add", "b.txt")

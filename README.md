@@ -499,7 +499,7 @@ gai log -n 50 -g --html --open --cn
 
 ### `gai graph`
 
-自绘 **IDEA 风格**本地分支链路图（写入并覆盖 `.gai/graph-report.html` + `graph-data.js`）：色轨分叉/汇合、分支标签、线性历史折叠箭头、悬停摘要、点击右侧击穿详情。默认打开浏览器；页内可筛选分支；非 git 仓库会给出友好错误提示。
+用 **ECharts 节点连边图**展示本地分支提交拓扑（写入并覆盖 `.gai/graph-report.html` + `graph-data.js`）：提交为节点、父子为箭头边，可缩放/拖拽；支持分支筛选、线性节点折叠、悬停摘要、点击击穿详情。默认打开浏览器；推荐 `--serve`（CDN/刷新更稳）；非 git 仓库会给出友好错误提示。
 
 ```bash
 gai graph --cn
