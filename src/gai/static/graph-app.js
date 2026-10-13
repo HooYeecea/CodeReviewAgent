@@ -1,9 +1,5 @@
 /**
- * IDEA-like VCS Log graph painter for gai graph.
- *
- * Pipeline:
- *   filter → color-by-branch → find linear folds → re-lane visible commits
- *   → long-edge arrows → paint cells (up/down edges dock like SimpleGraphCellPainter)
+ * gai graph — ECharts node-link commit graph (linked-list / topology feel).
  */
 (function (global) {
   "use strict";
@@ -21,15 +17,12 @@
     "#6c8cd5",
   ];
 
-  var ROW_H = 24;
-  var NODE_W = 13;
-  var LINE_W = 1.6;
-  var CIRCLE_R = 3.6;
-  var ARROW_LEN = 0.32;
-  var ARROW_COS2 = 0.7;
   var COLLAPSE_MIN = 3;
-  /** Visible through-rows before a lane becomes a long-edge arrow (IDEA default). */
-  var LONG_EDGE_MIN = 6;
+  /** Column / row spacing in cartesian units (1 row ≈ one clear node slot). */
+  var X_UNIT = 1.6;
+  var Y_UNIT = 1;
+  /** How many commits fit in the default vertical window (readable links). */
+  var VIEW_ROWS = 12;
 
   function colorOf(i) {
     return COLORS[((i % COLORS.length) + COLORS.length) % COLORS.length];
@@ -91,9 +84,6 @@
     return map;
   }
 
-  /**
-   * Stable commit colors from branch identity (current branch paints shared history first).
-   */
   function assignCommitColors(commits, branches) {
     var bmap = branchColorMap(branches);
     var byH = indexByHash(commits);
@@ -204,119 +194,6 @@
     return true;
   }
 
-  /**
-   * Newest-first lane assignment with per-lane color identity.
-   * commitColors[hash] drives new lane / node color; first-parent keeps lane color.
-   */
-  function assignLanes(commits, commitColors) {
-    commitColors = commitColors || {};
-    var map = indexByHash(commits);
-    var columns = [];
-    var laneColors = [];
-    var rows = [];
-    var prevAfter = [];
-    var prevColors = [];
-
-    commits.forEach(function (c) {
-      var arrivedFromAbove = columns.indexOf(c.hash) >= 0;
-      var col = columns.indexOf(c.hash);
-      var nodeColor = commitColors[c.hash] || colorOf(col < 0 ? columns.length : col);
-      if (col < 0) {
-        col = columns.indexOf(null);
-        if (col < 0) {
-          col = columns.length;
-          columns.push(c.hash);
-          laneColors.push(nodeColor);
-        } else {
-          columns[col] = c.hash;
-          laneColors[col] = nodeColor;
-        }
-      } else if (!arrivedFromAbove) {
-        laneColors[col] = nodeColor;
-      } else if (!laneColors[col]) {
-        laneColors[col] = nodeColor;
-      }
-
-      var before = columns.slice();
-      var colorsBefore = laneColors.slice();
-      var next = columns.slice();
-      var colorsNext = laneColors.slice();
-      next[col] = null;
-
-      var parents = (c.parents || []).filter(function (p) {
-        return !!map[p];
-      });
-      var placedFirst = false;
-      var parentCols = [];
-      var parentEdgeColors = [];
-
-      parents.forEach(function (p) {
-        var existing = next.indexOf(p);
-        var pColor = commitColors[p] || laneColors[col] || nodeColor;
-        if (existing >= 0) {
-          parentCols.push(existing);
-          parentEdgeColors.push(colorsNext[existing] || pColor);
-          return;
-        }
-        if (!placedFirst) {
-          next[col] = p;
-          colorsNext[col] = colorsBefore[col] || pColor;
-          parentCols.push(col);
-          parentEdgeColors.push(colorsNext[col]);
-          placedFirst = true;
-        } else {
-          var free = next.indexOf(null);
-          var slot;
-          if (free < 0) {
-            slot = next.length;
-            next.push(p);
-            colorsNext.push(pColor);
-          } else {
-            slot = free;
-            next[free] = p;
-            colorsNext[free] = pColor;
-          }
-          parentCols.push(slot);
-          parentEdgeColors.push(colorsNext[slot]);
-        }
-      });
-
-      while (next.length && next[next.length - 1] === null) {
-        next.pop();
-        colorsNext.pop();
-      }
-
-      rows.push({
-        commit: c,
-        col: col,
-        color: colorsBefore[col] || nodeColor,
-        before: before,
-        after: next.slice(),
-        colorsBefore: colorsBefore.slice(),
-        colorsAfter: colorsNext.slice(),
-        prevAfter: prevAfter.slice(),
-        prevColors: prevColors.slice(),
-        arrivedFromAbove: arrivedFromAbove,
-        parents: parents,
-        parentCols: parentCols,
-        parentEdgeColors: parentEdgeColors,
-        fold: null,
-        longDown: null,
-        longUp: null,
-        skipThrough: {},
-      });
-      prevAfter = next.slice();
-      prevColors = colorsNext.slice();
-      columns = next;
-      laneColors = colorsNext;
-    });
-    return rows;
-  }
-
-  /**
-   * Find linear folds on the FULL filtered list, return hidden hashes + fold
-   * attachments keyed by the visible commit ABOVE each run.
-   */
   function planLinearFolds(commits, children, tips, collapseMin, expanded) {
     var min = Math.max(1, collapseMin || COLLAPSE_MIN);
     var hidden = {};
@@ -335,8 +212,9 @@
       for (var k = start; k < i; k++) hashes.push(commits[k].hash);
       var sid = hashes[0] + ".." + hashes[hashes.length - 1];
       if (expanded[sid]) continue;
-      for (var k2 = start; k2 < i; k2++) hidden[hashes[k2 - start]] = true;
-      /* above = last commit before the run; if none, keep first of run visible */
+      hashes.forEach(function (h) {
+        hidden[h] = true;
+      });
       var aboveHash = start > 0 ? commits[start - 1].hash : null;
       if (aboveHash) {
         foldsByAbove[aboveHash] = {
@@ -346,7 +224,6 @@
           belowHash: i < commits.length ? commits[i].hash : null,
         };
       } else {
-        /* keep first visible, hide the rest */
         delete hidden[hashes[0]];
         foldsByAbove[hashes[0]] = {
           id: sid,
@@ -360,84 +237,6 @@
     return { hidden: hidden, foldsByAbove: foldsByAbove };
   }
 
-  /**
-   * After re-laning visible rows, compress long inactive lanes into arrows
-   * (IDEA "Show Long Edges" off).
-   */
-  function applyLongEdges(rows, longEdgeMin, enabled) {
-    if (!enabled) return rows;
-    var min = Math.max(2, longEdgeMin || LONG_EDGE_MIN);
-    var maxCol = 0;
-    rows.forEach(function (r) {
-      maxCol = Math.max(maxCol, r.col, (r.after || []).length, (r.prevAfter || []).length);
-    });
-
-    for (var col = 0; col <= maxCol; col++) {
-      var i = 0;
-      while (i < rows.length) {
-        /* Find a row that emits this lane downward (node on col or through). */
-        var start = -1;
-        for (; i < rows.length; i++) {
-          var r = rows[i];
-          var emits =
-            r.col === col ||
-            (r.after && r.after[col] != null) ||
-            (r.prevAfter && r.prevAfter[col] != null && r.col !== col);
-          if (emits) {
-            start = i;
-            break;
-          }
-        }
-        if (start < 0) break;
-
-        /* Walk while lane stays active without another node on this col. */
-        var end = start;
-        for (var j = start + 1; j < rows.length; j++) {
-          var rj = rows[j];
-          var active =
-            (rj.prevAfter && rj.prevAfter[col] != null) ||
-            (rj.after && rj.after[col] != null) ||
-            rj.col === col;
-          if (!active) break;
-          end = j;
-          if (rj.col === col) break; /* landed on next node */
-        }
-
-        var span = end - start;
-        if (span >= min && rows[end].col === col && start !== end) {
-          /* Arrow on start (down) and end (up); skip through in between. */
-          var color =
-            (rows[start].colorsAfter && rows[start].colorsAfter[col]) ||
-            (rows[start].colorsBefore && rows[start].colorsBefore[col]) ||
-            rows[start].color;
-          rows[start].longDown = {
-            col: col,
-            color: color,
-            gap: span - 1,
-            targetHash: rows[end].commit.hash,
-          };
-          rows[end].longUp = {
-            col: col,
-            color: color,
-            gap: span - 1,
-            sourceHash: rows[start].commit.hash,
-          };
-          for (var m = start + 1; m < end; m++) {
-            rows[m].skipThrough[col] = true;
-          }
-          i = end + 1;
-        } else {
-          i = start + 1;
-        }
-      }
-    }
-    return rows;
-  }
-
-  /**
-   * Walk through hidden commits to the next visible ancestor (linear folds are
-   * single-parent, so first-parent walk is enough; also skips gaps).
-   */
   function resolveVisibleAncestor(startHash, hidden, visibleSet, byAll) {
     var h = startHash;
     var guard = 0;
@@ -450,7 +249,6 @@
     return null;
   }
 
-  /** Clone visible commits with parents rewritten past hidden linear middles. */
   function rewriteVisibleCommits(commits, hidden) {
     var byAll = indexByHash(commits);
     var visibleSet = {};
@@ -485,14 +283,52 @@
       });
   }
 
-  /**
-   * Full visible geometry: fold → rewrite parents → re-lane → attach folds → long edges.
-   */
+  /** Newest-first lane columns for hierarchical X placement. */
+  function assignLanes(commits) {
+    var map = indexByHash(commits);
+    var columns = [];
+    var rows = [];
+    commits.forEach(function (c) {
+      var col = columns.indexOf(c.hash);
+      if (col < 0) {
+        col = columns.indexOf(null);
+        if (col < 0) {
+          col = columns.length;
+          columns.push(c.hash);
+        } else {
+          columns[col] = c.hash;
+        }
+      }
+      var next = columns.slice();
+      next[col] = null;
+      var parents = (c.parents || []).filter(function (p) {
+        return !!map[p];
+      });
+      var placedFirst = false;
+      parents.forEach(function (p) {
+        if (next.indexOf(p) >= 0) return;
+        if (!placedFirst) {
+          next[col] = p;
+          placedFirst = true;
+        } else {
+          var free = next.indexOf(null);
+          if (free < 0) next.push(p);
+          else next[free] = p;
+        }
+      });
+      while (next.length && next[next.length - 1] === null) next.pop();
+      rows.push({ commit: c, col: col, parents: parents });
+      columns = next;
+    });
+    return rows;
+  }
+
   function buildVisibleModel(commits, branches, tips, opts) {
     opts = opts || {};
     var children = buildChildren(commits);
     var commitColors = assignCommitColors(commits, branches);
-    var collapseOn = opts.collapseLinear !== false;
+    /* Default expanded; only collapse when explicitly requested. */
+    var collapseOn = opts.collapseLinear === true;
     var expanded = opts.expanded || {};
     var hidden = {};
     var foldsByAbove = {};
@@ -510,297 +346,140 @@
     }
 
     var visibleCommits = rewriteVisibleCommits(commits, hidden);
-    var rows = assignLanes(visibleCommits, commitColors);
-    rows.forEach(function (r) {
-      var fold = foldsByAbove[r.commit.hash];
-      if (fold && fold.count > 0) {
-        r.fold = {
-          id: fold.id,
-          count: fold.count,
-          hashes: fold.hashes,
-          belowHash: fold.belowHash,
-          col: r.col,
-          color: r.color,
-        };
+    var lanes = assignLanes(visibleCommits);
+    lanes.forEach(function (r) {
+      r.color = commitColors[r.commit.hash] || colorOf(r.col);
+      r.fold = foldsByAbove[r.commit.hash] || null;
+    });
+    return { rows: lanes, commitColors: commitColors, hidden: hidden };
+  }
+
+  /** Build ECharts graph nodes/links from lane rows. */
+  function toEchartsGraph(rows, tips, bmap, dark) {
+    var nodes = [];
+    var links = [];
+    var categories = [];
+    var catIndex = {};
+    Object.keys(bmap || {}).forEach(function (name, i) {
+      catIndex[name] = i;
+      categories.push({ name: name, itemStyle: { color: bmap[name] } });
+    });
+    if (!categories.length) {
+      categories.push({ name: "commits", itemStyle: { color: COLORS[0] } });
+    }
+
+    rows.forEach(function (r, idx) {
+      var c = r.commit;
+      var refs = refsFor(c, tips);
+      var branchNames = refs
+        .filter(function (x) {
+          return x.kind === "branch";
+        })
+        .map(function (x) {
+          return x.name;
+        });
+      var cat = 0;
+      for (var bi = 0; bi < branchNames.length; bi++) {
+        if (catIndex[branchNames[bi]] !== undefined) {
+          cat = catIndex[branchNames[bi]];
+          break;
+        }
       }
+      var labelBits = [];
+      refs.forEach(function (ref) {
+        if (ref.kind === "head") labelBits.push("HEAD");
+        else labelBits.push(ref.name);
+      });
+      var title = (c.subject || "").slice(0, 42);
+      if ((c.subject || "").length > 42) title += "…";
+      var nodeLabel = (c.short || c.hash.slice(0, 7)) + (title ? "\n" + title : "");
+      if (labelBits.length) nodeLabel = labelBits.join(" · ") + "\n" + nodeLabel;
+
+      var size = refs.length ? 46 : 36;
+      if (r.fold && r.fold.count) size = 42;
+
+      nodes.push({
+        id: c.hash,
+        name: c.short || c.hash.slice(0, 7),
+        /* cartesian2d: [col, row]; keep hash on commit for click handlers */
+        value: [r.col * X_UNIT, idx * Y_UNIT],
+        category: cat,
+        symbolSize: size,
+        itemStyle: {
+          color: r.color,
+          borderColor: dark ? "#fff" : "#1a1d23",
+          borderWidth: refs.length ? 2.5 : 1.5,
+          shadowBlur: 8,
+          shadowColor: "rgba(0,0,0,0.18)",
+        },
+        /* Details hidden by default; shown on hover (emphasis) / selected click. */
+        label: {
+          show: false,
+          position: "right",
+          distance: 14,
+          formatter: nodeLabel,
+          color: dark ? "#e8eaed" : "#1a1d23",
+          fontSize: 12,
+          lineHeight: 16,
+          fontFamily: 'Segoe UI, "Helvetica Neue", sans-serif',
+          backgroundColor: dark ? "rgba(27,32,40,0.92)" : "rgba(255,255,255,0.94)",
+          padding: [6, 8],
+          borderRadius: 6,
+          borderColor: dark ? "#3a4250" : "#d0d7e2",
+          borderWidth: 1,
+        },
+        commit: c,
+        fold: r.fold,
+        col: r.col,
+        row: idx,
+      });
+
+      (r.parents || []).forEach(function (p) {
+        var isFold = !!(r.fold && r.fold.belowHash === p);
+        links.push({
+          source: c.hash,
+          target: p,
+          lineStyle: {
+            color: r.color,
+            width: isFold ? 2 : 2.4,
+            type: isFold ? "dashed" : "solid",
+            curveness: r.col !== (rows.find(function (x) {
+              return x.commit.hash === p;
+            }) || { col: r.col }).col
+              ? 0.18
+              : 0.05,
+            opacity: 0.85,
+          },
+          symbol: ["none", "arrow"],
+          symbolSize: [0, 10],
+        });
+      });
     });
 
-    applyLongEdges(rows, opts.longEdgeMin || LONG_EDGE_MIN, opts.hideLongEdges !== false);
-    return { rows: rows, commitColors: commitColors, hidden: hidden };
-  }
-
-  function laneX(col) {
-    return NODE_W * col + NODE_W / 2;
-  }
-
-  function rotate(x1, y1, x2, y2, cos, sin, len) {
-    var dx = x2 - x1;
-    var dy = y2 - y1;
-    var d = Math.sqrt(dx * dx + dy * dy) || 1;
-    var ux = (dx / d) * len;
-    var uy = (dy / d) * len;
-    return {
-      x: x2 - ux * cos + uy * sin,
-      y: y2 - uy * cos - ux * sin,
-    };
-  }
-
-  function paintArrowHead(parts, x1, y1, tipX, tipY, color) {
-    var len = ARROW_LEN * ROW_H;
-    var cos = Math.sqrt(ARROW_COS2);
-    var sin = Math.sqrt(1 - ARROW_COS2);
-    var a = rotate(x1, y1, tipX, tipY, cos, sin, len);
-    var b = rotate(x1, y1, tipX, tipY, cos, -sin, len);
-    parts.push(
-      '<line x1="' +
-        tipX +
-        '" y1="' +
-        tipY +
-        '" x2="' +
-        a.x +
-        '" y2="' +
-        a.y +
-        '" stroke="' +
-        color +
-        '" stroke-width="' +
-        LINE_W +
-        '" stroke-linecap="round"/>'
-    );
-    parts.push(
-      '<line x1="' +
-        tipX +
-        '" y1="' +
-        tipY +
-        '" x2="' +
-        b.x +
-        '" y2="' +
-        b.y +
-        '" stroke="' +
-        color +
-        '" stroke-width="' +
-        LINE_W +
-        '" stroke-linecap="round"/>'
-    );
-  }
-
-  function strokeLine(parts, x1, y1, x2, y2, color, dashed) {
-    parts.push(
-      '<line x1="' +
-        x1 +
-        '" y1="' +
-        y1 +
-        '" x2="' +
-        x2 +
-        '" y2="' +
-        y2 +
-        '" stroke="' +
-        color +
-        '" stroke-width="' +
-        LINE_W +
-        '" stroke-linecap="round"' +
-        (dashed ? ' stroke-dasharray="2.5 2.5"' : "") +
-        "/>"
-    );
+    return { nodes: nodes, links: links, categories: categories };
   }
 
   /**
-   * Paint one cell. Down edges extend to y=h+h/2; up edges to y=-h/2 so neighbors dock.
+   * Default vertical window for cartesian dataZoom — shows ~VIEW_ROWS commits
+   * so edges stay readable (not a glued pillar of the entire history).
    */
-  function drawCellSvg(row, opts) {
-    opts = opts || {};
-    var after = row.after || [];
-    var prevAfter = row.prevAfter || [];
-    var colorsBefore = row.colorsBefore || [];
-    var colorsAfter = row.colorsAfter || [];
-    var prevColors = row.prevColors || [];
-    var laneCount = Math.max(
-      after.length,
-      prevAfter.length,
-      (row.parentCols || []).reduce(function (m, c) {
-        return Math.max(m, c + 1);
-      }, 0),
-      row.col + 1,
-      1
-    );
-    var w = Math.max(NODE_W * laneCount + 4, NODE_W + 4);
-    var h = ROW_H;
-    var mid = h / 2;
-    var parts = [];
-    parts.push(
-      '<svg xmlns="http://www.w3.org/2000/svg" width="' +
-        w +
-        '" height="' +
-        h +
-        '" viewBox="0 0 ' +
-        w +
-        " " +
-        h +
-        '" class="graph-svg" style="overflow:visible">'
-    );
-
-    var skip = row.skipThrough || {};
-    var hasFoldArrow = !!(row.fold && row.fold.count);
-
-    /* Through-lanes (not own column), unless long-edge skipped. */
-    for (var j = 0; j < laneCount; j++) {
-      if (j === row.col) continue;
-      if (skip[j]) continue;
-      if (row.longUp && row.longUp.col === j) continue;
-      if (row.longDown && row.longDown.col === j) continue;
-      var top = prevAfter[j] != null;
-      var bot = after[j] != null;
-      if (!top && !bot) continue;
-      var x = laneX(j);
-      var c = (top ? prevColors[j] : colorsAfter[j]) || colorsBefore[j] || colorOf(j);
-      if (top && bot) strokeLine(parts, x, 0, x, h, c, false);
-      else if (top) strokeLine(parts, x, 0, x, mid, c, false);
-      else strokeLine(parts, x, mid, x, h, c, false);
-    }
-
-    var cx = laneX(row.col);
-    var main = row.color || colorsBefore[row.col] || colorOf(row.col);
-
-    /* Up edge into node (from previous row). */
-    if (row.longUp && row.longUp.col === row.col) {
-      var upC = row.longUp.color || main;
-      var yUp = CIRCLE_R / 2 + 1;
-      strokeLine(parts, cx, mid, cx, yUp, upC, true);
-      paintArrowHead(parts, cx, mid, cx, yUp, upC);
-      parts.push(
-        '<rect class="fold-hit" data-fold="long:' +
-          escapeHtml(row.longUp.sourceHash || "") +
-          '" data-count="' +
-          (row.longUp.gap || 0) +
-          '" data-kind="long" x="' +
-          (cx - 7) +
-          '" y="0" width="14" height="' +
-          mid +
-          '" fill="transparent" style="cursor:pointer"/>'
-      );
-    } else if (row.arrivedFromAbove) {
-      strokeLine(parts, cx, 0, cx, mid, main, false);
-    }
-
-    /* Incoming diagonal stubs from previous row's down-diagonals (up half). */
-    if (opts.prevRow && !row.longUp) {
-      var prev = opts.prevRow;
-      var prevParents = prev.parentCols || [];
-      var prevColorsE = prev.parentEdgeColors || [];
-      if (!(prev.fold && prev.fold.count) && !prev.longDown) {
-        prevParents.forEach(function (pc, idx) {
-          if (pc === prev.col) return;
-          if (pc !== row.col && prev.col !== row.col) {
-            /* only draw up-half if this row is the landing column */
-          }
-          if (pc !== row.col) return;
-          var fromX = laneX(prev.col);
-          var toX = laneX(pc);
-          var ec = prevColorsE[idx] || prev.color || main;
-          /* Up line from mid toward previous mid: (toX, mid) → (fromX, -h/2) */
-          strokeLine(parts, toX, mid, fromX, -h / 2, ec, false);
-        });
-      }
-    }
-
-    /* Down edges */
-    if (hasFoldArrow) {
-      var fc = (row.fold && row.fold.color) || main;
-      var yTip = h - (CIRCLE_R / 2 + 1);
-      strokeLine(parts, cx, mid, cx, yTip, fc, true);
-      paintArrowHead(parts, cx, mid, cx, yTip, fc);
-      parts.push(
-        '<rect class="fold-hit" data-fold="' +
-          escapeHtml(row.fold.id) +
-          '" data-count="' +
-          row.fold.count +
-          '" data-kind="linear" x="' +
-          (cx - 7) +
-          '" y="' +
-          (mid + 2) +
-          '" width="14" height="' +
-          (h - mid - 2) +
-          '" fill="transparent" style="cursor:pointer"/>'
-      );
-    } else if (row.longDown && row.longDown.col === row.col) {
-      var ldC = row.longDown.color || main;
-      var yTip2 = h - (CIRCLE_R / 2 + 1);
-      strokeLine(parts, cx, mid, cx, yTip2, ldC, true);
-      paintArrowHead(parts, cx, mid, cx, yTip2, ldC);
-      parts.push(
-        '<rect class="fold-hit" data-fold="long:' +
-          escapeHtml(row.commit.hash) +
-          '" data-count="' +
-          (row.longDown.gap || 0) +
-          '" data-kind="long" x="' +
-          (cx - 7) +
-          '" y="' +
-          (mid + 2) +
-          '" width="14" height="' +
-          (h - mid - 2) +
-          '" fill="transparent" style="cursor:pointer"/>'
-      );
-    } else {
-      var parentCols = row.parentCols || [];
-      var edgeColors = row.parentEdgeColors || [];
-      parentCols.forEach(function (pc, idx) {
-        var px = laneX(pc);
-        var c2 = edgeColors[idx] || colorsAfter[pc] || main;
-        if (pc === row.col) {
-          strokeLine(parts, cx, mid, cx, h, c2, false);
-        } else {
-          /* Down diagonal into next row mid (IDEA paintDownLine). */
-          strokeLine(parts, cx, mid, px, h + h / 2, c2, false);
-        }
-      });
-    }
-
-    /* Long-edge down on a through column (arrow from a side lane). */
-    if (row.longDown && row.longDown.col !== row.col) {
-      var lc = row.longDown.col;
-      var lx = laneX(lc);
-      var lcol = row.longDown.color || colorOf(lc);
-      var yT = h - (CIRCLE_R / 2 + 1);
-      strokeLine(parts, lx, 0, lx, yT, lcol, true);
-      paintArrowHead(parts, lx, 0, lx, yT, lcol);
-    }
-    if (row.longUp && row.longUp.col !== row.col) {
-      var lc2 = row.longUp.col;
-      var lx2 = laneX(lc2);
-      var lcol2 = row.longUp.color || colorOf(lc2);
-      var yU = CIRCLE_R / 2 + 1;
-      strokeLine(parts, lx2, mid, lx2, yU, lcol2, true);
-      paintArrowHead(parts, lx2, mid, lx2, yU, lcol2);
-    }
-
-    parts.push(
-      '<circle cx="' +
-        cx +
-        '" cy="' +
-        mid +
-        '" r="' +
-        CIRCLE_R +
-        '" fill="' +
-        main +
-        '" stroke="' +
-        main +
-        '"/>'
-    );
-    if (opts.selected) {
-      parts.push(
-        '<circle cx="' +
-          cx +
-          '" cy="' +
-          mid +
-          '" r="' +
-          (CIRCLE_R + 2.2) +
-          '" fill="none" stroke="' +
-          main +
-          '" stroke-width="1.2" opacity="0.55"/>'
-      );
-    }
-
-    parts.push("</svg>");
-    return { html: parts.join(""), width: w };
+  function computeDataZoomWindow(nodes) {
+    var n = Math.max((nodes && nodes.length) || 1, 1);
+    var maxCol = 0;
+    (nodes || []).forEach(function (node) {
+      var col = (node.value && node.value[0]) || 0;
+      if (col > maxCol) maxCol = col;
+    });
+    var yEnd = Math.min(n - 0.35, VIEW_ROWS - 0.35);
+    if (n <= VIEW_ROWS) yEnd = n - 0.35;
+    return {
+      yStart: -0.55,
+      yEnd: Math.max(yEnd, 0.55),
+      xStart: -0.9,
+      xEnd: Math.max(maxCol + 1.8, 2.2),
+      yMax: Math.max(n - 0.25, VIEW_ROWS),
+      xMax: Math.max(maxCol + 1.8, 2.2),
+    };
   }
 
   function createApp(options) {
@@ -811,9 +490,11 @@
     var activeHash = null;
     var byHash = {};
     var data = options.data || {};
-    var collapseLinear = true;
-    var hideLongEdges = true;
-    var showLongEdgesExpanded = {}; /* long:hash → expanded */
+    var collapseLinear = false;
+    var chart = null;
+    var foldByHash = {};
+    var savedZoom = null;
+    var resetViewOnPaint = true;
 
     function bootData() {
       if (global.GAI_GRAPH_DATA) return global.GAI_GRAPH_DATA;
@@ -890,6 +571,7 @@
       box.querySelectorAll("input[type=checkbox]").forEach(function (inp) {
         inp.addEventListener("change", function () {
           selected[inp.getAttribute("data-branch")] = inp.checked;
+          resetViewOnPaint = true;
           paint();
         });
       });
@@ -911,53 +593,9 @@
       ) {
         selected[branches[0].name] = true;
       }
+      resetViewOnPaint = true;
       buildFilterUI(branches);
       paint();
-    }
-
-    function showTooltip(html, ev) {
-      var tip = document.getElementById("tooltip");
-      tip.innerHTML = html;
-      tip.style.display = "block";
-      moveTooltip(ev);
-    }
-
-    function moveTooltip(ev) {
-      var tip = document.getElementById("tooltip");
-      if (tip.style.display === "none") return;
-      var x = ev.clientX + 14;
-      var y = ev.clientY + 14;
-      var rect = tip.getBoundingClientRect();
-      if (x + rect.width > window.innerWidth - 8) x = ev.clientX - rect.width - 10;
-      if (y + rect.height > window.innerHeight - 8) y = ev.clientY - rect.height - 10;
-      tip.style.left = x + "px";
-      tip.style.top = y + "px";
-    }
-
-    function hideTooltip() {
-      document.getElementById("tooltip").style.display = "none";
-    }
-
-    function commitTooltipHtml(commit) {
-      var refs = refsFor(commit, tipMap(data.branches))
-        .map(function (r) {
-          return r.name;
-        })
-        .join(", ");
-      return (
-        '<div class="t-sub">' +
-        escapeHtml(commit.subject || "") +
-        "</div>" +
-        '<div class="t-meta">' +
-        escapeHtml(commit.short || "") +
-        " · " +
-        escapeHtml(commit.author || "") +
-        "</div>" +
-        '<div class="t-meta">' +
-        escapeHtml(formatDate(commit.date)) +
-        "</div>" +
-        (refs ? '<div class="t-meta">' + escapeHtml(refs) + "</div>" : "")
-      );
     }
 
     function openDetail(hash) {
@@ -1010,6 +648,16 @@
             .join("")
         : escapeHtml(dict.detail_none || "(none)");
       var body = ((c.subject || "") + (c.body ? "\n\n" + c.body : "")).trim();
+      var foldBtn = "";
+      var foldMeta = foldByHash[hash] || null;
+      if (foldMeta && foldMeta.id && foldMeta.count) {
+        foldBtn =
+          '<div style="margin-top:12px"><button type="button" id="btn-expand-fold" data-fold="' +
+          escapeHtml(foldMeta.id) +
+          '">' +
+          escapeHtml((dict.expand || "Expand {n} commits").replace("{n}", String(foldMeta.count))) +
+          "</button></div>";
+      }
       document.getElementById("drawer-body").innerHTML =
         '<div class="k">' +
         escapeHtml(dict.detail_hash || "Commit") +
@@ -1047,28 +695,75 @@
         "</div>" +
         '<div class="v"><pre class="body">' +
         escapeHtml(body || dict.detail_none || "") +
-        "</pre></div>";
+        "</pre></div>" +
+        foldBtn;
       document.querySelectorAll("#drawer-body .parent-link").forEach(function (el) {
         el.addEventListener("click", function () {
           openDetail(el.getAttribute("data-parent"));
-          paint();
-          var row = document.querySelector(
-            'tr.commit-row[data-hash="' + el.getAttribute("data-parent") + '"]'
-          );
-          if (row) row.scrollIntoView({ block: "center", behavior: "smooth" });
         });
       });
-      document.querySelectorAll("tr.commit-row").forEach(function (tr) {
-        tr.classList.toggle("active", tr.getAttribute("data-hash") === hash);
-      });
+      var expFold = document.getElementById("btn-expand-fold");
+      if (expFold) {
+        expFold.addEventListener("click", function () {
+          resetViewOnPaint = false;
+          expanded[expFold.getAttribute("data-fold")] = true;
+          paint();
+        });
+      }
     }
 
     function closeDetail() {
       activeHash = null;
       document.getElementById("layout").classList.add("no-detail");
-      document.querySelectorAll("tr.commit-row").forEach(function (tr) {
-        tr.classList.remove("active");
-      });
+      if (chart) {
+        try {
+          chart.resize();
+        } catch (e) {}
+      }
+    }
+
+    function ensureChart() {
+      var el = document.getElementById("graph-chart");
+      if (!el) return null;
+      if (typeof global.echarts === "undefined") return null;
+      if (!chart) {
+        chart = global.echarts.init(el, null, { renderer: "canvas" });
+        chart.on("click", function (params) {
+          if (params.dataType === "node" && params.data) {
+            var hash = params.data.id || (params.data.commit && params.data.commit.hash);
+            if (!hash) return;
+            activeHash = hash;
+            resetViewOnPaint = false;
+            openDetail(hash);
+            paint();
+          }
+        });
+        chart.on("dblclick", function (params) {
+          if (params.dataType === "node" && params.data && params.data.fold && params.data.fold.id) {
+            resetViewOnPaint = false;
+            expanded[params.data.fold.id] = true;
+            paint();
+          }
+        });
+        chart.on("datazoom", function () {
+          try {
+            var opt = chart.getOption();
+            var dz = opt.dataZoom || [];
+            savedZoom = dz.map(function (z) {
+              return {
+                startValue: z.startValue,
+                endValue: z.endValue,
+                start: z.start,
+                end: z.end,
+              };
+            });
+          } catch (e) {}
+        });
+        window.addEventListener("resize", function () {
+          if (chart) chart.resize();
+        });
+      }
+      return chart;
     }
 
     function paint() {
@@ -1083,163 +778,236 @@
       });
 
       var empty = document.getElementById("empty");
-      var table = document.getElementById("graph-table");
-      var tbody = document.getElementById("graph-body");
-      tbody.innerHTML = "";
+      var host = document.getElementById("graph-chart");
+      var dict = I18N();
 
       if (!(data.commits || []).length) {
         empty.hidden = false;
-        table.hidden = true;
-        document.getElementById("empty-text").textContent = I18N().empty || "Empty";
+        if (host) host.hidden = true;
+        document.getElementById("empty-text").textContent = dict.empty || "Empty";
         return;
       }
       if (!commits.length) {
         empty.hidden = false;
-        table.hidden = true;
+        if (host) host.hidden = true;
         document.getElementById("empty-text").textContent =
-          I18N().empty_filter || I18N().empty || "Empty";
+          dict.empty_filter || dict.empty || "Empty";
         return;
       }
+
+      if (typeof global.echarts === "undefined") {
+        empty.hidden = false;
+        if (host) host.hidden = true;
+        document.getElementById("empty-text").textContent =
+          dict.echarts_fail || "Failed to load ECharts. Check network / CDN.";
+        return;
+      }
+
       empty.hidden = true;
-      table.hidden = false;
+      if (host) host.hidden = false;
 
       var tips = tipMap(data.branches);
       var model = buildVisibleModel(commits, data.branches || [], tips, {
         collapseLinear: collapseLinear,
         expanded: expanded,
         collapseMin: data.collapseMin || COLLAPSE_MIN,
-        hideLongEdges: hideLongEdges,
-        longEdgeMin: data.longEdgeMin || LONG_EDGE_MIN,
       });
-      var visible = model.rows;
+      /* Mark fold hosts so double-click / button can expand — also show count in label via fold */
+      foldByHash = {};
+      model.rows.forEach(function (r) {
+        if (r.fold && r.fold.count) foldByHash[r.commit.hash] = r.fold;
+      });
+
+      var dark = document.documentElement.getAttribute("data-theme") === "dark";
       var bmap = branchColorMap(data.branches);
-      var dict = I18N();
-      var maxGraphW = NODE_W + 4;
+      var g = toEchartsGraph(model.rows, tips, bmap, dark);
 
-      visible.forEach(function (row, idx) {
-        var c = row.commit;
-        var tr = document.createElement("tr");
-        tr.className = "commit-row" + (activeHash === c.hash ? " active" : "");
-        tr.setAttribute("data-hash", c.hash);
-        var painted = drawCellSvg(row, {
-          selected: activeHash === c.hash,
-          prevRow: idx > 0 ? visible[idx - 1] : null,
-        });
-        if (painted.width > maxGraphW) maxGraphW = painted.width;
-
-        var refs = refsFor(c, tips);
-        var pills = refs
-          .map(function (r) {
-            var col =
-              r.kind === "tag"
-                ? "#9b6bdf"
-                : r.kind === "head"
-                  ? "#6e6e6e"
-                  : bmap[r.name] || row.color || colorOf(0);
-            return (
-              '<span class="ref-pill' +
-              (r.kind === "head" ? " head" : "") +
-              '" style="background:' +
-              col +
-              '">' +
-              escapeHtml(r.name) +
-              "</span>"
-            );
-          })
-          .join("");
-
-        tr.innerHTML =
-          '<td class="graph-cell">' +
-          painted.html +
-          "</td>" +
-          '<td class="msg-cell"><div class="msg">' +
-          pills +
-          '<span class="subject">' +
-          escapeHtml(c.subject || "") +
-          "</span></div></td>" +
-          '<td class="author">' +
-          escapeHtml(c.author || "") +
-          "</td>" +
-          '<td class="date">' +
-          escapeHtml(formatDate(c.date)) +
-          "</td>" +
-          '<td class="hash">' +
-          escapeHtml(c.short || "") +
-          "</td>";
-
-        tr.addEventListener("mouseenter", function (ev) {
-          showTooltip(commitTooltipHtml(c), ev);
-        });
-        tr.addEventListener("mousemove", moveTooltip);
-        tr.addEventListener("mouseleave", hideTooltip);
-        tr.addEventListener("click", function (ev) {
-          if (ev.target && ev.target.classList && ev.target.classList.contains("fold-hit")) {
-            return;
-          }
-          openDetail(c.hash);
-          paint();
-        });
-
-        tr.querySelectorAll(".fold-hit").forEach(function (hit) {
-          hit.addEventListener("mouseenter", function (ev) {
-            ev.stopPropagation();
-            var n = hit.getAttribute("data-count");
-            var kind = hit.getAttribute("data-kind");
-            var msg =
-              kind === "long"
-                ? (dict.long_edge || "Jump over {n} commits").replace("{n}", n)
-                : (dict.expand || "Expand {n} commits").replace("{n}", n);
-            showTooltip(
-              '<div class="t-sub">' +
-                escapeHtml(msg) +
-                '</div><div class="t-meta">' +
-                escapeHtml(
-                  kind === "long"
-                    ? dict.long_edge_hint || ""
-                    : dict.collapse_hint || ""
-                ) +
-                "</div>",
-              ev
-            );
+      g.nodes.forEach(function (n) {
+        if (n.fold && n.fold.count) {
+          var tip = (dict.expand || "Expand {n} commits").replace("{n}", String(n.fold.count));
+          n.label.formatter = (n.label.formatter || n.name) + "\n▾ " + tip;
+          n.foldClick = true;
+          /* Tiny fold cue on the node itself (not full commit text). */
+          n.symbol = "circle";
+          n.itemStyle = Object.assign({}, n.itemStyle, {
+            borderWidth: 3,
+            borderColor: dark ? "#ffd54f" : "#f9a825",
           });
-          hit.addEventListener("mousemove", function (ev) {
-            ev.stopPropagation();
-            moveTooltip(ev);
+        }
+        if (activeHash && n.commit && n.commit.hash === activeHash) {
+          n.label = Object.assign({}, n.label, { show: true });
+          n.itemStyle = Object.assign({}, n.itemStyle, {
+            borderWidth: 4,
+            shadowBlur: 16,
           });
-          hit.addEventListener("mouseleave", function (ev) {
-            ev.stopPropagation();
-            hideTooltip();
-          });
-          hit.addEventListener("click", function (ev) {
-            ev.preventDefault();
-            ev.stopPropagation();
-            var kind = hit.getAttribute("data-kind");
-            var fid = hit.getAttribute("data-fold");
-            if (kind === "long") {
-              /* Reveal long edges globally for this session (like enabling Show Long Edges). */
-              hideLongEdges = false;
-              showLongEdgesExpanded[fid] = true;
-            } else {
-              expanded[fid] = true;
-            }
-            hideTooltip();
-            paint();
-          });
-        });
-
-        tbody.appendChild(tr);
+        }
       });
 
-      document.querySelectorAll("th.graph-h, col.graph-col").forEach(function (el) {
-        el.style.width = maxGraphW + 8 + "px";
-      });
+      var c = ensureChart();
+      if (!c) return;
+
+      c.resize();
+      var win = computeDataZoomWindow(g.nodes);
+      var yZoom = {
+        type: "inside",
+        id: "y-zoom",
+        yAxisIndex: 0,
+        filterMode: "none",
+        zoomOnMouseWheel: true,
+        moveOnMouseMove: true,
+        moveOnMouseWheel: true,
+        startValue: win.yStart,
+        endValue: win.yEnd,
+      };
+      var xZoom = {
+        type: "inside",
+        id: "x-zoom",
+        xAxisIndex: 0,
+        filterMode: "none",
+        zoomOnMouseWheel: false,
+        moveOnMouseMove: true,
+        startValue: win.xStart,
+        endValue: win.xEnd,
+      };
+      if (!resetViewOnPaint && savedZoom && savedZoom.length >= 2) {
+        if (savedZoom[0].startValue != null && savedZoom[0].endValue != null) {
+          yZoom.startValue = savedZoom[0].startValue;
+          yZoom.endValue = savedZoom[0].endValue;
+        }
+        if (savedZoom[1].startValue != null && savedZoom[1].endValue != null) {
+          xZoom.startValue = savedZoom[1].startValue;
+          xZoom.endValue = savedZoom[1].endValue;
+        }
+      } else {
+        savedZoom = [
+          { startValue: yZoom.startValue, endValue: yZoom.endValue },
+          { startValue: xZoom.startValue, endValue: xZoom.endValue },
+        ];
+      }
+      resetViewOnPaint = false;
+
+      c.setOption(
+        {
+          backgroundColor: "transparent",
+          animation: false,
+          grid: {
+            left: 48,
+            right: 120,
+            top: 44,
+            bottom: 28,
+            containLabel: false,
+          },
+          xAxis: {
+            type: "value",
+            min: -1,
+            max: win.xMax,
+            show: false,
+            axisPointer: { show: false },
+          },
+          yAxis: {
+            type: "value",
+            inverse: true,
+            min: -0.8,
+            max: win.yMax,
+            show: false,
+            axisPointer: { show: false },
+          },
+          dataZoom: [yZoom, xZoom],
+          tooltip: {
+            trigger: "item",
+            enterable: false,
+            formatter: function (p) {
+              if (p.dataType !== "node" || !p.data || !p.data.commit) {
+                return p.name || "";
+              }
+              var cm = p.data.commit;
+              var refs = refsFor(cm, tips)
+                .map(function (r) {
+                  return r.name;
+                })
+                .join(", ");
+              return (
+                "<div style='max-width:360px'>" +
+                "<div style='font-weight:600;margin-bottom:4px'>" +
+                escapeHtml(cm.subject || "") +
+                "</div>" +
+                "<div style='opacity:.75;font-family:monospace;font-size:11px'>" +
+                escapeHtml(cm.short || "") +
+                " · " +
+                escapeHtml(cm.author || "") +
+                "</div>" +
+                "<div style='opacity:.75;font-size:11px'>" +
+                escapeHtml(formatDate(cm.date)) +
+                "</div>" +
+                (refs
+                  ? "<div style='opacity:.75;font-size:11px;margin-top:2px'>" +
+                    escapeHtml(refs) +
+                    "</div>"
+                  : "") +
+                (p.data.fold && p.data.fold.count
+                  ? "<div style='margin-top:4px;opacity:.85'>" +
+                    escapeHtml(
+                      (dict.expand || "Expand {n}").replace("{n}", String(p.data.fold.count))
+                    ) +
+                    " — " +
+                    escapeHtml(dict.collapse_hint || "dblclick to expand") +
+                    "</div>"
+                  : "") +
+                "</div>"
+              );
+            },
+          },
+          legend: {
+            type: "scroll",
+            orient: "horizontal",
+            top: 8,
+            left: 12,
+            z: 2,
+            textStyle: { color: dark ? "#c8c8c8" : "#444", fontSize: 11 },
+            data: g.categories.map(function (x) {
+              return x.name;
+            }),
+          },
+          series: [
+            {
+              id: "gai-commit-graph",
+              type: "graph",
+              coordinateSystem: "cartesian2d",
+              layout: "none",
+              roam: false,
+              draggable: false,
+              categories: g.categories,
+              data: g.nodes,
+              links: g.links,
+              edgeSymbol: ["none", "arrow"],
+              edgeSymbolSize: [0, 12],
+              lineStyle: {
+                opacity: 0.92,
+                width: 2.6,
+                curveness: 0.12,
+              },
+              emphasis: {
+                focus: "adjacency",
+                scale: true,
+                label: { show: true },
+                lineStyle: { width: 3.8 },
+                itemStyle: { shadowBlur: 18 },
+              },
+              blur: {
+                label: { show: false },
+                itemStyle: { opacity: 0.3 },
+                lineStyle: { opacity: 0.15 },
+              },
+              labelLayout: { hideOverlap: true },
+              selectedMode: false,
+            },
+          ],
+        },
+        { notMerge: true, lazyUpdate: false }
+      );
 
       if (activeHash && byHash[activeHash]) {
-        document.querySelectorAll("tr.commit-row").forEach(function (tr) {
-          tr.classList.toggle("active", tr.getAttribute("data-hash") === activeHash);
-        });
-      } else if (activeHash) {
-        closeDetail();
+        openDetail(activeHash);
       }
     }
 
@@ -1248,6 +1016,7 @@
       (data.branches || []).forEach(function (b) {
         if (selected[b.name] === undefined) selected[b.name] = true;
       });
+      resetViewOnPaint = true;
       buildFilterUI(data.branches || []);
       paint();
     }
@@ -1298,27 +1067,22 @@
       btnCollapse.addEventListener("click", function () {
         collapseLinear = true;
         expanded = {};
+        resetViewOnPaint = true;
         paint();
       });
     }
     if (btnExpand) {
       btnExpand.addEventListener("click", function () {
         collapseLinear = false;
+        resetViewOnPaint = true;
         paint();
       });
     }
-    var btnLong = document.getElementById("btn-long-edges");
-    if (btnLong) {
-      btnLong.addEventListener("click", function () {
-        hideLongEdges = !hideLongEdges;
+    var btnFit = document.getElementById("btn-fit");
+    if (btnFit) {
+      btnFit.addEventListener("click", function () {
+        resetViewOnPaint = true;
         paint();
-        applyI18n();
-        var dict = I18N();
-        showToast(
-          hideLongEdges
-            ? dict.long_edges_hidden || "Long edges collapsed"
-            : dict.long_edges_shown || "Long edges shown"
-        );
       });
     }
 
@@ -1345,6 +1109,9 @@
       if (ev.key === "Escape") closeDetail();
     });
 
+    /* Expand fold when clicking a node that has fold — first click expands if collapsed host */
+    /* Handled in chart click: if foldClick, expand */
+
     applyI18n();
     render(data);
   }
@@ -1352,11 +1119,11 @@
   global.GaiGraphApp = {
     createApp: createApp,
     COLORS: COLORS,
-    /* exported for tests / debugging */
     assignCommitColors: assignCommitColors,
     assignLanes: assignLanes,
     planLinearFolds: planLinearFolds,
     buildVisibleModel: buildVisibleModel,
-    applyLongEdges: applyLongEdges,
+    toEchartsGraph: toEchartsGraph,
+    computeDataZoomWindow: computeDataZoomWindow,
   };
 })(typeof window !== "undefined" ? window : this);
