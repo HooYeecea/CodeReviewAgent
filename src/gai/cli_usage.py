@@ -129,8 +129,8 @@ _COMMAND_EXAMPLES: dict[str, tuple[tuple[str, str, str], ...]] = {
     "graph": (
         (
             "gai graph --cn",
-            "Write ECharts node-link commit graph under .gai and open it",
-            "生成 ECharts 节点连边提交图并打开浏览器",
+            "Write IDEA Log-style branch graph HTML under .gai and open it",
+            "生成 IDEA Log 风格分支链路 HTML 并打开浏览器",
         ),
         (
             "gai graph --no-open --cn",

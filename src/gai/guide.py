@@ -194,11 +194,11 @@ _COMMAND_META: list[dict[str, Any]] = [
         "id": "graph",
         "en": {
             "title": "Branch graph",
-            "blurb": "ECharts node-link commit graph under .gai (opens by default; --serve for Refresh).",
+            "blurb": "IDEA Log-style branch/commit table under .gai (opens by default; --serve for Refresh).",
         },
         "cn": {
             "title": "分支链路图",
-            "blurb": "ECharts 节点连边提交图（可缩放拖拽/击穿详情）；写入 `.gai`，默认打开；`--serve` 刷新更稳。",
+            "blurb": "IDEA Log 风格色轨提交表（悬停/击穿详情）；写入 `.gai`，默认打开；`--serve` 刷新更稳。",
         },
     },
     {
