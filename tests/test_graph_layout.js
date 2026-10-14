@@ -1,5 +1,5 @@
 /**
- * Node smoke tests for gai graph layout helpers (no DOM / no ECharts runtime).
+ * Node smoke tests for gai graph IDEA Log layout helpers.
  * Run: node tests/test_graph_layout.js
  */
 var fs = require("fs");
@@ -59,32 +59,78 @@ commits[1].decorations = "feature";
 
 var colors = App.assignCommitColors(commits, branches);
 assert(colors.t1 === colors.t2, "main first-parent chain shares color");
-assert(colors.f1 !== colors.t1, "feature tip has distinct color from main tip");
+assert(colors.f1 !== colors.t1, "feature tip distinct color");
 
 var tips = { t1: [branches[0]], f1: [branches[1]] };
-var modelExpanded = App.buildVisibleModel(commits, branches, tips, {
+var expanded = App.buildVisibleModel(commits, branches, tips, {
   collapseLinear: false,
-  expanded: {},
-  collapseMin: 3,
 });
-assert(modelExpanded.rows.length === commits.length, "expand keeps all rows");
+assert(expanded.rows.length === commits.length, "default expand keeps all rows");
 
-var model = App.buildVisibleModel(commits, branches, tips, {
+var collapsed = App.buildVisibleModel(commits, branches, tips, {
   collapseLinear: true,
-  expanded: {},
   collapseMin: 3,
+  expanded: {},
 });
-assert(model.rows.length < commits.length, "linear collapse hides some rows");
+assert(collapsed.rows.length < commits.length, "collapse hides linear middles");
+assert(
+  collapsed.rows.some(function (r) {
+    return r.fold && r.fold.count > 0;
+  }),
+  "collapsed model has fold arrow host"
+);
 
-var g = App.toEchartsGraph(modelExpanded.rows, tips, { main: colors.t1, feature: colors.f1 }, false);
-assert(g.nodes.length === modelExpanded.rows.length, "node count matches");
-assert(g.links.length > 0, "has parent links");
-assert(g.nodes[0].label && g.nodes[0].label.show === false, "labels hidden by default");
-assert(Array.isArray(g.nodes[0].value) && g.nodes[0].value.length === 2, "cartesian [x,y]");
-assert(g.nodes[1].value[1] > g.nodes[0].value[1], "rows increase downward in data");
+var tipRow = expanded.rows.filter(function (r) {
+  return r.commit.hash === "t1";
+})[0];
+assert(tipRow && tipRow.color === colors.t1, "tip uses branch color");
 
-var win = App.computeDataZoomWindow(g.nodes);
-assert(win.yEnd - win.yStart <= 12.5, "default window shows about a dozen commits");
-assert(win.yEnd - win.yStart >= 1, "window has positive span");
+assert(App.ROW_H === 22, "IDEA row height");
+assert(App.NODE_W === 15, "IDEA node width");
+
+// Merge: IDEA double-length DOWN docks with next-row UP.
+var mergeCommits = [
+  {
+    hash: "m1",
+    short: "m1",
+    parents: ["t1", "f1"],
+    author: "A",
+    email: "a@t",
+    date: "2026-01-02T00:00:00+08:00",
+    subject: "Merge branch feature",
+    body: "",
+    decorations: "",
+  },
+].concat(commits);
+var mergeModel = App.buildVisibleModel(mergeCommits, branches, tips, {
+  collapseLinear: false,
+});
+var mergeRow = mergeModel.rows.filter(function (r) {
+  return r.commit.hash === "m1";
+})[0];
+assert(mergeRow && mergeRow.parentCols.length === 2, "merge has two parent cols");
+assert(
+  mergeRow.parentCols[0] !== mergeRow.parentCols[1],
+  "merge parents use distinct lanes"
+);
+var painted = App.drawCellSvg(mergeRow, { prevRow: null });
+assert(painted.html.indexOf("overflow:visible") >= 0, "svg allows docking overflow");
+var downY = App.ROW_H + App.ROW_H / 2;
+assert(
+  painted.html.indexOf('y2="' + downY + '"') >= 0 ||
+    painted.html.indexOf('y2="' + downY.toFixed(1) + '"') >= 0 ||
+    painted.html.indexOf("y2=\"" + String(downY) + "\"") >= 0,
+  "cross-lane DOWN uses IDEA double-length y2=" + downY
+);
+
+var nextIdx = mergeModel.rows.indexOf(mergeRow) + 1;
+var nextRow = mergeModel.rows[nextIdx];
+var nextPaint = App.drawCellSvg(nextRow, { prevRow: mergeRow });
+var upY = App.ROW_H / 2 - App.ROW_H;
+assert(
+  nextPaint.html.indexOf('y2="' + upY + '"') >= 0 ||
+    nextPaint.html.indexOf("y2=\"" + String(upY) + "\"") >= 0,
+  "next row paints matching UP half y2=" + upY
+);
 
 console.log("OK test_graph_layout.js");

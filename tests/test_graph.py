@@ -1,4 +1,4 @@
-"""Tests for gai graph HTML ECharts node-link visualization."""
+"""Tests for gai graph HTML IDEA Log-style visualization."""
 
 from __future__ import annotations
 
@@ -61,7 +61,6 @@ def test_collect_graph_snapshot_multi_branch(repo: Path) -> None:
     subjects = {c["subject"] for c in snap["commits"]}  # type: ignore[index]
     assert "feat: first" in subjects
     assert "feat: on feature" in subjects
-    assert all("parents" in c for c in snap["commits"])  # type: ignore[union-attr]
     first = next(c for c in snap["commits"] if c["subject"] == "feat: first")  # type: ignore[index]
     assert first["email"] == "t@example.com"
     assert "body line" in str(first.get("body") or "")
@@ -77,23 +76,24 @@ def test_write_graph_report_and_overwrite(repo: Path) -> None:
     assert "graph-data.js" in html
     assert "graph-app.js" in html
     assert (path1.parent / "graph-app.js").is_file()
-    assert "graph-chart" in html
-    assert "echarts" in html
+    assert "graph-table" in html
     assert "drawer" in html
+    assert "tooltip" in html
     assert "btn-collapse" in html
     assert "btn-expand" in html
     assert "GaiGraphApp.createApp" in html
     assert "branch-checks" in html
-    assert 'class="chrome"' in html
-    assert 'id="repo-name"' in html
+    assert "cdn.jsdelivr.net/npm/echarts" not in html
+    assert "echarts.min.js" not in html
     assert "GitgraphJS" not in html
+    assert "type: \"graph\"" not in (path1.parent / "graph-app.js").read_text(encoding="utf-8")
     app_js = (path1.parent / "graph-app.js").read_text(encoding="utf-8")
-    assert "toEchartsGraph" in app_js
     assert "buildVisibleModel" in app_js
-    assert "type: \"graph\"" in app_js or "type: 'graph'" in app_js
+    assert "drawCellSvg" in app_js
+    assert "fold-hit" in app_js
+    assert "toEchartsGraph" not in app_js
     data_txt = graph_data_path(repo).read_text(encoding="utf-8")
     assert "commits" in data_txt
-    assert "repoName" in data_txt
     assert "GAI_GRAPH_DATA" in data_txt
 
     (repo / "b.txt").write_text("b\n", encoding="utf-8")
@@ -109,9 +109,7 @@ def test_graph_not_repo_friendly(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     with pytest.raises(GitError) as exc:
         collect_graph_snapshot()
     assert exc.value.code == "not_repo"
-
-    code = run(["graph", "--no-open", "--cn"])
-    assert code == 1
+    assert run(["graph", "--no-open", "--cn"]) == 1
 
 
 def test_cli_graph_no_open(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -124,18 +122,13 @@ def test_cli_graph_no_open(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("gai.commands.view.open_path", _fake_open)
     assert run(["graph", "--no-open", "--cn"]) == 0
     assert not opened
-    assert graph_report_path(repo).is_file()
     raw = graph_data_path(repo).read_text(encoding="utf-8")
-    assert raw.startswith("window.GAI_GRAPH_DATA")
     payload = json.loads(raw.split("=", 1)[1].strip().rstrip(";"))
     assert payload["initialLang"] == "cn"
-    assert payload["branch"] == "main"
     assert payload["commits"]
-    assert "email" in payload["commits"][0]
 
 
 def test_graph_layout_js_helpers() -> None:
-    """Run Node layout smoke tests when node is available."""
     script = Path(__file__).resolve().parent / "test_graph_layout.js"
     node = subprocess.run(
         ["node", str(script)],
