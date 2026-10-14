@@ -1,4 +1,4 @@
-"""HTML ECharts node-link branch/commit graph for ``gai graph``."""
+"""HTML IDEA Log-style branch/commit graph for ``gai graph``."""
 
 from __future__ import annotations
 
@@ -17,7 +17,6 @@ from gai.web_prefs import PREF_LANG, PREF_THEME, early_prefs_script
 _GRAPH_HTML_RELATIVE = Path(".gai") / "graph-report.html"
 _GRAPH_DATA_RELATIVE = Path(".gai") / "graph-data.js"
 _GRAPH_APP_JS = "graph-app.js"
-_ECHARTS_CDN = "https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"
 
 __all__ = [
     "graph_data_path",
@@ -94,16 +93,14 @@ def write_graph_report(
                 "refresh_fail_http": "刷新失败：找不到 graph-data.js。请重新执行 gai graph。",
                 "empty": "暂无本地分支提交。",
                 "empty_filter": "所选分支没有可显示的提交。",
-                "echarts_fail": "ECharts 加载失败，请检查网络/CDN，或使用 gai graph --serve。",
                 "branches": "显示分支",
                 "select_all": "全选",
                 "select_none": "全不选",
                 "select_current": "仅当前",
-                "collapse_linear": "折叠线性节点",
-                "expand_linear": "展开线性节点",
-                "fit": "重置视图",
+                "collapse_linear": "折叠线性历史",
+                "expand_linear": "展开线性历史",
                 "expand": "展开 {n} 个提交",
-                "collapse_hint": "双击带 ▾ 的节点，或在详情里展开中间提交",
+                "collapse_hint": "点击色轨箭头展开中间提交",
                 "detail_title": "提交详情",
                 "detail_close": "关闭",
                 "detail_hash": "提交",
@@ -113,8 +110,11 @@ def write_graph_report(
                 "detail_refs": "引用",
                 "detail_body": "说明",
                 "detail_none": "（无）",
-                "hint": "默认展开约 12 个节点间距 · 滚轮缩放/拖拽平移 · 悬停摘要 · 点击详情",
-                "footer": "ECharts 节点连边图：默认展开；节点详情仅悬停/点击显示。每次 gai graph 覆盖本文件；推荐 --serve 刷新。",
+                "col_message": "提交说明",
+                "col_author": "作者",
+                "col_date": "时间",
+                "col_hash": "Hash",
+                "footer": "IDEA Log 风格：色轨分叉/汇合 + 提交列表。默认展开全部；悬停看摘要，点击右侧击穿详情。每次 gai graph 覆盖本文件；推荐 --serve 刷新。",
             },
             "en": {
                 "title": "gai branch graph",
@@ -130,16 +130,14 @@ def write_graph_report(
                 "refresh_fail_http": "Refresh failed: graph-data.js missing. Re-run gai graph.",
                 "empty": "No local-branch commits yet.",
                 "empty_filter": "No commits for the selected branches.",
-                "echarts_fail": "Failed to load ECharts. Check network/CDN, or use gai graph --serve.",
                 "branches": "Show branches",
                 "select_all": "All",
                 "select_none": "None",
                 "select_current": "Current only",
-                "collapse_linear": "Collapse linear nodes",
-                "expand_linear": "Expand linear nodes",
-                "fit": "Reset view",
+                "collapse_linear": "Collapse linear history",
+                "expand_linear": "Expand linear history",
                 "expand": "Expand {n} commits",
-                "collapse_hint": "Double-click a ▾ node, or expand from the detail panel",
+                "collapse_hint": "Click the lane arrow to expand folded commits",
                 "detail_title": "Commit detail",
                 "detail_close": "Close",
                 "detail_hash": "Commit",
@@ -149,8 +147,11 @@ def write_graph_report(
                 "detail_refs": "Refs",
                 "detail_body": "Message",
                 "detail_none": "(none)",
-                "hint": "Default: spaced ~12 commits · scroll zoom / drag pan · hover summary · click details",
-                "footer": "ECharts node-link graph: expanded by default; node details only on hover/click. Each gai graph overwrites this file; prefer --serve for refresh.",
+                "col_message": "Message",
+                "col_author": "Author",
+                "col_date": "Date",
+                "col_hash": "Hash",
+                "footer": "IDEA Log style: metro lanes + commit table. Expanded by default; hover for summary, click for detail. Each gai graph overwrites this file; prefer --serve for refresh.",
             },
         },
     }
@@ -176,33 +177,33 @@ def _render_graph_html(payload: dict[str, Any]) -> str:
   </script>
   <style>
     :root {{
-      --bg: #eef1f6; --fg: #1a1d23; --muted: #5c6570; --card: #fff;
-      --line: #d0d7e2; --accent: #3574f0; --hover: #edf3ff;
+      --bg: #f2f2f2; --fg: #000; --muted: #6c6c6c; --card: #fff;
+      --line: #c6c6c6; --row-line: #e6e6e6; --accent: #3574f0;
+      --hover: #edf3ff; --sel: #d4e5ff;
       --mono: "JetBrains Mono", "Cascadia Mono", Consolas, ui-monospace, monospace;
       --ui: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
-      --chart-min: min(72vh, 820px);
+      --row-h: 22px;
     }}
     html[data-theme="dark"] {{
-      --bg: #12151a; --fg: #e8eaed; --muted: #9aa3ad; --card: #1b2028;
-      --line: #2c3440; --accent: #548af7; --hover: #243044;
+      --bg: #1e1f22; --fg: #dfdfdf; --muted: #9a9a9a; --card: #2b2d30;
+      --line: #43454a; --row-line: #3a3c40; --accent: #548af7;
+      --hover: #2e4369; --sel: #2d4a75;
     }}
     * {{ box-sizing: border-box; }}
-    html, body {{ height: 100%; }}
     body {{
       margin: 0; font-family: var(--ui); font-size: 13px;
       background: var(--bg); color: var(--fg); line-height: 1.35;
-      display: flex; flex-direction: column; min-height: 100%;
     }}
     .chrome {{
-      flex: 0 0 auto; z-index: 20;
+      position: sticky; top: 0; z-index: 20;
       background: var(--card); border-bottom: 1px solid var(--line);
     }}
     header {{
       display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start;
-      justify-content: space-between; padding: 10px 14px 6px;
+      justify-content: space-between; padding: 10px 12px 6px;
     }}
-    h1 {{ margin: 0; font-size: 16px; font-weight: 650; letter-spacing: .02em; }}
-    .meta {{ color: var(--muted); font-size: 12px; margin-top: 3px; }}
+    h1 {{ margin: 0; font-size: 15px; font-weight: 600; }}
+    .meta {{ color: var(--muted); font-size: 12px; margin-top: 2px; }}
     .header-right {{
       display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-start;
       justify-content: flex-end; text-align: right;
@@ -215,13 +216,13 @@ def _render_graph_html(payload: dict[str, Any]) -> str:
     .toolbar, .filter-actions {{ display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }}
     .toolbar button, .filter-actions button, .drawer-head button {{
       border: 1px solid var(--line); background: var(--card); color: var(--fg);
-      border-radius: 6px; padding: 4px 9px; cursor: pointer; font: inherit; font-size: 12px;
+      border-radius: 4px; padding: 3px 8px; cursor: pointer; font: inherit; font-size: 12px;
     }}
     .toolbar button:hover, .filter-actions button:hover, .drawer-head button:hover {{
       border-color: var(--accent); background: var(--hover);
     }}
     .toolbar button:disabled {{ opacity: .55; cursor: wait; }}
-    .filter-panel {{ padding: 0 14px 8px; }}
+    .filter-panel {{ padding: 0 12px 8px; }}
     .filter-head {{
       display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center;
       justify-content: space-between; margin-bottom: 4px;
@@ -232,55 +233,76 @@ def _render_graph_html(payload: dict[str, Any]) -> str:
       display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
       font-size: 12px; user-select: none;
     }}
-    .branch-checks .dot {{ width: 9px; height: 9px; border-radius: 50%; }}
+    .branch-checks .dot {{ width: 8px; height: 8px; border-radius: 50%; }}
     .branch-checks label.current {{ font-weight: 600; }}
     .branch-checks input {{ accent-color: var(--accent); }}
-    main {{
-      flex: 1 1 auto; display: flex; flex-direction: column;
-      padding: 10px 12px 12px; min-height: 0;
-    }}
     .layout {{
-      flex: 1 1 auto; display: grid; grid-template-columns: 1fr minmax(280px, 340px);
-      gap: 0; min-height: var(--chart-min); align-items: stretch;
+      display: grid; grid-template-columns: 1fr minmax(280px, 340px);
+      gap: 0; align-items: stretch; min-height: 40vh;
     }}
     .layout.no-detail {{ grid-template-columns: 1fr; }}
+    main {{ padding: 8px 10px 28px; }}
     .board {{
-      background: var(--card); border: 1px solid var(--line); border-radius: 10px;
-      position: relative; min-height: var(--chart-min); overflow: hidden;
-      box-shadow: 0 10px 28px rgba(20, 30, 50, .06);
+      background: var(--card); border: 1px solid var(--line); border-radius: 2px;
+      overflow: auto; min-height: 200px;
     }}
-    #graph-chart {{
-      width: 100%; height: 100%; min-height: var(--chart-min);
-      touch-action: none; cursor: grab;
+    table.idea {{
+      border-collapse: collapse; width: 100%; font-size: 12px;
     }}
-    #graph-chart:active {{ cursor: grabbing; }}
-    .chart-hint {{
-      position: absolute; left: 12px; bottom: 10px; z-index: 2;
-      color: var(--muted); font-size: 11px; pointer-events: none;
-      background: color-mix(in srgb, var(--card) 82%, transparent);
-      padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line);
+    table.idea thead th {{
+      position: sticky; top: 0; z-index: 5;
+      background: var(--card); border-bottom: 1px solid var(--line);
+      text-align: left; padding: 5px 8px; color: var(--muted); font-weight: 600;
+      white-space: nowrap; font-size: 11px;
     }}
-    .empty {{
-      color: var(--muted); padding: 48px 28px; text-align: center;
-      position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
-      pointer-events: none; z-index: 1;
+    table.idea th.graph-h {{ padding: 0; }}
+    table.idea td {{
+      border-bottom: 1px solid var(--row-line); padding: 0 8px; vertical-align: middle;
+      height: var(--row-h); white-space: nowrap;
     }}
-    .empty:not([hidden]) {{ display: flex; pointer-events: auto; }}
-    footer {{ margin-top: 8px; color: var(--muted); font-size: 12px; flex: 0 0 auto; }}
+    table.idea tr.commit-row {{ cursor: pointer; }}
+    table.idea tr.commit-row:hover {{ background: var(--hover); }}
+    table.idea tr.commit-row.active {{ background: var(--sel); }}
+    td.graph-cell {{
+      padding: 0 !important; width: 1%; overflow: visible; position: relative;
+    }}
+    td.graph-cell svg.graph-svg {{ display: block; overflow: visible; }}
+    .msg {{
+      display: inline-flex; align-items: center; gap: 5px; max-width: 56vw;
+      overflow: hidden; text-overflow: ellipsis;
+    }}
+    .msg .subject {{ overflow: hidden; text-overflow: ellipsis; }}
+    .msg .subject.merge {{ color: var(--muted); }}
+    .ref-pill {{
+      display: inline-block; font-size: 10px; line-height: 14px; padding: 0 5px;
+      border-radius: 3px; color: #fff; font-weight: 600; flex-shrink: 0;
+    }}
+    .ref-pill.head {{ background: #6e6e6e !important; }}
+    .author, .date, .hash {{ color: var(--muted); font-size: 12px; }}
+    .hash {{ font-family: var(--mono); font-size: 11px; }}
+    .empty {{ color: var(--muted); padding: 28px; text-align: center; }}
+    footer {{ margin-top: 8px; color: var(--muted); font-size: 12px; }}
     .toast {{
       position: fixed; right: 14px; bottom: 14px; z-index: 40;
-      background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+      background: var(--card); border: 1px solid var(--line); border-radius: 6px;
       padding: 8px 12px; box-shadow: 0 6px 18px rgba(0,0,0,.14);
       display: none; max-width: min(420px, 90vw); font-size: 12px;
     }}
     .toast.show {{ display: block; }}
+    #tooltip {{
+      position: fixed; z-index: 50; display: none; pointer-events: none;
+      background: var(--card); border: 1px solid var(--line); border-radius: 4px;
+      padding: 7px 9px; box-shadow: 0 8px 22px rgba(0,0,0,.18);
+      max-width: min(420px, 90vw); font-size: 12px;
+    }}
+    #tooltip .t-sub {{ font-weight: 600; margin-bottom: 3px; word-break: break-word; }}
+    #tooltip .t-meta {{ color: var(--muted); font-family: var(--mono); font-size: 11px; }}
     .drawer {{
-      border: 1px solid var(--line); border-left: none; background: var(--card);
-      display: none; flex-direction: column; border-radius: 0 10px 10px 0;
-      max-height: calc(var(--chart-min) + 2px); overflow: auto;
+      border-left: 1px solid var(--line); background: var(--card);
+      display: none; flex-direction: column; min-height: 100%;
+      position: sticky; top: 0; max-height: 100vh; overflow: auto;
     }}
     .layout:not(.no-detail) .drawer {{ display: flex; }}
-    .layout:not(.no-detail) .board {{ border-radius: 10px 0 0 10px; }}
     .drawer-head {{
       display: flex; justify-content: space-between; align-items: center;
       gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line);
@@ -298,20 +320,14 @@ def _render_graph_html(payload: dict[str, Any]) -> str:
     .drawer-body pre.body {{
       white-space: pre-wrap; margin: 0; font-family: inherit; font-size: 12px;
     }}
-    .ref-pill {{
-      display: inline-block; font-size: 10px; line-height: 14px; padding: 0 5px;
-      border-radius: 3px; color: #fff; font-weight: 600; margin-right: 3px;
-    }}
-    .ref-pill.head {{ background: #6e6e6e !important; }}
     [data-lang="cn"] .en {{ display: none; }}
     [data-lang="en"] .cn {{ display: none; }}
     @media (max-width: 900px) {{
       .layout {{ grid-template-columns: 1fr; }}
       .drawer {{
-        border-left: 1px solid var(--line); border-radius: 10px; margin-top: 8px;
-        max-height: none;
+        border-left: none; border-top: 1px solid var(--line);
+        position: relative; max-height: none;
       }}
-      .layout:not(.no-detail) .board {{ border-radius: 10px; }}
     }}
   </style>
 </head>
@@ -336,7 +352,6 @@ def _render_graph_html(payload: dict[str, Any]) -> str:
         <div class="toolbar">
           <button type="button" id="btn-collapse"><span class="cn" data-i="collapse_linear"></span><span class="en" data-i="collapse_linear"></span></button>
           <button type="button" id="btn-expand"><span class="cn" data-i="expand_linear"></span><span class="en" data-i="expand_linear"></span></button>
-          <button type="button" id="btn-fit"><span class="cn" data-i="fit"></span><span class="en" data-i="fit"></span></button>
           <button type="button" id="btn-refresh"><span class="cn" data-i="refresh"></span><span class="en" data-i="refresh"></span></button>
           <button type="button" id="btn-lang">EN / 中文</button>
           <button type="button" id="btn-theme">Theme</button>
@@ -359,8 +374,25 @@ def _render_graph_html(payload: dict[str, Any]) -> str:
     <div class="layout no-detail" id="layout">
       <div class="board">
         <div class="empty" id="empty" hidden><span id="empty-text"></span></div>
-        <div id="graph-chart" aria-label="commit graph"></div>
-        <div class="chart-hint"><span class="cn" data-i="hint"></span><span class="en" data-i="hint"></span></div>
+        <table class="idea" id="graph-table" hidden>
+          <colgroup>
+            <col class="graph-col" />
+            <col />
+            <col />
+            <col />
+            <col />
+          </colgroup>
+          <thead>
+            <tr>
+              <th class="graph-h"></th>
+              <th><span class="cn" data-i="col_message"></span><span class="en" data-i="col_message"></span></th>
+              <th><span class="cn" data-i="col_author"></span><span class="en" data-i="col_author"></span></th>
+              <th><span class="cn" data-i="col_date"></span><span class="en" data-i="col_date"></span></th>
+              <th><span class="cn" data-i="col_hash"></span><span class="en" data-i="col_hash"></span></th>
+            </tr>
+          </thead>
+          <tbody id="graph-body"></tbody>
+        </table>
       </div>
       <aside class="drawer" id="drawer" aria-label="commit detail">
         <div class="drawer-head">
@@ -374,9 +406,9 @@ def _render_graph_html(payload: dict[str, Any]) -> str:
       <span class="cn" data-i="footer"></span><span class="en" data-i="footer"></span>
     </footer>
   </main>
+  <div id="tooltip" role="tooltip"></div>
   <div class="toast" id="toast" role="status"></div>
   <script id="gai-graph-bootstrap" type="application/json">{bootstrap}</script>
-  <script src="{_ECHARTS_CDN}"></script>
   <script src="graph-data.js"></script>
   <script src="{_GRAPH_APP_JS}"></script>
   <script>
