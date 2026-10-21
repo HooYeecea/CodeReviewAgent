@@ -44,11 +44,31 @@ class DiffTooLargeError(RuntimeError):
         )
 
 
-def staged_diff_size(
+@dataclass(frozen=True)
+class StagedDiffInfo:
+    """Full ignore-filtered staged diff plus size vs ``max_diff_chars``."""
+
+    text: str
+    chars: int
+    limit: int
+    exceeds: bool
+
+    def clipped(self) -> tuple[str, bool]:
+        """Return ``(text, truncated)`` clipped to ``limit`` when needed."""
+        if not self.exceeds:
+            return self.text, False
+        clipped = (
+            self.text[: self.limit]
+            + "\n\n... [diff truncated by gai due to size limit] ...\n"
+        )
+        return clipped, True
+
+
+def load_staged_diff_info(
     *,
     settings: Settings | None = None,
-) -> tuple[int, int, bool]:
-    """Return ``(chars, limit, exceeds)`` for the current staged diff."""
+) -> StagedDiffInfo:
+    """Read staged diff once; reuse for size checks and review payloads."""
     settings = settings or load_settings()
     diff, _ = get_staged_diff(
         ignore_patterns=settings.ignore_patterns,
@@ -56,7 +76,21 @@ def staged_diff_size(
     )
     chars = len(diff)
     limit = settings.max_diff_chars
-    return chars, limit, chars > limit
+    return StagedDiffInfo(
+        text=diff,
+        chars=chars,
+        limit=limit,
+        exceeds=chars > limit,
+    )
+
+
+def staged_diff_size(
+    *,
+    settings: Settings | None = None,
+) -> tuple[int, int, bool]:
+    """Return ``(chars, limit, exceeds)`` for the current staged diff."""
+    info = load_staged_diff_info(settings=settings)
+    return info.chars, info.limit, info.exceeds
 
 
 @dataclass
@@ -202,14 +236,11 @@ def run_review(
     if not has_staged_changes():
         raise RuntimeError("No staged changes. Run `git add` first.")
 
-    chars, limit, exceeds = staged_diff_size(settings=settings)
-    if exceeds and not allow_truncated:
-        raise DiffTooLargeError(chars=chars, limit=limit)
+    info = load_staged_diff_info(settings=settings)
+    if info.exceeds and not allow_truncated:
+        raise DiffTooLargeError(chars=info.chars, limit=info.limit)
 
-    diff, truncated = get_staged_diff(
-        ignore_patterns=settings.ignore_patterns,
-        max_chars=settings.max_diff_chars,
-    )
+    diff, truncated = info.clipped()
     if not diff.strip():
         raise RuntimeError(
             "Staged changes are empty after ignore filters. "
