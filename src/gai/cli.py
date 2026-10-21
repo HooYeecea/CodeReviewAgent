@@ -17,9 +17,11 @@ from gai.command_history import maybe_record_command
 from gai.help_i18n import H
 
 # Register subcommands on the shared ``app``.
+# ship before flow: flow imports shared helpers from ship at import time.
+from gai.commands import ship as _ship  # noqa: F401
+from gai.commands import flow as _flow  # noqa: F401
 from gai.commands import insight as _insight  # noqa: F401
 from gai.commands import setup as _setup  # noqa: F401
-from gai.commands import ship as _ship  # noqa: F401
 from gai.commands import stage as _stage  # noqa: F401
 from gai.commands import sync as _sync  # noqa: F401
 from gai.commands import view as _view  # noqa: F401
