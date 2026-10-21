@@ -5,7 +5,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from gai.commands.ship import parse_batch_message_lang_spec
+from gai.commands.flow import parse_batch_message_lang_spec
 from gai.devflow import (
     CommitBatch,
     apply_message_lang_to_batches,

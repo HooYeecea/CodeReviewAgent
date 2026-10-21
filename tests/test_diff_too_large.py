@@ -78,3 +78,24 @@ def test_run_review_allow_truncated(
         settings=settings, review_only=True, allow_truncated=True
     )
     assert result.truncated_diff is True
+
+
+def test_run_review_reads_staged_diff_once(
+    staged_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = Settings(max_diff_chars=80_000, api_key="test-key")
+    calls = {"n": 0}
+    real = __import__("gai.git_ops", fromlist=["get_staged_diff"]).get_staged_diff
+
+    def counting_get_staged_diff(*args, **kwargs):
+        calls["n"] += 1
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr("gai.review.get_staged_diff", counting_get_staged_diff)
+
+    def fake_chat(self, *, system: str, user: str) -> str:  # noqa: ARG001
+        return '{"summary":"ok","commit_message":"chore: once","review":[]}'
+
+    monkeypatch.setattr("gai.review.LLMClient.chat", fake_chat)
+    run_review(settings=settings, review_only=True)
+    assert calls["n"] == 1

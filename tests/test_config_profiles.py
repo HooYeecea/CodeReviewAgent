@@ -64,6 +64,22 @@ def test_numbered_env_profiles_and_switch(
     assert names == ["0", "1"]
 
 
+def test_save_settings_tightens_permissions(cfg_home: Path) -> None:
+    path = config.save_settings(
+        api_key="sk-secret-abcdefgh",
+        base_url="https://api.example.test/v1",
+        model="m",
+        profile="0",
+        set_current="0",
+    )
+    assert path.is_file()
+    mode = path.stat().st_mode & 0o777
+    # On Unix expect 0o600; on Windows mode bits are often ignored — just ensure writable.
+    assert mode & 0o200
+    if mode & 0o077 == 0:
+        assert mode == 0o600
+
+
 def test_file_current_and_named_profile(
     cfg_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

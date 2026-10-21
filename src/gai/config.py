@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 import re
+import stat
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -366,7 +367,17 @@ def save_settings(
     lines.append("")
 
     CONFIG_FILE.write_text("\n".join(lines), encoding="utf-8")
+    _tighten_config_permissions(CONFIG_FILE)
     return CONFIG_FILE
+
+
+def _tighten_config_permissions(path: Path) -> None:
+    """Best-effort: restrict config.toml to the current user (contains API keys)."""
+    try:
+        path.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0o600
+    except OSError:
+        # Windows / some network FS may ignore or reject POSIX mode bits.
+        pass
 
 
 def mask_secret(value: str) -> str:
