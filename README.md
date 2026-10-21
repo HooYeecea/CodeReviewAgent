@@ -248,12 +248,13 @@ gai uncommit --cn
 
 ### `gai review`
 
-只审查，不提交。只看 **已暂存** 内容。若 diff 超过 `max_diff_chars`，会提示改用 `gai splitflow` 并询问是否切换（`--json` 只提示不切换）。即使未超限，若 AI 判断主题可拆成多次提交，也会给出分批建议（可拒绝后继续整包审查）。
+只审查，不提交。只看 **已暂存** 内容。若 diff 超过 `max_diff_chars`，会提示改用 `gai splitflow` 并询问是否切换（`--json` 只提示不切换）。加 `--suggest-split` 时，即使未超限也会让 AI 判断是否适合拆成多次提交（可拒绝后继续整包审查；默认关闭以免额外耗 token）。
 
 | 参数 | 说明 |
 |------|------|
 | `--json` | 输出结构化 JSON |
 | `--message-only` | 主要生成 commit message |
+| `--suggest-split` | 未超限时也询问 AI 是否拆批（额外一次模型调用；默认关） |
 | `--cn` | 审查结论与摘要用简体中文 |
 | `-t` / `--trace` | 打印底层 git 命令链路 |
 
@@ -264,7 +265,7 @@ gai review --json
 
 ### `gai commit`
 
-审查 → 生成 Message → 确认 → 提交。Diff 过大时强制提示切换 `splitflow`；未超限但 AI 认为可拆批时也会建议（`-y` / 非交互不自动切换）。
+审查 → 生成 Message → 确认 → 提交。Diff 过大时强制提示切换 `splitflow`；加 `--suggest-split` 时未超限也可询问是否拆批（`-y` / 非交互不自动切换）。
 
 | 参数 | 说明 |
 |------|------|
@@ -272,6 +273,7 @@ gai review --json
 | `-y` / `--yes` | 跳过交互确认 |
 | `--no-review` | 跳过审查展示，只生成 Message |
 | `--no-ai` | 完全不调 AI，必须同时带 `-m` |
+| `--suggest-split` | 未超限时也询问 AI 是否拆批（额外一次模型调用；默认关） |
 | `--cn` | 中文审查结果 + 中文确认文案 |
 | `--push` | 提交成功后推送到已配置的远程 |
 | `-r` / `--remote` | 配合 `--push` 指定远程名（默认优先 `origin`） |
@@ -302,6 +304,7 @@ gai devflow --cn -r origin
 | 参数 | 说明 |
 |------|------|
 | `--cn` | 界面与审查用简体中文；提交词仍提供中英两种 |
+| `--suggest-split` | 审查前未超限时也询问 AI 是否拆批（默认关） |
 | `-r` / `--remote` | 最后一步 push 的远程名 |
 | `-t` / `--trace` | 每一步结束后打印该步执行的 git 命令 |
 
@@ -718,10 +721,10 @@ CodeReviewAgent/
   README.md
   src/gai/
     cli.py           # 入口：注册 commands/*；run()
-    commands/        # stage / ship / sync / insight / setup / view 子命令
+    commands/        # stage / ship / flow / sync / insight / setup / view 子命令
     cli_common.py    # 共享 Typer app 与输出 helpers
     git_views.py     # status/log 美化与 log-report.html
-    devflow.py       # gai devflow / splitflow：暂存建议、分批计划、中英提交词
+    devflow.py       # 暂存建议、分批计划、中英提交词（供 flow 命令复用）
     command_history.py # .gai/commands.jsonl 命令执行记录
     history_report.py  # commands.jsonl → .gai/history-report.html
     guide.py         # .gai/guide.html 可视化使用指南（中英双语）
