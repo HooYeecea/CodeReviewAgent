@@ -12,16 +12,16 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from gai.config import Settings, load_settings
-from gai.git_ops import (
+from gai.common.config import Settings, load_settings
+from gai.common.git import (
     count_staged_files,
     current_branch_name,
     get_staged_diff,
     has_staged_changes,
 )
-from gai.llm.client import LLMClient, LLMError
-from gai.llm.prompts import SYSTEM_PROMPT, build_user_prompt
-from gai.llm.usage import set_llm_usage_meta
+from gai.common.llm.client import LLMClient, LLMError
+from gai.common.llm.prompts import SYSTEM_PROMPT, build_user_prompt
+from gai.common.llm.usage import set_llm_usage_meta
 
 Severity = Literal["critical", "warning", "info"]
 
