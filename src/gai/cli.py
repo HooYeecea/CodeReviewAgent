@@ -20,7 +20,9 @@ from gai.help_i18n import H
 # ship before flow: flow imports shared helpers from ship at import time.
 from gai.commands import ship as _ship  # noqa: F401
 from gai.commands import flow as _flow  # noqa: F401
+from gai.commands import branching as _branching  # noqa: F401
 from gai.commands import insight as _insight  # noqa: F401
+from gai.commands import integrate as _integrate  # noqa: F401
 from gai.commands import setup as _setup  # noqa: F401
 from gai.commands import stage as _stage  # noqa: F401
 from gai.commands import sync as _sync  # noqa: F401

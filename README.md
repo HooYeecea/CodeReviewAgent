@@ -709,7 +709,7 @@ gai balance
 
 - 审查 / 提交只看 staged diff（`git diff --cached`）。
 - 不拦截原生 git：可用 `--no-ai -m` 或直接 `git commit` / `git push`。
-- Core（`review.py` / `report.py` / `git_ops.py` / `llm/`）不依赖终端交互；CLI 负责展示与确认。
+- Core（`review/` / `reports/` / `git/` / `llm/`）不依赖终端交互；CLI 负责展示与确认。
 - 默认忽略锁文件与常见二进制；超大输入会截断并提示。
 - 版本号以 `pyproject.toml` 为准（`gai --version` 读取安装包元数据）。
 
@@ -720,32 +720,16 @@ CodeReviewAgent/
   pyproject.toml
   README.md
   src/gai/
-    cli.py           # 入口：注册 commands/*；run()
-    commands/        # stage / ship / flow / sync / insight / setup / view
-    reports/         # HTML 报告（usage / history / guide / graph）+ 共享 web 壳
-      urls.py        # path_to_file_url
-      prefs.py       # 主题/语言 localStorage
-      shell_css.py   # usage/history 共用 dashboard CSS
-      shell_js.py    # usage/history 共用 theme/lang JS
-    cli_common.py    # 共享 Typer app 与输出 helpers
-    git_views.py     # status/log 美化与 log-report.html
-    devflow.py       # 暂存建议、分批计划、中英提交词（供 flow 命令复用）
-    command_history.py # .gai/commands.jsonl 命令执行记录
-    completion_cmd.py # shell Tab 补全安装 / 查看
-    cli_usage.py     # 子命令 / 参数拼写纠错
-    errors.py        # 友好错误文案
-    help_i18n.py     # -h --cn 帮助语言
-    git/             # git 子包（core / local / remote / workflow / logview）
-    git_ops.py       # 兼容 shim → gai.git
-    config.py        # 环境变量与 ~/.gai/config.toml
-    review.py        # 审查引擎
-    report.py        # 提交记录 → 工作总结
-    llm/
-      client.py      # OpenAI 兼容客户端（含重试）
-      balance.py     # 厂商余额查询
-      usage.py       # 本次调用与 token 统计
-      history.py     # 本地用量 JSONL 持久化
-      prompts.py     # Prompt 模板
+    cli.py / cli_common.py / cli_usage.py / help_i18n.py / errors.py / config.py
+    commands/        # stage / ship / flow / sync / integrate / branching / …
+                     # completion / insight / setup / view；flow_lib 为 flow 辅助
+    git/             # core / local / remote / workflow / logview / views
+    reports/         # usage / history / guide / graph / work / serve + web 壳
+    review/          # 审查引擎（engine）
+    flow/            # 暂存建议、分批计划、中英提交词
+    history/         # commands.jsonl + 路径/合并（store）
+    llm/             # client / balance / usage / history / prompts
+    # 根目录若干 *.py 为兼容 shim（旧 import 路径仍可用）
   tests/
 ```
 
