@@ -16,7 +16,7 @@ from gai.llm.history import (
     summarize_records,
     usage_log_path,
 )
-from gai.log_store import (
+from gai.history.store import (
     global_gai_dir,
     global_usage_log_path,
     global_usage_report_path,

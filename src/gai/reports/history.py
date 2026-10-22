@@ -10,8 +10,8 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from gai.command_history import CommandRecord, command_log_path, load_command_records
-from gai.log_store import (
+from gai.history.commands import CommandRecord, command_log_path, load_command_records
+from gai.history.store import (
     global_command_log_path,
     global_gai_dir,
     global_history_report_path,
