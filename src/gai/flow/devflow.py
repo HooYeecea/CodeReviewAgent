@@ -8,8 +8,8 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
-from gai.config import Settings, load_settings
-from gai.git_ops import (
+from gai.common.config import Settings, load_settings
+from gai.common.git import (
     ChangeEntry,
     current_branch_name,
     get_staged_diff,
@@ -17,8 +17,8 @@ from gai.git_ops import (
     list_change_entries,
     porcelain_status,
 )
-from gai.llm.client import LLMClient, LLMError
-from gai.llm.prompts import (
+from gai.common.llm.client import LLMClient, LLMError
+from gai.common.llm.prompts import (
     BILINGUAL_MESSAGE_SYSTEM_PROMPT,
     COMMIT_BATCH_SYSTEM_PROMPT,
     STAGE_SYSTEM_PROMPT,
@@ -26,7 +26,7 @@ from gai.llm.prompts import (
     build_commit_batch_user_prompt,
     build_stage_user_prompt,
 )
-from gai.llm.usage import set_llm_usage_meta
+from gai.common.llm.usage import set_llm_usage_meta
 from gai.review import DiffTooLargeError, _extract_json_blob, staged_diff_size
 
 
