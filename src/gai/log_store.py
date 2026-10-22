@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from gai.config import CONFIG_DIR
+from gai.common.config import CONFIG_DIR
 from gai.history.store import (
     cleanup_global_logs,
     discover_sibling_project_logs,
@@ -19,7 +19,7 @@ from gai.history.store import (
     local_usage_report_path,
     merge_jsonl_into,
 )
-from gai.llm.history import project_root
+from gai.common.llm.history import project_root
 
 __all__ = [
     "cleanup_global_logs",

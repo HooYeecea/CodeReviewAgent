@@ -2,6 +2,6 @@
 
 from __future__ import annotations
 
-from gai.reports.urls import path_to_file_url
+from gai.common.web.urls import path_to_file_url
 
 __all__ = ["path_to_file_url"]
