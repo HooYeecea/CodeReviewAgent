@@ -45,7 +45,7 @@ def test_extract_command() -> None:
 
 
 def test_append_and_load(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr("gai.command_history.project_root", lambda cwd=None: tmp_path)
+    monkeypatch.setattr("gai.history.commands.project_root", lambda cwd=None: tmp_path)
     log = tmp_path / ".gai" / "commands.jsonl"
     append_command_record(
         CommandRecord(
@@ -89,7 +89,7 @@ def test_append_and_load(tmp_path: Path, monkeypatch) -> None:
 def test_history_disabled(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("GAI_HISTORY", "0")
     assert history_enabled() is False
-    monkeypatch.setattr("gai.command_history.project_root", lambda cwd=None: tmp_path)
+    monkeypatch.setattr("gai.history.commands.project_root", lambda cwd=None: tmp_path)
     maybe_record_command(["review", "--cn"], exit_code=0, duration_ms=1)
     assert not (tmp_path / ".gai" / "commands.jsonl").exists()
 
@@ -97,7 +97,7 @@ def test_history_disabled(monkeypatch, tmp_path: Path) -> None:
 def test_skip_completion_probe(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.delenv("GAI_HISTORY", raising=False)
     monkeypatch.setenv("_GAI_COMPLETE", "complete")
-    monkeypatch.setattr("gai.command_history.project_root", lambda cwd=None: tmp_path)
+    monkeypatch.setattr("gai.history.commands.project_root", lambda cwd=None: tmp_path)
     maybe_record_command(["commit"], exit_code=0, duration_ms=1)
     assert not (tmp_path / ".gai" / "commands.jsonl").exists()
 

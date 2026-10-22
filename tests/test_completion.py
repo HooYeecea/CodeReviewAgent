@@ -93,7 +93,7 @@ def test_completion_show_powershell_script():
 
 
 def test_install_powershell_replaces_legacy_block(tmp_path, monkeypatch):
-    from gai import completion_cmd as mod
+    from gai.commands import completion as mod
 
     profile = tmp_path / "Microsoft.PowerShell_profile.ps1"
     profile.write_text(

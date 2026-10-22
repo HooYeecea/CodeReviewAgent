@@ -55,7 +55,7 @@ def test_run_review_blocks_truncated_by_default(
     def boom(*_a, **_k):  # pragma: no cover - must not be called
         raise AssertionError("LLM should not be called when diff is too large")
 
-    monkeypatch.setattr("gai.review.LLMClient.chat", boom)
+    monkeypatch.setattr("gai.review.engine.LLMClient.chat", boom)
     with pytest.raises(DiffTooLargeError) as caught:
         run_review(settings=settings, review_only=True)
     assert caught.value.limit == 100
@@ -73,7 +73,7 @@ def test_run_review_allow_truncated(
             '"review":[]}'
         )
 
-    monkeypatch.setattr("gai.review.LLMClient.chat", fake_chat)
+    monkeypatch.setattr("gai.review.engine.LLMClient.chat", fake_chat)
     result = run_review(
         settings=settings, review_only=True, allow_truncated=True
     )
@@ -91,11 +91,11 @@ def test_run_review_reads_staged_diff_once(
         calls["n"] += 1
         return real(*args, **kwargs)
 
-    monkeypatch.setattr("gai.review.get_staged_diff", counting_get_staged_diff)
+    monkeypatch.setattr("gai.review.engine.get_staged_diff", counting_get_staged_diff)
 
     def fake_chat(self, *, system: str, user: str) -> str:  # noqa: ARG001
         return '{"summary":"ok","commit_message":"chore: once","review":[]}'
 
-    monkeypatch.setattr("gai.review.LLMClient.chat", fake_chat)
+    monkeypatch.setattr("gai.review.engine.LLMClient.chat", fake_chat)
     run_review(settings=settings, review_only=True)
     assert calls["n"] == 1

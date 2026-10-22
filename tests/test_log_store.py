@@ -9,7 +9,7 @@ import pytest
 
 from gai.command_history import CommandRecord, append_command_record, load_command_records
 from gai.llm.history import UsageRecord, append_usage_record, load_usage_records
-from gai import log_store
+from gai.history import store as log_store
 
 
 @pytest.fixture
