@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from gai.llm.history import now_iso, project_root
+from gai.common.llm.history import now_iso, project_root
 
 # Soft cap similar to usage.jsonl.
 _MAX_BYTES = 3_000_000
@@ -239,7 +239,7 @@ def _append_command_to(target: Path, record: CommandRecord) -> None:
     except OSError:
         return
     try:
-        from gai.history_report import sync_history_data_file
+        from gai.history.report import sync_history_data_file
 
         sync_history_data_file(log_path=target)
     except Exception:
@@ -378,7 +378,7 @@ def maybe_record_command(
         if os.environ.get("_GAI_COMPLETE") or os.environ.get("_TYPER_COMPLETE"):
             return
         from gai import __version__
-        from gai.git_ops import current_git_identity, current_repo_identity
+        from gai.common.git import current_git_identity, current_repo_identity
 
         safe = sanitize_argv(list(argv))
         command, subcommand = extract_command(safe)

@@ -11,8 +11,8 @@ import os
 from pathlib import Path
 from typing import Iterable
 
-from gai.config import CONFIG_DIR
-from gai.llm.history import project_root
+from gai.common.config import CONFIG_DIR
+from gai.common.llm.history import project_root
 
 _USAGE_NAME = "usage.jsonl"
 _COMMANDS_NAME = "commands.jsonl"
