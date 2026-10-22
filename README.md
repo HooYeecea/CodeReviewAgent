@@ -709,7 +709,7 @@ gai balance
 
 - 审查 / 提交只看 staged diff（`git diff --cached`）。
 - 不拦截原生 git：可用 `--no-ai -m` 或直接 `git commit` / `git push`。
-- Core（`review/` / `reports/` / `git/` / `llm/`）不依赖终端交互；CLI 负责展示与确认。
+- 按二级命令分域；共用能力在 `common/`；命令包保持薄（CLI 接线 + 域内逻辑）。
 - 默认忽略锁文件与常见二进制；超大输入会截断并提示。
 - 版本号以 `pyproject.toml` 为准（`gai --version` 读取安装包元数据）。
 
@@ -720,16 +720,24 @@ CodeReviewAgent/
   pyproject.toml
   README.md
   src/gai/
-    cli.py / cli_common.py / cli_usage.py / help_i18n.py / errors.py / config.py
-    commands/        # stage / ship / flow / sync / integrate / branching / …
-                     # completion / insight / setup / view；flow_lib 为 flow 辅助
-    git/             # core / local / remote / workflow / logview / views
-    reports/         # usage / history / guide / graph / work / serve + web 壳
-    review/          # 审查引擎（engine）
-    flow/            # 暂存建议、分批计划、中英提交词
-    history/         # commands.jsonl + 路径/合并（store）
-    llm/             # client / balance / usage / history / prompts
-    # 根目录若干 *.py 为兼容 shim（旧 import 路径仍可用）
+    cli.py / cli_common.py / cli_usage.py   # 入口与公共 CLI 辅助
+    common/            # 跨命令共用
+      config.py / errors.py / i18n.py
+      git/             # core / local / remote / workflow / logview / views
+      llm/             # client / balance / usage / prompts / …
+      web/             # serve / prefs / urls / shell_*
+    review/            # gai review（engine + cmd + helpers）
+    commit/            # gai commit
+    flow/              # gai devflow / splitflow
+    stage/             # gai add / unadd / uncommit / stash
+    sync/              # gai push / pull / merge / rebase / branch / switch
+    status/            # gai status / log
+    report/            # gai report（工作总结）
+    usage/             # gai usage / balance
+    history/           # gai history（commands.jsonl + 报告）
+    guide/ / graph/    # gai guide / graph
+    insight/ / setup/ / completion/
+    # 根目录与 llm/、git/、reports/ 等保留兼容 shim（旧 import 仍可用）
   tests/
 ```
 
