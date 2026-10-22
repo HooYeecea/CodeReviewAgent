@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from gai.config import Settings
+from gai.common.config import Settings
 from gai.review import DiffTooLargeError, run_review, staged_diff_size
 
 

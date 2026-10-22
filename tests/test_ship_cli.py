@@ -50,7 +50,7 @@ def _fake_review(**_kwargs) -> ReviewResult:
 def test_review_json_happy_path(
     staged_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("gai.commands.ship.run_review", _fake_review)
+    monkeypatch.setattr("gai.review.cmd.run_review", _fake_review)
     code = run(["review", "--json"])
     assert code == 0
 
@@ -77,9 +77,9 @@ def test_commit_no_ai_yes(
     def boom(*_a, **_k):  # pragma: no cover
         raise AssertionError("LLM must not be called with --no-ai")
 
-    monkeypatch.setattr("gai.commands.ship.run_review", boom)
+    monkeypatch.setattr("gai.commit.cmd.run_review", boom)
     monkeypatch.setattr(
-        "gai.commands.ship.git_commit",
+        "gai.commit.cmd.git_commit",
         lambda msg: called.append(msg),
     )
     code = run(["commit", "--no-ai", "-m", "chore: manual", "-y"])
@@ -91,9 +91,9 @@ def test_commit_ai_yes_uses_model_message(
     staged_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     called: list[str] = []
-    monkeypatch.setattr("gai.commands.ship.run_review", _fake_review)
+    monkeypatch.setattr("gai.commit.cmd.run_review", _fake_review)
     monkeypatch.setattr(
-        "gai.commands.ship.git_commit",
+        "gai.commit.cmd.git_commit",
         lambda msg: called.append(msg),
     )
     code = run(["commit", "-y", "--cn"])
@@ -105,14 +105,14 @@ def test_review_diff_too_large_json(
     staged_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
-        "gai.commands.ship.staged_diff_size",
+        "gai.review.cmd.staged_diff_size",
         lambda **_k: (90_000, 100, True),
     )
 
     def boom(*_a, **_k):  # pragma: no cover
         raise AssertionError("LLM must not run when diff exceeds limit")
 
-    monkeypatch.setattr("gai.commands.ship.run_review", boom)
+    monkeypatch.setattr("gai.review.cmd.run_review", boom)
     code = run(["review", "--json"])
     assert code == 1
 
@@ -126,11 +126,11 @@ def test_suggest_split_not_called_by_default(
         hits.append("suggest")
 
     monkeypatch.setattr(
-        "gai.commands.ship._maybe_suggest_optional_splitflow", track_suggest
+        "gai.review.helpers._maybe_suggest_optional_splitflow", track_suggest
     )
-    monkeypatch.setattr("gai.commands.ship.run_review", _fake_review)
+    monkeypatch.setattr("gai.review.cmd.run_review", _fake_review)
     monkeypatch.setattr(
-        "gai.commands.ship.staged_diff_size",
+        "gai.review.cmd.staged_diff_size",
         lambda **_k: (10, 80_000, False),
     )
     code = run(["review"])

@@ -5,8 +5,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from gai.commands.flow_lib import parse_batch_message_lang_spec
-from gai.devflow import (
+from gai.flow.lib import parse_batch_message_lang_spec
+from gai.flow.devflow import (
     CommitBatch,
     apply_message_lang_to_batches,
     fallback_commit_batches,
@@ -18,7 +18,7 @@ from gai.devflow import (
     parse_stage_suggestion,
     stageable_paths_summary,
 )
-from gai.git_ops import list_change_entries
+from gai.common.git import list_change_entries
 
 
 def test_parse_stage_suggestion() -> None:

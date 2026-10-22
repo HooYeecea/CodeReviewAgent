@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from gai.command_history import CommandRecord, append_command_record, load_command_records
-from gai.llm.history import UsageRecord, append_usage_record, load_usage_records
+from gai.common.llm.history import UsageRecord, append_usage_record, load_usage_records
 from gai.history import store as log_store
 
 
@@ -19,9 +19,9 @@ def dual_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, P
     global_dir = tmp_path / "home_gai"
     global_dir.mkdir()
     monkeypatch.setattr(log_store, "CONFIG_DIR", global_dir)
-    monkeypatch.setattr("gai.config.CONFIG_DIR", global_dir)
+    monkeypatch.setattr("gai.common.config.CONFIG_DIR", global_dir)
     monkeypatch.setattr(log_store, "project_root", lambda cwd=None: local_root)
-    monkeypatch.setattr("gai.llm.history.project_root", lambda cwd=None: local_root)
+    monkeypatch.setattr("gai.common.llm.history.project_root", lambda cwd=None: local_root)
     monkeypatch.delenv("GAI_USAGE_LOG", raising=False)
     monkeypatch.delenv("GAI_USAGE_LOG_GLOBAL", raising=False)
     monkeypatch.delenv("GAI_HISTORY_LOG", raising=False)

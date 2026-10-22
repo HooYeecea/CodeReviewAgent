@@ -17,7 +17,7 @@ from gai.history_report import (
 def test_write_history_report_fixed_path(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr("gai.history.store.project_root", lambda cwd=None: tmp_path)
     monkeypatch.setattr("gai.history.commands.project_root", lambda cwd=None: tmp_path)
-    monkeypatch.setattr("gai.llm.history.project_root", lambda cwd=None: tmp_path)
+    monkeypatch.setattr("gai.common.llm.history.project_root", lambda cwd=None: tmp_path)
 
     log = tmp_path / ".gai" / "commands.jsonl"
     append_command_record(

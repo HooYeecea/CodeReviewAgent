@@ -7,9 +7,9 @@ from typing import Any
 import httpx
 import pytest
 
-from gai.config import Settings
-from gai.llm.client import LLMClient, LLMError
-from gai.llm.usage import clear_llm_usage, get_llm_calls
+from gai.common.config import Settings
+from gai.common.llm.client import LLMClient, LLMError
+from gai.common.llm.usage import clear_llm_usage, get_llm_calls
 
 
 class _FakeResponse:

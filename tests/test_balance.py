@@ -7,14 +7,14 @@ from typing import Any
 import httpx
 import pytest
 
-from gai.config import Settings
-from gai.llm.balance import (
+from gai.common.config import Settings
+from gai.common.llm.balance import (
     detect_provider,
     fetch_balance,
     format_balance_brief,
     format_balance_result,
 )
-from gai.llm.client import LLMError
+from gai.common.llm.client import LLMError
 
 
 def test_detect_supported_providers():

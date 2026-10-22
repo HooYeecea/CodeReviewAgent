@@ -1,6 +1,6 @@
 """Tests for LLM usage tracking and footer wording helpers."""
 
-from gai.llm.usage import (
+from gai.common.llm.usage import (
     clear_llm_usage,
     get_llm_calls,
     record_llm_call,

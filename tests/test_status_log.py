@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from rich.console import Console
 
-from gai.git_ops import collect_log_entries, log_plain, status_plain
+from gai.common.git import collect_log_entries, log_plain, status_plain
 from gai.git_views import log_report_path, render_pretty_status, write_log_report
 from gai.cli import run
 

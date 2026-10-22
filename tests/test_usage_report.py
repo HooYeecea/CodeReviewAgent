@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from gai.llm.history import UsageRecord, append_usage_record, load_usage_records
+from gai.common.llm.history import UsageRecord, append_usage_record, load_usage_records
 from datetime import datetime
 
-from gai.llm.usage_report import (
+from gai.common.llm.usage_report import (
     build_report_datasets,
     build_trend_series,
     build_usage_analytics,
@@ -20,7 +20,7 @@ from gai.llm.usage_report import (
 
 def test_write_usage_report_fixed_path(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr("gai.history.store.project_root", lambda cwd=None: tmp_path)
-    monkeypatch.setattr("gai.llm.history.project_root", lambda cwd=None: tmp_path)
+    monkeypatch.setattr("gai.common.llm.history.project_root", lambda cwd=None: tmp_path)
 
     log = tmp_path / ".gai" / "usage.jsonl"
     append_usage_record(
@@ -195,7 +195,7 @@ def test_trend_today_is_hourly_until_now() -> None:
 
 def test_sync_usage_data_file_creates_html_shell(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr("gai.history.store.project_root", lambda cwd=None: tmp_path)
-    monkeypatch.setattr("gai.llm.history.project_root", lambda cwd=None: tmp_path)
+    monkeypatch.setattr("gai.common.llm.history.project_root", lambda cwd=None: tmp_path)
     log = tmp_path / ".gai" / "usage.jsonl"
     append_usage_record(
         UsageRecord(

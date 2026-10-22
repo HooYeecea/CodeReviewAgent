@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from gai.git_ops import (
+from gai.common.git import (
     GitError,
     commits_ahead_of_head,
     create_branch,
@@ -228,7 +228,7 @@ def test_cli_merge_continue_abort_flags(branched_repo: Path, monkeypatch: pytest
         merge("feature", repo)
 
     monkeypatch.chdir(repo)
-    monkeypatch.setattr("gai.commands.sync.Confirm.ask", lambda *a, **k: True)
+    monkeypatch.setattr("gai.sync.integrate.Confirm.ask", lambda *a, **k: True)
 
     code = run(["merge", "--abort", "--cn"])
     assert code == 0

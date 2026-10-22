@@ -1,6 +1,6 @@
 """Tests for git command tracing."""
 
-from gai.git_ops import get_traced_commands, run_git, set_tracing
+from gai.common.git import get_traced_commands, run_git, set_tracing
 
 
 def test_trace_records_commands():

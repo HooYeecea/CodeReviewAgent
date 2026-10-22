@@ -8,23 +8,23 @@ from pathlib import Path
 import httpx
 import pytest
 
-from gai.config import Settings
-from gai.llm.client import LLMClient
-from gai.llm.history import (
+from gai.common.config import Settings
+from gai.common.llm.client import LLMClient
+from gai.common.llm.history import (
     UsageRecord,
     append_usage_record,
     format_usage_table,
     load_usage_records,
     summarize_records,
 )
-from gai.llm.usage import clear_llm_usage, set_llm_action, set_llm_usage_meta
+from gai.common.llm.usage import clear_llm_usage, set_llm_action, set_llm_usage_meta
 
 
 def test_usage_log_path_under_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("GAI_USAGE_LOG", raising=False)
     monkeypatch.setattr("gai.history.store.project_root", lambda cwd=None: tmp_path)
-    monkeypatch.setattr("gai.llm.history.project_root", lambda cwd=None: tmp_path)
-    from gai.llm.history import usage_log_path
+    monkeypatch.setattr("gai.common.llm.history.project_root", lambda cwd=None: tmp_path)
+    from gai.common.llm.history import usage_log_path
 
     assert usage_log_path() == tmp_path / ".gai" / "usage.jsonl"
 
@@ -154,11 +154,11 @@ def test_client_persists_usage(
     path = tmp_path / "usage.jsonl"
     monkeypatch.setenv("GAI_USAGE_LOG", str(path))
     monkeypatch.setattr(
-        "gai.llm.client.current_git_identity",
+        "gai.common.llm.client.current_git_identity",
         lambda cwd=None: ("Tester", "tester@example.com"),
     )
     monkeypatch.setattr(
-        "gai.llm.client.current_repo_identity",
+        "gai.common.llm.client.current_repo_identity",
         lambda cwd=None: ("CodeReviewAgent", "origin"),
     )
 
@@ -257,7 +257,7 @@ def test_client_persists_failure(
     path = tmp_path / "usage.jsonl"
     monkeypatch.setenv("GAI_USAGE_LOG", str(path))
     monkeypatch.setattr(
-        "gai.llm.client.current_git_identity",
+        "gai.common.llm.client.current_git_identity",
         lambda cwd=None: ("Tester", "tester@example.com"),
     )
 
@@ -283,7 +283,7 @@ def test_client_persists_failure(
     clear_llm_usage()
     set_llm_action("review")
     set_llm_usage_meta(action_detail="review", branch="dev")
-    from gai.llm.client import LLMError
+    from gai.common.llm.client import LLMError
 
     client = LLMClient(
         Settings(api_key="sk-bad", base_url="https://api.openai.com/v1", model="gpt-x"),

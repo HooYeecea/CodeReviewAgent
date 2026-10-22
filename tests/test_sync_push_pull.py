@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from gai.git_ops import (
+from gai.common.git import (
     NothingToPull,
     NothingToPush,
     check_sync,

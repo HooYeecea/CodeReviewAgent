@@ -4,9 +4,9 @@ from datetime import date
 
 import pytest
 
-from gai.errors import PeriodError, format_cli_error
-from gai.git_ops import GitError, choose_remote, classify_remote_failure
-from gai.llm.client import LLMError, classify_http_error
+from gai.common.errors import PeriodError, format_cli_error
+from gai.common.git import GitError, choose_remote, classify_remote_failure
+from gai.common.llm.client import LLMError, classify_http_error
 from gai.report import validate_report_period
 
 

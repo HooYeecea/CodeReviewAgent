@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from gai.git_ops import (
+from gai.common.git import (
     CommitInfo,
     format_commits_for_prompt,
     is_alltime_token,

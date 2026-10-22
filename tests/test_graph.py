@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from gai.cli import run
-from gai.git_ops import GitError, collect_graph_snapshot
+from gai.common.git import GitError, collect_graph_snapshot
 from gai.graph_report import (
     graph_data_path,
     graph_report_path,
@@ -119,7 +119,7 @@ def test_cli_graph_no_open(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         opened.append(path)
         return path.as_uri()
 
-    monkeypatch.setattr("gai.commands.view.open_path", _fake_open)
+    monkeypatch.setattr("gai.status.cmd.open_path", _fake_open)
     assert run(["graph", "--no-open", "--cn"]) == 0
     assert not opened
     raw = graph_data_path(repo).read_text(encoding="utf-8")
@@ -151,6 +151,6 @@ def test_cli_graph_opens_by_default(repo: Path, monkeypatch: pytest.MonkeyPatch)
         opened.append(path)
         return path.as_uri()
 
-    monkeypatch.setattr("gai.commands.view.open_path", _fake_open)
+    monkeypatch.setattr("gai.status.cmd.open_path", _fake_open)
     assert run(["graph", "--cn"]) == 0
     assert opened and opened[0] == graph_report_path(repo)
