@@ -1,1 +1,1 @@
-"""Typer command modules; imported by gai.cli to register on the shared app."""
+"""Legacy command package — prefer feature domains (``gai.review``, ``gai.sync``, …)."""
