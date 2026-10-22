@@ -129,7 +129,7 @@ def usage_log_path(cwd: Path | None = None, *, scope: str = "local") -> Path:
     ``scope="local"`` → ``<project>/.gai/usage.jsonl`` (``GAI_USAGE_LOG`` override).
     ``scope="global"`` → ``~/.gai/usage.jsonl`` (``GAI_USAGE_LOG_GLOBAL`` override).
     """
-    from gai.log_store import global_usage_log_path, local_usage_log_path
+    from gai.history.store import global_usage_log_path, local_usage_log_path
 
     if scope == "global":
         return global_usage_log_path()
@@ -167,7 +167,7 @@ def append_usage_record(record: UsageRecord, *, path: Path | None = None) -> Non
         _append_usage_to(path, record)
         return
 
-    from gai.log_store import global_usage_log_path, local_usage_log_path
+    from gai.history.store import global_usage_log_path, local_usage_log_path
 
     local = local_usage_log_path()
     _append_usage_to(local, record)
