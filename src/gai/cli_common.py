@@ -7,17 +7,17 @@ from rich.prompt import Confirm
 import typer
 
 from gai import __version__
-from gai.errors import format_cli_error
-from gai.git_ops import (
+from gai.common.errors import format_cli_error
+from gai.common.git import (
     clear_trace,
     get_traced_commands,
     is_worktree_dirty,
     set_tracing,
     short_status,
 )
-from gai.help_i18n import H
-from gai.llm.usage import clear_llm_usage, get_llm_calls, set_llm_action, usage_totals
-from gai.completion_cmd import completion_app
+from gai.common.i18n import H
+from gai.common.llm.usage import clear_llm_usage, get_llm_calls, set_llm_action, usage_totals
+from gai.completion.cmd import completion_app
 
 app = typer.Typer(
     name="gai",

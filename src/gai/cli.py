@@ -14,22 +14,22 @@ from gai.cli_common import (
 )
 from gai.cli_usage import format_usage_error, want_chinese
 from gai.command_history import maybe_record_command
-from gai.help_i18n import H
+from gai.common.i18n import H
 
-# Register subcommands on the shared ``app``.
-# ship before flow: flow imports shared helpers from ship at import time.
-from gai.commands import ship as _ship  # noqa: F401
-from gai.commands import flow as _flow  # noqa: F401
-from gai.commands import branching as _branching  # noqa: F401
-from gai.commands import insight as _insight  # noqa: F401
-from gai.commands import integrate as _integrate  # noqa: F401
-from gai.commands import setup as _setup  # noqa: F401
-from gai.commands import stage as _stage  # noqa: F401
-from gai.commands import sync as _sync  # noqa: F401
-from gai.commands import view as _view  # noqa: F401
-from gai.commands.setup import _attach_profile_balances  # noqa: F401
+# Register feature-domain commands (order: shared helpers first where needed).
+from gai.review import cmd as _review_cmd  # noqa: F401
+from gai.commit import cmd as _commit_cmd  # noqa: F401
+from gai.stage import cmd as _stage_cmd  # noqa: F401
+from gai.sync import push_pull as _sync_cmd  # noqa: F401
+from gai.sync import integrate as _integrate_cmd  # noqa: F401
+from gai.sync import branching as _branching_cmd  # noqa: F401
+from gai.flow import cmd as _flow_cmd  # noqa: F401
+from gai.status import cmd as _status_cmd  # noqa: F401
+from gai.setup import cmd as _setup_cmd  # noqa: F401
+from gai.insight import cmd as _insight_cmd  # noqa: F401
+from gai.setup.cmd import _attach_profile_balances  # noqa: F401
 
-from gai.llm.balance import fetch_balance  # tests monkeypatch gai.cli.fetch_balance
+from gai.common.llm.balance import fetch_balance  # tests monkeypatch gai.cli.fetch_balance
 
 
 @app.callback()

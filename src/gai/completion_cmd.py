@@ -1,8 +1,8 @@
-"""Compatibility shim — implementation lives in ``gai.commands.completion``."""
+"""Compatibility shim — implementation lives in ``gai.completion.cmd``."""
 
 from __future__ import annotations
 
-from gai.commands.completion import (
+from gai.completion.cmd import (
     SHELL_CHOICES,
     completion_app,
     get_shell_completion_script,
