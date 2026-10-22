@@ -1,5 +1,5 @@
-"""LLM package."""
+"""Compatibility shim — use ``gai.common.llm``."""
 
-from gai.llm.client import LLMClient, LLMError
+from __future__ import annotations
 
-__all__ = ["LLMClient", "LLMError"]
+# Submodules remain importable as gai.llm.* via package path tricks below.
