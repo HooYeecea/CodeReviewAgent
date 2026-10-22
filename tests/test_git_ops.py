@@ -85,7 +85,7 @@ def test_current_repo_identity_prefers_origin(monkeypatch: pytest.MonkeyPatch, t
             return GitResult("upstream\norigin\n", "", 0)
         return GitResult("", "unexpected", 1)
 
-    monkeypatch.setattr("gai.git_ops.run_git", fake_run_git)
+    monkeypatch.setattr("gai.git.logview.run_git", fake_run_git)
     repo_name, remote_name = current_repo_identity(tmp_path)
     assert repo_name == "MyRepo"
     assert remote_name == "origin"
@@ -101,7 +101,7 @@ def test_current_repo_identity_no_remote_is_null(
             return GitResult("", "", 0)
         return GitResult("", "unexpected", 1)
 
-    monkeypatch.setattr("gai.git_ops.run_git", fake_run_git)
+    monkeypatch.setattr("gai.git.logview.run_git", fake_run_git)
     repo_name, remote_name = current_repo_identity(tmp_path)
     assert repo_name == "LocalOnly"
     assert remote_name is None
