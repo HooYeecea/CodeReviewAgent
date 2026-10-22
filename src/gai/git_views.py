@@ -25,8 +25,8 @@ from gai.git_ops import (
     log_graph_text,
 )
 from gai.llm.history import project_root
-from gai.llm.usage_report import path_to_file_url
-from gai.web_prefs import PREF_LANG, PREF_THEME, early_prefs_script
+from gai.reports.prefs import PREF_LANG, PREF_THEME, early_prefs_script
+from gai.reports.urls import path_to_file_url
 
 _LOG_HTML_RELATIVE = Path(".gai") / "log-report.html"
 
