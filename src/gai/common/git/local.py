@@ -128,11 +128,20 @@ def commit(message: str, cwd: Path | None = None) -> None:
 
 
 def add(paths: list[str] | tuple[str, ...] | None = None, cwd: Path | None = None) -> None:
-    """Stage files via `git add`. Defaults to `.` when paths is empty."""
+    """Stage files via `git add`. Defaults to `.` when paths is empty.
+
+    Explicit paths that are gitignored or under project ``.gai/`` are skipped so
+    splitflow/devflow batches never fail with ``paths are ignored by .gitignore``.
+    If every path is skipped, this is a no-op (caller may then see an empty index).
+    """
     ensure_repo(cwd)
     targets = [p for p in (paths or []) if str(p).strip()]
     if not targets:
         targets = ["."]
+    if targets != ["."]:
+        targets = filter_addable_paths(targets, cwd=cwd)
+        if not targets:
+            return
     result = run_git("add", "--", *targets, cwd=cwd)
     if result.returncode != 0:
         raise GitError(
@@ -211,16 +220,71 @@ class ChangeEntry:
     worktree: str
 
     @property
+    def ignored(self) -> bool:
+        """True for ``!!`` ignored entries (only present with ``--ignored``)."""
+        return self.index == "!" and self.worktree == "!"
+
+    @property
     def staged(self) -> bool:
-        return bool(self.index.strip()) and self.index != "?"
+        return bool(self.index.strip()) and self.index not in {"?", "!"}
 
     @property
     def unstaged(self) -> bool:
-        return bool(self.worktree.strip()) and self.worktree != "?"
+        return bool(self.worktree.strip()) and self.worktree not in {"?", "!"}
 
     @property
     def untracked(self) -> bool:
         return self.index == "?" and self.worktree == "?"
+
+
+def is_local_gai_path(path: str) -> bool:
+    """True for project-local ``.gai/`` runtime artifacts (logs, HTML reports)."""
+    norm = path.replace("\\", "/")
+    while norm.startswith("./"):
+        norm = norm[2:]
+    return norm == ".gai" or norm.startswith(".gai/")
+
+
+def is_path_ignored(path: str, cwd: Path | None = None) -> bool:
+    """True when ``git check-ignore`` says the path matches an ignore rule.
+
+    Tracked files that happen to match a pattern still return False here only
+    when git does not consider them ignored for add purposes; ``check-ignore``
+    reports pattern matches for untracked paths. Exit codes: 0=ignored,
+    1=not ignored, 128=error (treated as not ignored so callers can still try).
+    """
+    if not str(path).strip() or path.strip() == ".":
+        return False
+    result = run_git("check-ignore", "-q", "--", path, cwd=cwd)
+    return result.returncode == 0
+
+
+def filter_addable_paths(
+    paths: list[str] | tuple[str, ...] | None,
+    cwd: Path | None = None,
+    *,
+    drop_local_gai: bool = True,
+) -> list[str]:
+    """Drop gitignored / local ``.gai/`` paths so explicit ``git add`` won't fail.
+
+    ``.`` is kept as-is (``git add .`` already skips ignored files silently).
+    """
+    out: list[str] = []
+    for raw in paths or []:
+        path = str(raw or "").strip()
+        if not path:
+            continue
+        if path == ".":
+            if path not in out:
+                out.append(path)
+            continue
+        if drop_local_gai and is_local_gai_path(path):
+            continue
+        if is_path_ignored(path, cwd=cwd):
+            continue
+        if path not in out:
+            out.append(path)
+    return out
 
 
 def list_change_entries(cwd: Path | None = None) -> list[ChangeEntry]:
@@ -240,7 +304,10 @@ def list_change_entries(cwd: Path | None = None) -> list[ChangeEntry]:
         path = path.strip().strip('"')
         if not path:
             continue
-        entries.append(ChangeEntry(path=path, index=index, worktree=worktree))
+        entry = ChangeEntry(path=path, index=index, worktree=worktree)
+        if entry.ignored or is_local_gai_path(path):
+            continue
+        entries.append(entry)
     return entries
 
 
