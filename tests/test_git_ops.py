@@ -1,5 +1,8 @@
 """Tests for git diff ignore filtering and remote selection."""
 
+from __future__ import annotations
+
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -7,9 +10,15 @@ import pytest
 from gai.common.git import (
     GitError,
     GitResult,
+    add,
     choose_remote,
     current_repo_identity,
+    filter_addable_paths,
     filter_diff_by_ignore,
+    has_staged_changes,
+    is_local_gai_path,
+    is_path_ignored,
+    list_change_entries,
 )
 
 
@@ -105,3 +114,84 @@ def test_current_repo_identity_no_remote_is_null(
     repo_name, remote_name = current_repo_identity(tmp_path)
     assert repo_name == "LocalOnly"
     assert remote_name is None
+
+
+def test_is_local_gai_path() -> None:
+    assert is_local_gai_path(".gai/commands.jsonl")
+    assert is_local_gai_path(".gai\\usage.jsonl")
+    assert is_local_gai_path("./.gai/history-report.html")
+    assert is_local_gai_path(".gai")
+    assert not is_local_gai_path("src/gai/cli.py")
+    assert not is_local_gai_path("README.md")
+
+
+def _init_repo(tmp_path: Path) -> None:
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "t@example.com"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Tester"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+
+
+def test_add_skips_ignored_gai_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Explicit git add of ignored .gai files must not raise (splitflow last batch)."""
+    monkeypatch.chdir(tmp_path)
+    _init_repo(tmp_path)
+    (tmp_path / ".gitignore").write_text(".gai/\n", encoding="utf-8")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "app.py").write_text("print(1)\n", encoding="utf-8")
+    gai = tmp_path / ".gai"
+    gai.mkdir()
+    (gai / "commands.jsonl").write_text("{}\n", encoding="utf-8")
+    (gai / "usage.jsonl").write_text("{}\n", encoding="utf-8")
+
+    assert is_path_ignored(".gai/commands.jsonl")
+    filtered = filter_addable_paths(
+        [
+            "src/app.py",
+            ".gai/commands.jsonl",
+            ".gai/usage.jsonl",
+            ".gai/history-report.html",
+        ]
+    )
+    assert filtered == ["src/app.py"]
+
+    # Would previously fail with: paths are ignored by one of your .gitignore files
+    add(
+        [
+            ".gai/commands.jsonl",
+            ".gai/usage.jsonl",
+            ".gai/history-data.js",
+            ".gai/usage-data.js",
+            ".gai/history-report.html",
+        ]
+    )
+    assert not has_staged_changes()
+
+    add(["src/app.py", ".gai/commands.jsonl"])
+    assert has_staged_changes()
+    staged = {e.path for e in list_change_entries() if e.staged}
+    assert staged == {"src/app.py"}
+
+
+def test_list_change_entries_hides_local_gai(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _init_repo(tmp_path)
+    (tmp_path / "keep.py").write_text("x\n", encoding="utf-8")
+    gai = tmp_path / ".gai"
+    gai.mkdir()
+    (gai / "commands.jsonl").write_text("{}\n", encoding="utf-8")
+
+    paths = {e.path for e in list_change_entries()}
+    assert "keep.py" in paths
+    assert not any(p.startswith(".gai") for p in paths)

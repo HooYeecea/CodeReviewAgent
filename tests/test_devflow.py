@@ -16,6 +16,7 @@ from gai.flow.devflow import (
     parse_bilingual_messages,
     parse_commit_batch_plan,
     parse_stage_suggestion,
+    sanitize_commit_batches,
     stageable_paths_summary,
 )
 from gai.common.git import list_change_entries
@@ -89,6 +90,50 @@ def test_normalize_commit_batches_dedupes_and_appends_leftover() -> None:
     )
     assert [b.paths for b in out] == [["a.py"], ["b.py"], ["c.py"]]
     assert out[-1].title == "其余改动"
+
+
+def test_normalize_commit_batches_drops_local_gai_paths() -> None:
+    batches = [
+        CommitBatch(title="code", paths=["a.py", ".gai/commands.jsonl"], reason=""),
+        CommitBatch(
+            title="更新 .gai 运行记录与报告产物",
+            paths=[
+                ".gai/commands.jsonl",
+                ".gai/usage.jsonl",
+                ".gai/history-data.js",
+                ".gai/usage-data.js",
+                ".gai/history-report.html",
+            ],
+            reason="",
+        ),
+    ]
+    out = normalize_commit_batches(
+        batches,
+        allowed_paths=[
+            "a.py",
+            ".gai/commands.jsonl",
+            ".gai/usage.jsonl",
+            ".gai/history-data.js",
+            ".gai/usage-data.js",
+            ".gai/history-report.html",
+        ],
+        chinese=True,
+    )
+    assert [b.paths for b in out] == [["a.py"]]
+
+
+def test_sanitize_commit_batches_drops_gai_only_batch() -> None:
+    batches = [
+        CommitBatch(title="docs", paths=["README.md"], reason=""),
+        CommitBatch(
+            title="更新 .gai 运行记录与报告产物",
+            paths=[".gai/commands.jsonl", ".gai/usage.jsonl"],
+            reason="",
+        ),
+    ]
+    out = sanitize_commit_batches(batches)
+    assert len(out) == 1
+    assert out[0].paths == ["README.md"]
 
 
 def test_fallback_commit_batches_by_directory() -> None:
