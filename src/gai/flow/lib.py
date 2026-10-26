@@ -20,6 +20,7 @@ from gai.flow.devflow import (
     CommitBatch,
     CommitBatchPlan,
     normalize_path_input,
+    sanitize_commit_batches,
     stageable_paths_summary,
     suggest_bilingual_messages,
     suggest_commit_batches,
@@ -575,6 +576,23 @@ def _run_splitflow(
             )
 
     assert plan is not None
+    cleaned = sanitize_commit_batches(plan.batches)
+    if len(cleaned) != len(plan.batches):
+        plan = CommitBatchPlan(
+            batches=cleaned,
+            summary=plan.summary,
+            raw_text=plan.raw_text,
+            parsed_ok=plan.parsed_ok and bool(cleaned),
+        )
+    if not plan.batches:
+        tip = (
+            "分批计划为空（可提交路径均被忽略或属于本地 .gai/）。"
+            if chinese
+            else "Batch plan is empty (paths are ignored or under local .gai/)."
+        )
+        err_console.print(f"[yellow]{tip}[/yellow]")
+        flush("plan")
+        raise typer.Exit(code=1)
     if not reused_plan:
         _print_batch_plan(plan.batches, summary=plan.summary, chinese=chinese)
         if not Confirm.ask(
