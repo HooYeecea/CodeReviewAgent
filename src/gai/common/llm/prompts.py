@@ -97,10 +97,12 @@ Your job:
 1. Read the working-tree status (and optional unstaged diff snippet).
 2. Suggest a coherent set of paths to `git add` for ONE focused commit.
 3. Prefer source/docs that belong together; usually exclude secrets, local env files,
-   build artifacts, and unrelated WIP unless the status clearly shows they are part of this change.
+   build artifacts, project ``.gai/`` runtime logs/reports, and unrelated WIP unless
+   the status clearly shows they are part of this change.
 
 Rules:
 - Only suggest paths that appear in the provided status/diff.
+- Never suggest paths under ``.gai/`` (local gai usage/history/report artifacts).
 - Prefer concrete file paths over "." unless nearly everything should be staged.
 - Respond with ONLY valid JSON. No markdown fences, no commentary.
 
@@ -127,11 +129,12 @@ Your job:
    path in at most one batch.
 6. Prefer covering all provided changed paths. If you intentionally leave WIP out,
    say so in `summary` and omit those paths.
-7. Order batches so later commits can build on earlier ones when that matters.
-8. Prefer 2–8 batches for a large tree; avoid one-file-per-batch unless necessary.
-9. If the changes already form ONE coherent commit, return exactly one batch covering them.
+7. Never put paths under ``.gai/`` into any batch (local gai runtime logs/reports).
+8. Order batches so later commits can build on earlier ones when that matters.
+9. Prefer 2–8 batches for a large tree; avoid one-file-per-batch unless necessary.
+10. If the changes already form ONE coherent commit, return exactly one batch covering them.
    Only recommend multiple batches when themes/modules clearly diverge.
-10. Respond with ONLY valid JSON. No markdown fences, no commentary.
+11. Respond with ONLY valid JSON. No markdown fences, no commentary.
 
 JSON schema:
 {

@@ -12,6 +12,7 @@ from gai.common.config import Settings, load_settings
 from gai.common.git import (
     ChangeEntry,
     current_branch_name,
+    filter_addable_paths,
     get_staged_diff,
     get_unstaged_diff,
     list_change_entries,
@@ -253,7 +254,8 @@ def _stageable_paths(entries: list[ChangeEntry] | None = None) -> list[str]:
             # Include anything changed (staged / unstaged / untracked).
             if e.untracked or e.unstaged or e.staged:
                 paths.append(e.path)
-    return paths
+    # Drop gitignored / local .gai artifacts (defense if status ever surfaces them).
+    return filter_addable_paths(paths)
 
 
 def fallback_commit_batches(
@@ -288,6 +290,26 @@ def fallback_commit_batches(
     return batches
 
 
+def sanitize_commit_batches(batches: list[CommitBatch]) -> list[CommitBatch]:
+    """Drop gitignored / local ``.gai/`` paths from an existing plan (e.g. reused)."""
+    out: list[CommitBatch] = []
+    for batch in batches:
+        paths = filter_addable_paths(batch.paths)
+        if not paths:
+            continue
+        out.append(
+            CommitBatch(
+                title=batch.title,
+                paths=paths,
+                reason=batch.reason,
+                message_hint_en=batch.message_hint_en,
+                message_hint_cn=batch.message_hint_cn,
+                commit_message=batch.commit_message,
+            )
+        )
+    return out
+
+
 def normalize_commit_batches(
     batches: list[CommitBatch],
     *,
@@ -295,7 +317,7 @@ def normalize_commit_batches(
     chinese: bool = False,
 ) -> list[CommitBatch]:
     """Drop unknown/duplicate paths; append leftovers as a final batch."""
-    allowed = set(allowed_paths)
+    allowed = set(filter_addable_paths(allowed_paths))
     seen: set[str] = set()
     out: list[CommitBatch] = []
     for batch in batches:
@@ -317,7 +339,7 @@ def normalize_commit_batches(
                 commit_message=batch.commit_message,
             )
         )
-    leftover = [p for p in allowed_paths if p not in seen]
+    leftover = [p for p in allowed_paths if p in allowed and p not in seen]
     if leftover:
         out.append(
             CommitBatch(
@@ -403,9 +425,10 @@ def suggest_commit_batches(
         # Keep caller order when possible.
         order = {p.replace("\\", "/"): i for i, p in enumerate(paths)}
         selected.sort(key=lambda p: order.get(p.replace("\\", "/"), 10_000))
-        plan_paths = selected or list(paths)
+        # Never fall back to caller paths that are gitignored / under .gai/.
+        plan_paths = filter_addable_paths(selected or list(paths))
     elif only_staged:
-        plan_paths = list_staged_paths(entries)
+        plan_paths = filter_addable_paths(list_staged_paths(entries))
     else:
         plan_paths = _stageable_paths(entries)
     if not plan_paths:
