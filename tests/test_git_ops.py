@@ -12,9 +12,11 @@ from gai.common.git import (
     GitResult,
     add,
     choose_remote,
+    clear_diff_cache,
     current_repo_identity,
     filter_addable_paths,
     filter_diff_by_ignore,
+    get_staged_diff,
     has_staged_changes,
     is_local_gai_path,
     is_path_ignored,
@@ -195,3 +197,35 @@ def test_list_change_entries_hides_local_gai(
     paths = {e.path for e in list_change_entries()}
     assert "keep.py" in paths
     assert not any(p.startswith(".gai") for p in paths)
+
+
+def test_staged_diff_cache_reuses_until_add(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _init_repo(tmp_path)
+    (tmp_path / "a.txt").write_text("one\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "add", "a.txt"], cwd=tmp_path, check=True, capture_output=True
+    )
+    clear_diff_cache()
+    calls: list[tuple[str, ...]] = []
+    real_run_git = __import__("gai.common.git.local", fromlist=["run_git"]).run_git
+
+    def tracking_run_git(*args: str, cwd=None, trace: bool = True):
+        calls.append(args)
+        return real_run_git(*args, cwd=cwd, trace=trace)
+
+    monkeypatch.setattr("gai.common.git.local.run_git", tracking_run_git)
+    d1, _ = get_staged_diff()
+    d2, _ = get_staged_diff()
+    assert d1 == d2
+    diff_calls = [c for c in calls if c[:2] == ("diff", "--cached")]
+    assert len(diff_calls) == 1
+
+    (tmp_path / "b.txt").write_text("two\n", encoding="utf-8")
+    add(["b.txt"])
+    d3, _ = get_staged_diff()
+    assert "b.txt" in d3 or "+two" in d3
+    diff_calls_after = [c for c in calls if c[:2] == ("diff", "--cached")]
+    assert len(diff_calls_after) >= 2

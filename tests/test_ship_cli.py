@@ -104,9 +104,11 @@ def test_commit_ai_yes_uses_model_message(
 def test_review_diff_too_large_json(
     staged_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from gai.review import StagedDiffInfo
+
     monkeypatch.setattr(
-        "gai.review.cmd.staged_diff_size",
-        lambda **_k: (90_000, 100, True),
+        "gai.review.cmd.load_staged_diff_info",
+        lambda **_k: StagedDiffInfo(text="x" * 200, chars=90_000, limit=100, exceeds=True),
     )
 
     def boom(*_a, **_k):  # pragma: no cover
@@ -120,6 +122,8 @@ def test_review_diff_too_large_json(
 def test_suggest_split_not_called_by_default(
     staged_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from gai.review import StagedDiffInfo
+
     hits: list[str] = []
 
     def track_suggest(**_k):
@@ -130,8 +134,8 @@ def test_suggest_split_not_called_by_default(
     )
     monkeypatch.setattr("gai.review.cmd.run_review", _fake_review)
     monkeypatch.setattr(
-        "gai.review.cmd.staged_diff_size",
-        lambda **_k: (10, 80_000, False),
+        "gai.review.cmd.load_staged_diff_info",
+        lambda **_k: StagedDiffInfo(text="ok\n", chars=10, limit=80_000, exceeds=False),
     )
     code = run(["review"])
     assert code == 0
