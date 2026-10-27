@@ -225,18 +225,22 @@ def run_review(
     review_only: bool = False,
     chinese: bool = False,
     allow_truncated: bool = False,
+    diff_info: StagedDiffInfo | None = None,
 ) -> ReviewResult:
     """Load staged diff and ask the LLM for review + commit message.
 
     When the staged diff exceeds ``max_diff_chars`` and ``allow_truncated`` is
     false, raises ``DiffTooLargeError`` so the CLI can offer ``gai splitflow``.
+
+    Pass ``diff_info`` when the caller already loaded the staged diff (avoids a
+    second git read when the process-local cache was cleared or key differs).
     """
     settings = settings or load_settings()
 
     if not has_staged_changes():
         raise RuntimeError("No staged changes. Run `git add` first.")
 
-    info = load_staged_diff_info(settings=settings)
+    info = diff_info or load_staged_diff_info(settings=settings)
     if info.exceeds and not allow_truncated:
         raise DiffTooLargeError(chars=info.chars, limit=info.limit)
 

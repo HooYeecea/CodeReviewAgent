@@ -9,13 +9,37 @@ from pathlib import Path
 
 from gai.common.git.core import GitError, ensure_repo, run_git
 
+# Process-local caches: invalidated whenever the index / HEAD mutates via gai.
+_STAGED_DIFF_CACHE: dict[tuple[object, ...], tuple[str, bool]] = {}
+_UNSTAGED_DIFF_CACHE: dict[tuple[object, ...], tuple[str, bool]] = {}
+_HAS_STAGED_CACHE: dict[object, bool] = {}
+
+
+def clear_diff_cache() -> None:
+    """Drop cached staged/unstaged diffs (call after add/unadd/commit/reset)."""
+    _STAGED_DIFF_CACHE.clear()
+    _UNSTAGED_DIFF_CACHE.clear()
+    _HAS_STAGED_CACHE.clear()
+
+
+def _cwd_key(cwd: Path | None) -> str:
+    """Stable cache key; ``cwd=None`` means the process current directory."""
+    root = Path(cwd) if cwd is not None else Path.cwd()
+    return str(root.resolve())
+
+
 def has_staged_changes(cwd: Path | None = None) -> bool:
     ensure_repo(cwd)
+    key = _cwd_key(cwd)
+    if key in _HAS_STAGED_CACHE:
+        return _HAS_STAGED_CACHE[key]
     # --quiet: exit 0 if no diff, 1 if there is a diff, >1 on error
     result = run_git("diff", "--cached", "--quiet", cwd=cwd)
     if result.returncode == 0:
+        _HAS_STAGED_CACHE[key] = False
         return False
     if result.returncode == 1:
+        _HAS_STAGED_CACHE[key] = True
         return True
     raise GitError(result.stderr.strip() or "failed to check staged changes")
 
@@ -95,15 +119,24 @@ def get_staged_diff(
     ignore_patterns: tuple[str, ...] | list[str] | None = None,
     max_chars: int | None = None,
 ) -> tuple[str, bool]:
-    """Return (diff_text, truncated). Empty string if nothing staged / all ignored."""
+    """Return (diff_text, truncated). Empty string if nothing staged / all ignored.
+
+    Results are cached until ``clear_diff_cache`` (triggered by add/unadd/commit).
+    """
     ensure_repo(cwd)
+    patterns = tuple(ignore_patterns or ())
+    cache_key = (_cwd_key(cwd), patterns, max_chars)
+    hit = _STAGED_DIFF_CACHE.get(cache_key)
+    if hit is not None:
+        return hit
+
     result = run_git("diff", "--cached", "--no-color", cwd=cwd)
     if result.returncode != 0:
         raise GitError(result.stderr.strip() or "failed to get staged diff")
 
     diff = result.stdout
-    if ignore_patterns:
-        diff = filter_diff_by_ignore(diff, ignore_patterns)
+    if patterns:
+        diff = filter_diff_by_ignore(diff, patterns)
 
     truncated = False
     if max_chars is not None and len(diff) > max_chars:
@@ -112,7 +145,9 @@ def get_staged_diff(
             + "\n\n... [diff truncated by gai due to size limit] ...\n"
         )
         truncated = True
-    return diff, truncated
+    out = (diff, truncated)
+    _STAGED_DIFF_CACHE[cache_key] = out
+    return out
 
 
 def commit(message: str, cwd: Path | None = None) -> None:
@@ -120,6 +155,7 @@ def commit(message: str, cwd: Path | None = None) -> None:
     if not message.strip():
         raise GitError("commit message must not be empty", code="empty_message")
     result = run_git("commit", "-m", message, cwd=cwd)
+    clear_diff_cache()
     if result.returncode != 0:
         raise GitError(
             result.stderr.strip() or result.stdout.strip() or "git commit failed",
@@ -143,6 +179,7 @@ def add(paths: list[str] | tuple[str, ...] | None = None, cwd: Path | None = Non
         if not targets:
             return
     result = run_git("add", "--", *targets, cwd=cwd)
+    clear_diff_cache()
     if result.returncode != 0:
         raise GitError(
             result.stderr.strip() or result.stdout.strip() or "git add failed",
@@ -159,6 +196,7 @@ def unadd(paths: list[str] | tuple[str, ...] | None = None, cwd: Path | None = N
     if not targets:
         targets = ["."]
     result = run_git("restore", "--staged", "--", *targets, cwd=cwd)
+    clear_diff_cache()
     if result.returncode != 0:
         raise GitError(
             result.stderr.strip() or result.stdout.strip() or "git restore --staged failed",
@@ -186,6 +224,7 @@ def uncommit(cwd: Path | None = None) -> str:
             code="no_commit",
         )
     result = run_git("reset", "--soft", "HEAD~1", cwd=cwd)
+    clear_diff_cache()
     if result.returncode != 0:
         raise GitError(
             result.stderr.strip() or result.stdout.strip() or "git reset --soft HEAD~1 failed",
@@ -319,6 +358,11 @@ def get_unstaged_diff(
 ) -> tuple[str, bool]:
     """Return unstaged worktree diff (+ untracked file list), optionally truncated."""
     ensure_repo(cwd)
+    patterns = tuple(ignore_patterns or ())
+    cache_key = (_cwd_key(cwd), patterns, max_chars)
+    hit = _UNSTAGED_DIFF_CACHE.get(cache_key)
+    if hit is not None:
+        return hit
     result = run_git("diff", "--no-color", cwd=cwd)
     if result.returncode != 0:
         raise GitError(result.stderr.strip() or "failed to get unstaged diff")
@@ -328,8 +372,8 @@ def get_unstaged_diff(
         names = [ln.strip() for ln in untracked.stdout.splitlines() if ln.strip()]
         if names:
             diff += "\n\n# Untracked files:\n" + "\n".join(f"+ {n}" for n in names) + "\n"
-    if ignore_patterns:
-        diff = filter_diff_by_ignore(diff, ignore_patterns)
+    if patterns:
+        diff = filter_diff_by_ignore(diff, patterns)
     truncated = False
     if max_chars is not None and len(diff) > max_chars:
         diff = (
@@ -337,7 +381,9 @@ def get_unstaged_diff(
             + "\n\n... [diff truncated by gai due to size limit] ...\n"
         )
         truncated = True
-    return diff, truncated
+    out = (diff, truncated)
+    _UNSTAGED_DIFF_CACHE[cache_key] = out
+    return out
 
 
 def is_worktree_dirty(cwd: Path | None = None) -> bool:

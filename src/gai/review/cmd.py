@@ -16,7 +16,12 @@ from gai.cli_common import (
 from gai.common.git import GitError, has_staged_changes
 from gai.common.i18n import H
 from gai.common.llm.client import LLMError
-from gai.review import DiffTooLargeError, render_review, run_review, staged_diff_size
+from gai.review import (
+    DiffTooLargeError,
+    load_staged_diff_info,
+    render_review,
+    run_review,
+)
 from gai.review.helpers import (
     _SUGGEST_SPLIT_HELP,
     _maybe_suggest_optional_splitflow,
@@ -80,10 +85,12 @@ def review_cmd(
             err_console.print(f"[red]{tip}[/red]")
             raise typer.Exit(code=1)
 
-        chars, limit, exceeds = staged_diff_size()
-        if exceeds:
+        diff_info = load_staged_diff_info()
+        if diff_info.exceeds:
             if as_json:
-                _print_diff_too_large(chars=chars, limit=limit, chinese=cn)
+                _print_diff_too_large(
+                    chars=diff_info.chars, limit=diff_info.limit, chinese=cn
+                )
                 tip = (
                     "请改跑：gai splitflow --cn"
                     if cn
@@ -95,8 +102,8 @@ def review_cmd(
                 chinese=cn,
                 trace=trace,
                 interactive=True,
-                chars=chars,
-                limit=limit,
+                chars=diff_info.chars,
+                limit=diff_info.limit,
             )
         elif suggest_split and not as_json:
             _maybe_suggest_optional_splitflow(
@@ -109,6 +116,7 @@ def review_cmd(
                 message_only=message_only,
                 review_only=not message_only,
                 chinese=cn,
+                diff_info=diff_info,
             )
 
         if as_json:

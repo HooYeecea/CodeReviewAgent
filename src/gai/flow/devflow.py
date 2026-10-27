@@ -28,7 +28,11 @@ from gai.common.llm.prompts import (
     build_stage_user_prompt,
 )
 from gai.common.llm.usage import set_llm_usage_meta
-from gai.review import DiffTooLargeError, _extract_json_blob, staged_diff_size
+from gai.review import (
+    DiffTooLargeError,
+    _extract_json_blob,
+    load_staged_diff_info,
+)
 
 
 @dataclass(frozen=True)
@@ -542,13 +546,10 @@ def suggest_bilingual_messages(
 ) -> BilingualMessages:
     """Ask the LLM for English + Chinese Conventional Commit messages."""
     settings = settings or load_settings()
-    chars, limit, exceeds = staged_diff_size(settings=settings)
-    if exceeds and not allow_truncated:
-        raise DiffTooLargeError(chars=chars, limit=limit)
-    diff, truncated = get_staged_diff(
-        ignore_patterns=settings.ignore_patterns,
-        max_chars=settings.max_diff_chars,
-    )
+    info = load_staged_diff_info(settings=settings)
+    if info.exceeds and not allow_truncated:
+        raise DiffTooLargeError(chars=info.chars, limit=info.limit)
+    diff, truncated = info.clipped()
     if not diff.strip():
         raise RuntimeError(
             "Staged changes are empty after ignore filters. "

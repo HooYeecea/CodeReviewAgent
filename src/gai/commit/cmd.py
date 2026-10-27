@@ -19,7 +19,12 @@ from gai.cli_common import (
 from gai.common.git import GitError, commit as git_commit, has_staged_changes, short_status
 from gai.common.i18n import H
 from gai.common.llm.client import LLMError
-from gai.review import DiffTooLargeError, render_review, run_review, staged_diff_size
+from gai.review import (
+    DiffTooLargeError,
+    load_staged_diff_info,
+    render_review,
+    run_review,
+)
 from gai.review.helpers import (
     _SUGGEST_SPLIT_HELP,
     _maybe_suggest_optional_splitflow,
@@ -138,15 +143,15 @@ def commit_cmd(
 
         need_ai = (not commit_message) or (not no_review)
         if need_ai:
-            chars, limit, exceeds = staged_diff_size()
-            if exceeds:
+            diff_info = load_staged_diff_info()
+            if diff_info.exceeds:
                 _offer_splitflow_instead(
                     chinese=cn,
                     remote=remote,
                     trace=trace,
                     interactive=not yes,
-                    chars=chars,
-                    limit=limit,
+                    chars=diff_info.chars,
+                    limit=diff_info.limit,
                 )
             elif suggest_split:
                 _maybe_suggest_optional_splitflow(
@@ -161,6 +166,7 @@ def commit_cmd(
                     message_only=no_review and not commit_message,
                     review_only=not no_review and bool(commit_message),
                     chinese=cn,
+                    diff_info=diff_info,
                 )
 
             if not no_review and result is not None:

@@ -38,7 +38,13 @@ from gai.common.git import (
     unadd as git_unadd,
 )
 from gai.common.llm.client import LLMError
-from gai.review import DiffTooLargeError, render_review, run_review, staged_diff_size
+from gai.review import (
+    DiffTooLargeError,
+    load_staged_diff_info,
+    render_review,
+    run_review,
+    staged_diff_size,
+)
 
 from gai.review.helpers import (
     _maybe_suggest_optional_splitflow,
@@ -95,16 +101,17 @@ def _run_staged_review(
     auto_continue: bool = False,
 ) -> bool:
     """Run review on the current index. Returns False if user stops."""
+    diff_info = None
     if offer_splitflow and not allow_truncated:
-        chars, limit, exceeds = staged_diff_size()
-        if exceeds:
+        diff_info = load_staged_diff_info()
+        if diff_info.exceeds:
             _offer_splitflow_instead(
                 chinese=chinese,
                 remote=remote,
                 trace=trace,
                 interactive=True,
-                chars=chars,
-                limit=limit,
+                chars=diff_info.chars,
+                limit=diff_info.limit,
             )
         elif suggest_split:
             _maybe_suggest_optional_splitflow(
@@ -116,6 +123,7 @@ def _run_staged_review(
             review_only=True,
             chinese=review_cn,
             allow_truncated=allow_truncated,
+            diff_info=diff_info,
         )
     render_review(result, console, chinese=review_cn)
     flush("review")

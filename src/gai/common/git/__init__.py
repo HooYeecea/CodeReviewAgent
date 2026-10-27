@@ -14,6 +14,7 @@ from gai.common.git.core import (
 from gai.common.git.local import (
     ChangeEntry,
     add,
+    clear_diff_cache,
     commit,
     filter_addable_paths,
     filter_diff_by_ignore,
@@ -107,6 +108,7 @@ __all__ = [
     "choose_remote",
     "classify_git_failure",
     "classify_remote_failure",
+    "clear_diff_cache",
     "clear_trace",
     "collect_graph_snapshot",
     "collect_log_entries",
