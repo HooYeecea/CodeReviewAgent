@@ -18,8 +18,12 @@ from gai.history.store import (
     local_gai_dir,
     local_history_report_path,
 )
-from gai.common.web.prefs import early_prefs_script
-from gai.common.web.shell_css import DASHBOARD_CSS
+from gai.common.web.dashboard_shell import (
+    dashboard_boot_js,
+    dashboard_chrome,
+    dashboard_footer_and_toast,
+    dashboard_head,
+)
 from gai.common.web.shell_js import dashboard_theme_lang_js
 from gai.common.web.urls import path_to_file_url
 
@@ -535,62 +539,16 @@ def render_history_report_html(datasets: dict[str, Any], *, chinese: bool = Fals
     t = _i18n(chinese)
     i18n_js = json.dumps({"cn": _i18n(True), "en": _i18n(False)}, ensure_ascii=False)
     initial_lang = "cn" if chinese else "en"
-    title = html.escape(t["title"])
-    project_dd_label = html.escape(t["project_all"])
+    title = t["title"]
+    boot = dashboard_boot_js(
+        i18n_js=i18n_js,
+        datasets_global="__GAI_HISTORY_DATASETS__",
+        data_file="history-data.js",
+        loader_id="history-data-loader",
+    )
 
-    return f"""<!DOCTYPE html>
-<html lang="{'zh-CN' if chinese else 'en'}" class="view-all" data-lang="{initial_lang}" data-theme="dark">
-<head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>{title}</title>
-<script>
-{early_prefs_script(default_lang=initial_lang, default_theme="dark")}
-</script>
-<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
-<script src="history-data.js"></script>
-<style>
-{DASHBOARD_CSS}</style>
-</head>
-<body>
-  <div class="shell">
-    <header class="hero">
-      <div>
-        <div class="brand">GAI HISTORY</div>
-        <h1 data-i="title">{title}</h1>
-        <div class="meta" id="meta-line"></div>
-      </div>
-      <div class="badge">ECharts · .gai/history-report.html</div>
-    </header>
-
-    <div class="toolbar">
-      <button type="button" class="btn-refresh" id="btn-refresh" data-i="refresh">刷新</button>
-      <button type="button" class="btn-export" id="btn-export-csv" data-i="export_csv">导出 CSV</button>
-      <div class="seg" role="group" aria-label="Theme">
-        <button type="button" id="btn-theme-light" data-i="theme_light">日间</button>
-        <button type="button" id="btn-theme-dark" data-i="theme_dark">夜间</button>
-      </div>
-      <div class="seg" role="group" aria-label="Language">
-        <button type="button" id="btn-lang-cn">中文</button>
-        <button type="button" id="btn-lang-en">EN</button>
-      </div>
-    </div>
-
-    <div class="filters">
-      <label id="project-filter-label" data-i="project_filter">{t['project_filter']}</label>
-      <div class="dd" id="project-dd">
-        <button type="button" class="dd-trigger" id="project-dd-btn"
-                aria-haspopup="listbox" aria-expanded="false"
-                aria-labelledby="project-filter-label project-dd-label">
-          <span class="dd-ico" aria-hidden="true">⌘</span>
-          <span class="dd-label" id="project-dd-label">{project_dd_label}</span>
-          <span class="dd-caret" aria-hidden="true"></span>
-        </button>
-        <div class="dd-menu" id="project-dd-menu" role="listbox" aria-labelledby="project-filter-label"></div>
-      </div>
-      <span class="meta" id="project-hint" data-i="hint_project">{html.escape(t['hint_project'])}</span>
-    </div>
-
+    return f"""{dashboard_head(title=title, data_script="history-data.js", chinese=chinese, initial_lang=initial_lang)}
+{dashboard_chrome(brand="GAI HISTORY", title=title, badge="ECharts · .gai/history-report.html", t=t)}
     <section class="kpis">
       <div class="kpi"><div class="label" data-i="calls">{t['calls']}</div><div class="value" id="kpi-calls">0</div></div>
       <div class="kpi"><div class="label" data-i="ok">{t['ok']}</div><div class="value" id="kpi-ok">0</div></div>
@@ -673,61 +631,13 @@ def render_history_report_html(datasets: dict[str, Any], *, chinese: bool = Fals
         </div>
       </div>
     </div>
-    <footer data-i="footer">{html.escape(t['footer'])}</footer>
-  </div>
-  <div class="toast" id="toast"></div>
-
+{dashboard_footer_and_toast(footer=t["footer"])}
 <script>
-const I18N_ALL = {i18n_js};
-let lang = document.documentElement.getAttribute('data-lang') === 'cn' ? 'cn' : 'en';
-let I18N = I18N_ALL[lang] || I18N_ALL.en;
-let DATASETS = window.__GAI_HISTORY_DATASETS__ || {{ all: {{}}, projects: [], by_project: {{}}, default_project: '__all__' }};
-let A = DATASETS.all || {{}};
-let currentProject = DATASETS.default_project || '__all__';
-let currentTrend = (A.default_trend || 'today');
-let chartHandles = [];
-const TABLE_PAGE_SIZE = 25;
-let tablePage = 0;
-
-function themeColors() {{
-  const light = document.documentElement.getAttribute('data-theme') === 'light';
-  return light
-    ? ['#0284c7', '#0f766e', '#7c3aed', '#d97706', '#db2777', '#2563eb', '#e11d48', '#0d9488']
-    : ['#38bdf8', '#a78bfa', '#34d399', '#fbbf24', '#f472b6', '#60a5fa', '#fb7185', '#2dd4bf'];
-}}
-
-function ink() {{
-  return getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#e8eef8';
-}}
-function muted() {{
-  return getComputedStyle(document.documentElement).getPropertyValue('--muted').trim() || '#94a3b8';
-}}
-
-function showToast(msg) {{
-  const el = document.getElementById('toast');
-  el.textContent = msg;
-  el.classList.add('show');
-  clearTimeout(showToast._t);
-  showToast._t = setTimeout(() => el.classList.remove('show'), 1600);
-}}
-
-function esc(s) {{
-  return String(s)
-    .replaceAll('&', '&amp;').replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;').replaceAll('"', '&quot;');
-}}
+{boot}
 
 function activeSlice() {{
   if (currentProject === '__all__') return DATASETS.all || {{}};
   return (DATASETS.by_project && DATASETS.by_project[currentProject]) || {{}};
-}}
-
-function applyViewScope() {{
-  const isAll = currentProject === '__all__';
-  document.documentElement.classList.toggle('view-all', isAll);
-  document.documentElement.classList.toggle('view-repo', !isAll);
-  const hint = document.getElementById('project-hint');
-  if (hint) hint.textContent = isAll ? I18N.hint_project_all : I18N.hint_project_repo;
 }}
 
 function updateMetaLine() {{
@@ -1057,33 +967,6 @@ function applyDatasets(next) {{
   rebuildProjectMenu();
   updateMetaLine();
   renderDashboard();
-}}
-
-function refreshHint() {{
-  const viaHttp = location.protocol === 'http:' || location.protocol === 'https:';
-  return viaHttp
-    ? (I18N.refresh_fail_http || I18N.refresh_fail || 'Failed')
-    : (I18N.refresh_fail_file || I18N.refresh_fail || 'Failed');
-}}
-
-function refreshData() {{
-  const btn = document.getElementById('btn-refresh');
-  if (btn) {{ btn.disabled = true; btn.textContent = I18N.refreshing || '...'; }}
-  const old = document.getElementById('history-data-loader');
-  if (old) old.remove();
-  const s = document.createElement('script');
-  s.id = 'history-data-loader';
-  s.src = 'history-data.js?t=' + Date.now();
-  s.onload = () => {{
-    applyDatasets(window.__GAI_HISTORY_DATASETS__);
-    showToast(I18N.refresh_ok || 'OK');
-    if (btn) {{ btn.disabled = false; btn.textContent = I18N.refresh; }}
-  }};
-  s.onerror = () => {{
-    showToast(refreshHint());
-    if (btn) {{ btn.disabled = false; btn.textContent = I18N.refresh; }}
-  }};
-  document.head.appendChild(s);
 }}
 
 function applyStaticI18n() {{
