@@ -165,3 +165,69 @@ def test_pull_rebase_when_diverged(synced_pair: tuple[Path, Path], tmp_path: Pat
     after = check_sync(local, do_fetch=True)
     assert after.ahead == 1
     assert after.behind == 0
+
+
+def _add_backup(local: Path, bare: Path, tmp_path: Path) -> Path:
+    backup = tmp_path / "backup.git"
+    _git(tmp_path, "clone", "--bare", str(bare), str(backup))
+    _git(local, "remote", "add", "backup", str(backup))
+    return backup
+
+
+def test_explicit_backup_push_ignores_origin_upstream(synced_pair, tmp_path):
+    local, bare = synced_pair
+    _add_backup(local, bare, tmp_path)
+    _commit_file(local, "new.txt", "new\n")
+    _git(local, "push", "origin", BRANCH)
+    sync = check_sync(local, remote="backup", for_push=True)
+    assert sync.ahead == 1
+    push(local, remote="backup", check=sync)
+    assert check_sync(local, remote="backup", for_push=True).ahead == 0
+
+
+def test_explicit_backup_pull_ignores_origin_upstream(synced_pair, tmp_path):
+    local, bare = synced_pair
+    backup = _add_backup(local, bare, tmp_path)
+    other = tmp_path / "backup_writer"
+    _git(tmp_path, "clone", str(backup), str(other))
+    _git(other, "config", "user.email", "test@example.com")
+    _git(other, "config", "user.name", "Tester")
+    _commit_file(other, "backup_only.txt", "backup\n")
+    _git(other, "push", "origin", BRANCH)
+    sync = check_sync(local, remote="backup")
+    assert sync.behind == 1
+    pull(local, remote="backup", check=sync)
+    assert (local / "backup_only.txt").read_text() == "backup\n"
+
+
+def test_different_upstream_branch_has_distinct_push_and_pull_targets(synced_pair, tmp_path):
+    local, bare = synced_pair
+    _git(local, "branch", "-m", "topic")
+    other = tmp_path / "writer"
+    _git(tmp_path, "clone", str(bare), str(other))
+    _git(other, "config", "user.email", "test@example.com")
+    _git(other, "config", "user.name", "Tester")
+    _commit_file(other, "incoming.txt", "incoming\n")
+    _git(other, "push", "origin", BRANCH)
+    sync = check_sync(local)
+    assert sync.branch == "topic"
+    assert sync.remote_branch == BRANCH
+    assert sync.behind == 1
+    pull(local, check=sync)
+    assert (local / "incoming.txt").is_file()
+    outgoing = check_sync(local, for_push=True)
+    assert outgoing.remote_branch == "topic"
+    assert outgoing.ahead > 0
+    push(local, check=outgoing)
+    assert check_sync(local, for_push=True).ahead == 0
+
+
+def test_mismatched_remote_check_is_rejected(synced_pair, tmp_path):
+    from gai.common.git import GitError
+
+    local, bare = synced_pair
+    _add_backup(local, bare, tmp_path)
+    sync = check_sync(local, remote="origin")
+    with pytest.raises(GitError) as caught:
+        pull(local, remote="backup", check=sync)
+    assert caught.value.code == "sync_target_changed"

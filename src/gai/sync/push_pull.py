@@ -40,7 +40,7 @@ def _do_push(
     plan = plan_push(remote=remote, set_upstream=set_upstream)
     status = "正在检查远程同步状态..." if chinese else "Checking remote sync status..."
     with console.status(f"[bold]{status}[/bold]"):
-        sync = check_sync(remote=plan.remote, do_fetch=True)
+        sync = check_sync(remote=plan.remote, do_fetch=True, for_push=True)
 
     if sync.ahead <= 0:
         tip = (
@@ -105,17 +105,17 @@ def _do_pull(
 
     if sync.behind <= 0:
         tip = (
-            f"没有可拉取的内容：已与 {sync.remote}/{sync.branch} 同步。"
+            f"没有可拉取的内容：已与 {sync.remote}/{sync.remote_branch} 同步。"
             if chinese
-            else f"Nothing to pull: already up to date with {sync.remote}/{sync.branch}."
+            else f"Nothing to pull: already up to date with {sync.remote}/{sync.remote_branch}."
         )
         console.print(f"[yellow]{tip}[/yellow]")
         raise typer.Exit(code=0)
 
     behind_tip = (
-        f"待拉取提交数：{sync.behind}（{sync.remote}/{sync.branch}）"
+        f"待拉取提交数：{sync.behind}（{sync.remote}/{sync.remote_branch}）"
         if chinese
-        else f"Commits to pull: {sync.behind} ({sync.remote}/{sync.branch})"
+        else f"Commits to pull: {sync.behind} ({sync.remote}/{sync.remote_branch})"
     )
     console.print(f"[dim]{behind_tip}[/dim]")
     if sync.ahead > 0:
@@ -208,10 +208,10 @@ def _do_pull(
             raise typer.Exit(code=0) from exc
 
     done = (
-        f"已拉取 {sync.behind} 个提交：{sync.remote}/{sync.branch}"
+        f"已拉取 {sync.behind} 个提交：{sync.remote}/{sync.remote_branch}"
         + ("（rebase）" if use_rebase else "")
         if chinese
-        else f"Pulled {sync.behind} commit(s): {sync.remote}/{sync.branch}"
+        else f"Pulled {sync.behind} commit(s): {sync.remote}/{sync.remote_branch}"
         + (" (rebase)" if use_rebase else "")
     )
     console.print(f"[green]{done}[/green]")

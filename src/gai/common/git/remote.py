@@ -113,6 +113,33 @@ class SyncCheck:
     upstream: str | None
     ahead: int
     behind: int
+    target_branch: str = ""
+
+    @property
+    def remote_branch(self) -> str:
+        return self.target_branch or self.branch
+
+
+def _sync_target(
+    cwd: Path | None, remote: str | None, *, for_push: bool,
+) -> tuple[str, str, str | None, str]:
+    remote_name = choose_remote(list_remotes(cwd), preferred=remote)
+    branch = get_current_branch(cwd)
+    upstream = get_upstream_ref(cwd)
+    target_branch = branch
+    # Push explicitly sends the current branch. Pull may follow a differently
+    # named upstream branch, but only on the selected remote.
+    if not for_push and upstream and upstream.startswith(remote_name + "/"):
+        target_branch = upstream[len(remote_name) + 1:]
+    return remote_name, branch, upstream, target_branch
+
+
+def _validate_sync_target(
+    sync: SyncCheck, cwd: Path | None, remote: str | None, *, for_push: bool,
+) -> None:
+    name, branch, _, target = _sync_target(cwd, remote or sync.remote, for_push=for_push)
+    if (name, branch, target) != (sync.remote, sync.branch, sync.remote_branch):
+        raise GitError("Sync target changed after checking", code="sync_target_changed")
 
 
 def classify_remote_failure(detail: str) -> str:
@@ -236,21 +263,18 @@ def check_sync(
     *,
     remote: str | None = None,
     do_fetch: bool = True,
+    for_push: bool = False,
 ) -> SyncCheck:
     """Fetch (optional) and compute how many commits are ahead/behind remote."""
-    remotes = list_remotes(cwd)
-    remote_name = choose_remote(remotes, preferred=remote)
-    branch = get_current_branch(cwd)
+    remote_name, branch, upstream, target_branch = _sync_target(
+        cwd, remote, for_push=for_push,
+    )
     if do_fetch:
         fetch_remote(remote_name, cwd)
 
-    upstream = get_upstream_ref(cwd)
-    remote_ref = f"{remote_name}/{branch}"
+    remote_ref = f"refs/remotes/{remote_name}/{target_branch}"
 
-    if upstream:
-        ahead = _rev_list_count(f"{upstream}..HEAD", cwd)
-        behind = _rev_list_count(f"HEAD..{upstream}", cwd)
-    elif _remote_branch_exists(remote_name, branch, cwd):
+    if _remote_branch_exists(remote_name, target_branch, cwd):
         ahead = _rev_list_count(f"{remote_ref}..HEAD", cwd)
         behind = _rev_list_count(f"HEAD..{remote_ref}", cwd)
     else:
@@ -264,6 +288,7 @@ def check_sync(
         upstream=upstream,
         ahead=ahead,
         behind=behind,
+        target_branch=target_branch,
     )
 
 
@@ -319,8 +344,9 @@ def push(
     check: SyncCheck | None = None,
 ) -> PushPlan:
     """Push current branch to remote. Returns the plan that was executed."""
-    plan = plan_push(cwd, remote=remote, set_upstream=set_upstream)
-    sync = check or check_sync(cwd, remote=plan.remote, do_fetch=True)
+    plan = plan_push(cwd, remote=remote or (check.remote if check else None), set_upstream=set_upstream)
+    sync = check or check_sync(cwd, remote=plan.remote, do_fetch=True, for_push=True)
+    _validate_sync_target(sync, cwd, plan.remote, for_push=True)
     if sync.ahead <= 0:
         raise NothingToPush(
             f"Nothing to push: {plan.remote}/{plan.branch} is up to date "
@@ -350,19 +376,17 @@ def pull(
 ) -> SyncCheck:
     """Pull from remote after verifying there is something to pull."""
     sync = check or check_sync(cwd, remote=remote, do_fetch=True)
+    _validate_sync_target(sync, cwd, remote, for_push=False)
     if sync.behind <= 0:
         raise NothingToPull(
             f"Nothing to pull: already up to date with "
-            f"{sync.remote}/{sync.branch} (behind={sync.behind})."
+            f"{sync.remote}/{sync.remote_branch} (behind={sync.behind})."
         )
 
     args: list[str] = ["pull"]
     if rebase:
         args.append("--rebase")
-    if sync.upstream:
-        result = run_git(*args, cwd=cwd)
-    else:
-        result = run_git(*args, sync.remote, sync.branch, cwd=cwd)
+    result = run_git(*args, sync.remote, f"refs/heads/{sync.remote_branch}", cwd=cwd)
 
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "git pull failed").strip()
@@ -372,7 +396,7 @@ def pull(
     combined = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
     if "already up to date" in combined or "already up-to-date" in combined:
         raise NothingToPull(
-            f"Nothing to pull: already up to date with {sync.remote}/{sync.branch}."
+            f"Nothing to pull: already up to date with {sync.remote}/{sync.remote_branch}."
         )
     return sync
 
