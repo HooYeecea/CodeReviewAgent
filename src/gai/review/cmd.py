@@ -127,6 +127,8 @@ def review_cmd(
                 console.print()
                 label = "建议的提交信息：" if cn else "Suggested commit message:"
                 console.print(f"[bold]{label}[/bold] {result.commit_message}")
+        if not result.parsed_ok:
+            raise typer.Exit(code=1)
     except typer.Exit:
         raise
     except DiffTooLargeError as exc:

@@ -69,6 +69,14 @@ _LLM_MESSAGES: dict[str, tuple[str, str]] = {
 # --- Git / repo ---
 
 _GIT_MESSAGES: dict[str, tuple[str, str]] = {
+    "review_changed": (
+        "Staged changes or HEAD changed since review. Review again before committing.",
+        "暂存区或 HEAD 在审查后发生变化，已停止提交。请重新审查后再提交。",
+    ),
+    "sync_target_changed": (
+        "The sync target changed after checking. Run push/pull again.",
+        "同步目标在检查后发生变化，已停止操作。请重新运行推送或拉取。",
+    ),
     "no_git": (
         "git executable not found on PATH. Install Git and reopen the terminal.",
         "系统 PATH 中找不到 git。请安装 Git 后重新打开终端。",

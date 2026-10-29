@@ -14,6 +14,9 @@ from rich.text import Text
 
 from gai.common.config import Settings, load_settings
 from gai.common.git import (
+    StagedSnapshot,
+    staged_snapshot,
+    assert_staged_snapshot,
     count_staged_files,
     current_branch_name,
     get_staged_diff,
@@ -52,6 +55,7 @@ class StagedDiffInfo:
     chars: int
     limit: int
     exceeds: bool
+    snapshot: StagedSnapshot | None = None
 
     def clipped(self) -> tuple[str, bool]:
         """Return ``(text, truncated)`` clipped to ``limit`` when needed."""
@@ -70,9 +74,11 @@ def load_staged_diff_info(
 ) -> StagedDiffInfo:
     """Read staged diff once; reuse for size checks and review payloads."""
     settings = settings or load_settings()
+    snapshot = staged_snapshot()
     diff, _ = get_staged_diff(
         ignore_patterns=settings.ignore_patterns,
         max_chars=None,
+        snapshot=snapshot,
     )
     chars = len(diff)
     limit = settings.max_diff_chars
@@ -81,6 +87,7 @@ def load_staged_diff_info(
         chars=chars,
         limit=limit,
         exceeds=chars > limit,
+        snapshot=snapshot,
     )
 
 
@@ -113,6 +120,7 @@ class ReviewResult:
     raw_text: str = ""
     parsed_ok: bool = True
     truncated_diff: bool = False
+    snapshot: StagedSnapshot | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -121,6 +129,7 @@ class ReviewResult:
             "summary": self.summary,
             "parsed_ok": self.parsed_ok,
             "truncated_diff": self.truncated_diff,
+            "status": "failed" if not self.parsed_ok else ("issues" if self.review else "passed"),
         }
 
 
@@ -187,15 +196,42 @@ def parse_review_response(text: str) -> ReviewResult:
     if not isinstance(data, dict):
         return ReviewResult(raw_text=text, parsed_ok=False, summary=str(data)[:2000])
 
+    def invalid() -> ReviewResult:
+        return ReviewResult(raw_text=text, parsed_ok=False)
+
+    raw_review = data.get("review")
+    message = data.get("commit_message", data.get("commitMessage"))
+    if (
+        not isinstance(raw_review, list)
+        or not isinstance(message, str)
+        or not isinstance(data.get("summary", ""), str)
+    ):
+        return invalid()
+
     items: list[ReviewItem] = []
-    raw_review = data.get("review") or []
     if isinstance(raw_review, list):
         for entry in raw_review:
             if not isinstance(entry, dict):
-                continue
-            issue = str(entry.get("issue") or "").strip()
-            if not issue:
-                continue
+                return invalid()
+            severity = entry.get("severity")
+            line = entry.get("line")
+            if (
+                not isinstance(severity, str)
+                or severity.strip().lower() not in {
+                    "critical", "error", "blocker", "high", "warning", "warn", "medium", "info"
+                }
+                or not isinstance(entry.get("file"), str)
+                or not entry["file"].strip()
+                or not isinstance(entry.get("issue"), str)
+                or not entry["issue"].strip()
+                or not isinstance(entry.get("suggestion", ""), str)
+                or (line is not None and (
+                    isinstance(line, bool) or not isinstance(line, (int, str))
+                    or _normalize_line(line) is None
+                ))
+            ):
+                return invalid()
+            issue = entry["issue"].strip()
             items.append(
                 ReviewItem(
                     severity=_normalize_severity(entry.get("severity")),
@@ -241,6 +277,8 @@ def run_review(
         raise RuntimeError("No staged changes. Run `git add` first.")
 
     info = diff_info or load_staged_diff_info(settings=settings)
+    if info.snapshot is not None:
+        assert_staged_snapshot(info.snapshot)
     if info.exceeds and not allow_truncated:
         raise DiffTooLargeError(chars=info.chars, limit=info.limit)
 
@@ -281,7 +319,10 @@ def run_review(
         raise
 
     result = parse_review_response(raw)
+    if info.snapshot is not None:
+        assert_staged_snapshot(info.snapshot)
     result.truncated_diff = truncated
+    result.snapshot = info.snapshot
     return result
 
 

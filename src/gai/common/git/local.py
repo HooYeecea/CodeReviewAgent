@@ -28,9 +28,39 @@ def _cwd_key(cwd: Path | None) -> str:
     return str(root.resolve())
 
 
+@dataclass(frozen=True)
+class StagedSnapshot:
+    """Index contents and the HEAD against which those contents were reviewed."""
+
+    tree: str
+    head: str
+    ref: str
+
+
+def staged_snapshot(cwd: Path | None = None) -> StagedSnapshot:
+    tree = run_git("write-tree", cwd=cwd)
+    if tree.returncode != 0:
+        raise GitError(tree.stderr.strip() or "Cannot snapshot the index")
+    head = run_git("rev-parse", "--verify", "HEAD", cwd=cwd)
+    ref = run_git("symbolic-ref", "-q", "HEAD", cwd=cwd)
+    return StagedSnapshot(
+        tree.stdout.strip(),
+        head.stdout.strip() if head.returncode == 0 else "",
+        ref.stdout.strip() if ref.returncode == 0 else "",
+    )
+
+
+def assert_staged_snapshot(expected: StagedSnapshot, cwd: Path | None = None) -> None:
+    if staged_snapshot(cwd) != expected:
+        raise GitError(
+            "Staged changes or HEAD changed since review. Run the review again before committing.",
+            code="review_changed",
+        )
+
+
 def has_staged_changes(cwd: Path | None = None) -> bool:
     ensure_repo(cwd)
-    key = _cwd_key(cwd)
+    key = (_cwd_key(cwd), staged_snapshot(cwd))
     if key in _HAS_STAGED_CACHE:
         return _HAS_STAGED_CACHE[key]
     # --quiet: exit 0 if no diff, 1 if there is a diff, >1 on error
@@ -118,14 +148,17 @@ def get_staged_diff(
     *,
     ignore_patterns: tuple[str, ...] | list[str] | None = None,
     max_chars: int | None = None,
+    snapshot: StagedSnapshot | None = None,
 ) -> tuple[str, bool]:
     """Return (diff_text, truncated). Empty string if nothing staged / all ignored.
 
-    Results are cached until ``clear_diff_cache`` (triggered by add/unadd/commit).
+    Cache entries are tied to index contents and HEAD, including external edits.
     """
     ensure_repo(cwd)
     patterns = tuple(ignore_patterns or ())
-    cache_key = (_cwd_key(cwd), patterns, max_chars)
+    snapshot = snapshot or staged_snapshot(cwd)
+    assert_staged_snapshot(snapshot, cwd)
+    cache_key = (_cwd_key(cwd), patterns, max_chars, snapshot)
     hit = _STAGED_DIFF_CACHE.get(cache_key)
     if hit is not None:
         return hit
@@ -133,6 +166,7 @@ def get_staged_diff(
     result = run_git("diff", "--cached", "--no-color", cwd=cwd)
     if result.returncode != 0:
         raise GitError(result.stderr.strip() or "failed to get staged diff")
+    assert_staged_snapshot(snapshot, cwd)
 
     diff = result.stdout
     if patterns:
@@ -150,10 +184,15 @@ def get_staged_diff(
     return out
 
 
-def commit(message: str, cwd: Path | None = None) -> None:
+def commit(
+    message: str, cwd: Path | None = None, *,
+    expected_snapshot: StagedSnapshot | None = None,
+) -> None:
     ensure_repo(cwd)
     if not message.strip():
         raise GitError("commit message must not be empty", code="empty_message")
+    if expected_snapshot is not None:
+        assert_staged_snapshot(expected_snapshot, cwd)
     result = run_git("commit", "-m", message, cwd=cwd)
     clear_diff_cache()
     if result.returncode != 0:

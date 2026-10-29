@@ -27,6 +27,8 @@ from gai.flow.devflow import (
     suggest_stage_paths,
 )
 from gai.common.git import (
+    StagedSnapshot,
+    assert_staged_snapshot,
     GitError,
     add as git_add,
     commit as git_commit,
@@ -99,11 +101,10 @@ def _run_staged_review(
     remote: str | None = None,
     trace: bool = False,
     auto_continue: bool = False,
-) -> bool:
-    """Run review on the current index. Returns False if user stops."""
-    diff_info = None
+) -> StagedSnapshot | None:
+    """Return the reviewed snapshot, or None when the user stops."""
+    diff_info = load_staged_diff_info()
     if offer_splitflow and not allow_truncated:
-        diff_info = load_staged_diff_info()
         if diff_info.exceeds:
             _offer_splitflow_instead(
                 chinese=chinese,
@@ -127,8 +128,12 @@ def _run_staged_review(
         )
     render_review(result, console, chinese=review_cn)
     flush("review")
+    if not result.parsed_ok:
+        raise LLMError("Review output failed validation; commit stopped", kind="bad_response")
+    if diff_info.snapshot is None:
+        raise RuntimeError("Missing reviewed index snapshot")
     if auto_continue:
-        return True
+        return diff_info.snapshot
     cont = Confirm.ask(
         "审查完成，继续选择提交信息？"
         if chinese
@@ -137,8 +142,8 @@ def _run_staged_review(
     )
     if not cont:
         console.print("已取消。" if chinese else "Aborted.")
-        return False
-    return True
+        return None
+    return diff_info.snapshot
 
 
 def _commit_fixed_message(
@@ -146,6 +151,7 @@ def _commit_fixed_message(
     *,
     chinese: bool,
     flush,
+    expected_snapshot: StagedSnapshot,
     confirm: bool = True,
 ) -> bool:
     """Commit with a preselected message. Returns False if aborted."""
@@ -164,7 +170,7 @@ def _commit_fixed_message(
         console.print("已取消提交。" if chinese else "Commit aborted.")
         flush("commit")
         return False
-    git_commit(text)
+    git_commit(text, expected_snapshot=expected_snapshot)
     console.print(
         ("[green]已提交：[/green] " if chinese else "[green]Committed:[/green] ")
         + text
@@ -365,12 +371,14 @@ def _pick_and_commit_message(
     *,
     chinese: bool,
     flush,
+    expected_snapshot: StagedSnapshot,
     hint_en: str = "",
     hint_cn: str = "",
     allow_truncated: bool = False,
     prefer_lang: str | None = None,
 ) -> bool:
     """Generate bilingual message choices and commit. Returns False if aborted."""
+    assert_staged_snapshot(expected_snapshot)
     status_text = (
         "正在生成中英提交信息..."
         if chinese
@@ -499,7 +507,7 @@ def _pick_and_commit_message(
             flush("commit")
             return False
 
-    git_commit(commit_message)
+    git_commit(commit_message, expected_snapshot=expected_snapshot)
     console.print(
         ("[green]已提交：[/green] " if chinese else "[green]Committed:[/green] ")
         + commit_message
@@ -676,14 +684,16 @@ def _run_splitflow(
                 )
                 console.print(f"[yellow]{tip}[/yellow]")
                 git_add(batch.paths)
-                if not _run_staged_review(
+                reviewed_snapshot = _run_staged_review(
                     chinese=chinese,
                     review_cn=review_cn,
                     flush=flush,
                     allow_truncated=True,
-                ):
+                )
+                if reviewed_snapshot is None:
                     raise typer.Exit(code=0)
                 if not _pick_and_commit_message(
+                    expected_snapshot=reviewed_snapshot,
                     chinese=chinese,
                     flush=flush,
                     hint_en=batch.message_hint_en,
@@ -751,16 +761,18 @@ def _run_splitflow(
                     continue
                 flush(f"batch-{idx}-{j}-add")
                 # Max depth 2: allow truncated review; no per-batch confirms.
-                if not _run_staged_review(
+                reviewed_snapshot = _run_staged_review(
                     chinese=chinese,
                     review_cn=review_cn,
                     flush=flush,
                     allow_truncated=True,
                     auto_continue=True,
-                ):
+                )
+                if reviewed_snapshot is None:
                     raise typer.Exit(code=0)
                 if not _commit_fixed_message(
                     sub.commit_message,
+                    expected_snapshot=reviewed_snapshot,
                     chinese=chinese,
                     flush=flush,
                     confirm=False,
@@ -770,15 +782,17 @@ def _run_splitflow(
             continue
 
         # Level-1 fits (or single oversized path): review + pick message.
-        if not _run_staged_review(
+        reviewed_snapshot = _run_staged_review(
             chinese=chinese,
             review_cn=review_cn,
             flush=flush,
             allow_truncated=True,
-        ):
+        )
+        if reviewed_snapshot is None:
             raise typer.Exit(code=0)
 
         if not _pick_and_commit_message(
+            expected_snapshot=reviewed_snapshot,
             chinese=chinese,
             flush=flush,
             hint_en=batch.message_hint_en,
@@ -939,7 +953,7 @@ def _run_devflow(
     # ----- 2) REVIEW -----
     step(2, "代码审查 (review)" if chinese else "Code review")
     review_cn = _review_language(chinese=chinese)
-    if not _run_staged_review(
+    reviewed_snapshot = _run_staged_review(
         chinese=chinese,
         review_cn=review_cn,
         flush=flush,
@@ -947,12 +961,15 @@ def _run_devflow(
         suggest_split=suggest_split,
         remote=remote,
         trace=trace,
-    ):
+    )
+    if reviewed_snapshot is None:
         raise typer.Exit(code=0)
 
     # ----- 3) COMMIT (bilingual choice) -----
     step(3, "提交 (commit)" if chinese else "Commit")
-    if not _pick_and_commit_message(chinese=chinese, flush=flush):
+    if not _pick_and_commit_message(
+        chinese=chinese, flush=flush, expected_snapshot=reviewed_snapshot,
+    ):
         raise typer.Exit(code=0)
 
     # ----- 4) PUSH -----

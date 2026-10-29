@@ -17,6 +17,7 @@ from gai.cli_common import (
     err_console,
 )
 from gai.common.git import GitError, commit as git_commit, has_staged_changes, short_status
+from gai.common.git import StagedSnapshot
 from gai.common.i18n import H
 from gai.common.llm.client import LLMError
 from gai.review import (
@@ -140,10 +141,12 @@ def commit_cmd(
 
         commit_message = (message or "").strip()
         result = None
+        expected_snapshot = None
 
         need_ai = (not commit_message) or (not no_review)
         if need_ai:
             diff_info = load_staged_diff_info()
+            expected_snapshot = diff_info.snapshot
             if diff_info.exceeds:
                 _offer_splitflow_instead(
                     chinese=cn,
@@ -173,16 +176,12 @@ def commit_cmd(
                 render_review(result, console, chinese=cn)
                 console.print()
 
+            if not result.parsed_ok:
+                raise LLMError("Review output failed validation; commit stopped", kind="bad_response")
+
             if not commit_message and result is not None:
                 if result.commit_message:
                     commit_message = result.commit_message
-                elif not result.parsed_ok:
-                    tip = (
-                        "无法从模型输出中解析提交信息。"
-                        if cn
-                        else "Could not parse a commit message from the model."
-                    )
-                    err_console.print(f"[yellow]{tip}[/yellow]")
 
         if not commit_message:
             if yes:
@@ -201,6 +200,7 @@ def commit_cmd(
                 raise typer.Exit(code=1)
             _confirm_and_commit(
                 commit_message,
+                expected_snapshot=expected_snapshot,
                 yes=False,
                 chinese=cn,
                 do_push=do_push,
@@ -213,6 +213,7 @@ def commit_cmd(
         if yes:
             _do_commit(
                 commit_message,
+                expected_snapshot=expected_snapshot,
                 chinese=cn,
                 do_push=do_push,
                 remote=remote,
@@ -224,6 +225,7 @@ def commit_cmd(
         if Confirm.ask(ask, default=True):
             _do_commit(
                 commit_message,
+                expected_snapshot=expected_snapshot,
                 chinese=cn,
                 do_push=do_push,
                 remote=remote,
@@ -242,6 +244,7 @@ def commit_cmd(
             raise typer.Exit(code=0)
         _do_commit(
             edited,
+            expected_snapshot=expected_snapshot,
             chinese=cn,
             do_push=do_push,
             remote=remote,
@@ -275,6 +278,7 @@ def _confirm_and_commit(
     chinese: bool = False,
     do_push: bool = False,
     remote: str | None = None,
+    expected_snapshot: StagedSnapshot | None = None,
 ) -> None:
     label = "提交信息：" if chinese else "Commit message:"
     console.print(f"[bold]{label}[/bold] {message}")
@@ -284,6 +288,7 @@ def _confirm_and_commit(
         raise typer.Exit(code=0)
     _do_commit(
         message,
+        expected_snapshot=expected_snapshot,
         chinese=chinese,
         do_push=do_push,
         remote=remote,
@@ -298,8 +303,9 @@ def _do_commit(
     do_push: bool = False,
     remote: str | None = None,
     yes: bool = False,
+    expected_snapshot: StagedSnapshot | None = None,
 ) -> None:
-    git_commit(message)
+    git_commit(message, expected_snapshot=expected_snapshot)
     label = "已提交：" if chinese else "Committed:"
     console.print(f"[green]{label}[/green] {message}")
     if do_push:
