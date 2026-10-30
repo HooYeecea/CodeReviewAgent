@@ -1,6 +1,12 @@
 """Tests for review response parsing and degradation."""
 
-from gai.review import parse_review_response
+import json
+from io import StringIO
+
+import pytest
+from rich.console import Console
+
+from gai.review import parse_review_response, render_review
 
 
 def test_parse_clean_json():
@@ -58,12 +64,12 @@ def test_parse_invalid_falls_back():
     assert result.raw_text == raw
 
 
-def test_parse_skips_empty_issues():
+def test_parse_rejects_empty_issues():
     raw = '{"review":[{"severity":"info","file":"a.py","line":null,"issue":"","suggestion":"x"}],"commit_message":"docs: update"}'
     result = parse_review_response(raw)
-    assert result.parsed_ok is True
+    assert result.parsed_ok is False
     assert result.review == []
-    assert result.commit_message == "docs: update"
+    assert result.commit_message == ""
 
 
 def test_to_dict_shape():
@@ -73,3 +79,30 @@ def test_to_dict_shape():
     assert data["commit_message"] == "feat: x"
     assert data["parsed_ok"] is True
     assert isinstance(data["review"], list)
+    assert data["status"] == "passed"
+
+
+@pytest.mark.parametrize("payload", [
+    {}, {"commit_message": "fix: x"},
+    {"review": None, "commit_message": "fix: x"},
+    {"review": "invalid", "commit_message": "fix: x"},
+    {"review": [], "commit_message": 42},
+    {"review": [], "commit_message": "fix: x", "summary": {}},
+    {"review": ["bug"], "commit_message": "fix: x"},
+    {"review": [{"file": "a.py", "severity": "unknown", "issue": "bug"}], "commit_message": "fix: x"},
+    {"review": [{"file": "a.py", "severity": "warning", "issue": "bug", "line": True}], "commit_message": "fix: x"},
+])
+def test_invalid_schema_never_reports_clean(payload):
+    result = parse_review_response(json.dumps(payload))
+    assert result.to_dict()["status"] == "failed"
+    output = StringIO()
+    render_review(result, Console(file=output, color_system=None))
+    assert "No issues found" not in output.getvalue()
+
+
+def test_valid_findings_have_issues_status():
+    result = parse_review_response(json.dumps({
+        "review": [{"file": "a.py", "severity": "critical", "issue": "bug", "line": None}],
+        "commit_message": "fix: bug",
+    }))
+    assert result.to_dict()["status"] == "issues"
