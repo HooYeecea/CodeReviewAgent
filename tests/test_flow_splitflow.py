@@ -96,9 +96,9 @@ def test_splitflow_drops_gai_batch_and_commits_rest(
     )
 
     def fake_pick(**_k):
-        from gai.common.git import commit as git_commit
+        from gai.flow.lib import _flow_commit
 
-        git_commit("chore: bump a.py")
+        _flow_commit("chore: bump a.py", _k["expected_snapshot"])
         commits.append("chore: bump a.py")
         return True
 
