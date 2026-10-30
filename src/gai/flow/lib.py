@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+import json
+from dataclasses import asdict
 from typing import Optional
 
 import typer
@@ -17,6 +19,8 @@ from gai.cli_common import (
     err_console,
 )
 from gai.flow.devflow import (
+    BilingualMessages,
+    StageSuggestion,
     CommitBatch,
     CommitBatchPlan,
     normalize_path_input,
@@ -44,6 +48,7 @@ from gai.review import (
     DiffTooLargeError,
     load_staged_diff_info,
     render_review,
+    parse_review_response,
     run_review,
     staged_diff_size,
 )
@@ -53,6 +58,7 @@ from gai.review.helpers import (
     _offer_splitflow_instead,
 )
 from gai.sync.push_pull import _do_push
+from gai.flow.session import current_session
 
 def _print_batch_plan(
     batches: list[CommitBatch],
@@ -118,14 +124,31 @@ def _run_staged_review(
             _maybe_suggest_optional_splitflow(
                 chinese=chinese, remote=remote, trace=trace, interactive=True
             )
-    status_text = "正在调用大模型审查..." if chinese else "Calling LLM for code review..."
-    with console.status(f"[bold]{status_text}[/bold]"):
-        result = run_review(
-            review_only=True,
-            chinese=review_cn,
-            allow_truncated=allow_truncated,
-            diff_info=diff_info,
-        )
+    session = current_session()
+    key = session.cache_key("review", chinese=review_cn, truncated=allow_truncated) if session else ""
+    cached = session.batch.get("review") if session else None
+    if session:
+        session.verify()
+    if cached and cached["key"] == key:
+        result = parse_review_response(json.dumps(cached["result"]))
+        result.truncated_diff = cached["result"].get("truncated_diff", False)
+        console.print("复用已保存的审查结果 / Reusing saved review", markup=False)
+    else:
+        if session:
+            for field in ("review", "messages", "selected_message"):
+                session.batch.pop(field, None)
+            session.save()
+        status_text = "正在调用大模型审查..." if chinese else "Calling LLM for code review..."
+        with console.status(f"[bold]{status_text}[/bold]"):
+            result = run_review(
+                review_only=True, chinese=review_cn, allow_truncated=allow_truncated,
+                diff_info=diff_info,
+            )
+        if session:
+            session.verify()
+            if result.parsed_ok:
+                session.batch["review"] = {"key": key, "result": result.to_dict()}
+                session.save()
     render_review(result, console, chinese=review_cn)
     flush("review")
     if not result.parsed_ok:
@@ -170,7 +193,7 @@ def _commit_fixed_message(
         console.print("已取消提交。" if chinese else "Commit aborted.")
         flush("commit")
         return False
-    git_commit(text, expected_snapshot=expected_snapshot)
+    _flow_commit(text, expected_snapshot)
     console.print(
         ("[green]已提交：[/green] " if chinese else "[green]Committed:[/green] ")
         + text
@@ -376,6 +399,7 @@ def _pick_and_commit_message(
     hint_cn: str = "",
     allow_truncated: bool = False,
     prefer_lang: str | None = None,
+    yes: bool = False,
 ) -> bool:
     """Generate bilingual message choices and commit. Returns False if aborted."""
     assert_staged_snapshot(expected_snapshot)
@@ -384,8 +408,19 @@ def _pick_and_commit_message(
         if chinese
         else "Generating English + Chinese commit messages..."
     )
-    with console.status(f"[bold]{status_text}[/bold]"):
-        messages = suggest_bilingual_messages(allow_truncated=allow_truncated)
+    session = current_session()
+    key = session.cache_key("messages", truncated=allow_truncated) if session else ""
+    cached = session.batch.get("messages") if session else None
+    if cached and cached["key"] == key:
+        messages = BilingualMessages(**cached["result"])
+    else:
+        with console.status(f"[bold]{status_text}[/bold]"):
+            messages = suggest_bilingual_messages(allow_truncated=allow_truncated)
+        if session:
+            session.verify()
+            if messages.parsed_ok:
+                session.batch["messages"] = {"key": key, "result": asdict(messages)}
+                session.save()
 
     options: list[tuple[str, str]] = []
     en = messages.message_en or hint_en
@@ -396,6 +431,20 @@ def _pick_and_commit_message(
         options.append(("cn", cn_msg))
 
     prefer = _normalize_msg_lang(prefer_lang or "") if prefer_lang else None
+    if yes:
+        # Automation cannot fall back to a manual menu or a different language.
+        selected = {"en": messages.message_en, "cn": messages.message_cn}.get(prefer, "").strip()
+        if not messages.parsed_ok or not selected:
+            if session:
+                session.batch.pop("messages", None)
+                session.save()
+            raise LLMError(
+                "自动确认需要所选语言的有效提交信息；请重试。 / "
+                "Auto-confirm requires a valid message in the selected language; retry the flow.",
+                kind="bad_response",
+            )
+        return _commit_fixed_message(selected, chinese=chinese, flush=flush,
+                                     expected_snapshot=expected_snapshot, confirm=False)
     commit_message = ""
 
     def _choose_from_menu() -> str:
@@ -507,7 +556,7 @@ def _pick_and_commit_message(
             flush("commit")
             return False
 
-    git_commit(commit_message, expected_snapshot=expected_snapshot)
+    _flow_commit(commit_message, expected_snapshot)
     console.print(
         ("[green]已提交：[/green] " if chinese else "[green]Committed:[/green] ")
         + commit_message
@@ -516,342 +565,22 @@ def _pick_and_commit_message(
     return True
 
 
-def _run_splitflow(
-    *,
-    chinese: bool,
-    remote: str | None,
-    trace: bool = False,
-    plan: CommitBatchPlan | None = None,
-) -> None:
-    """Plan coherent commit batches, then review→commit each; optional push at end."""
-    step = lambda n, title: console.print(
-        f"\n[bold cyan]━━ {n}. {title} ━━[/bold cyan]"
-    )
-    flush = lambda label: _print_step_trace(trace=trace, chinese=chinese, step=label)
-
-    step(0, "拆分计划 (plan)" if chinese else "Split plan")
-    if not is_worktree_dirty() and not has_staged_changes():
-        tip = (
-            "工作区干净，没有可拆分的变更。"
-            if chinese
-            else "Working tree is clean; nothing to split."
-        )
-        err_console.print(f"[yellow]{tip}[/yellow]")
-        flush("plan")
-        raise typer.Exit(code=1)
-
-    status = short_status()
-    if status:
-        console.print("[dim]" + status + "[/dim]")
-
-    if has_staged_changes():
-        tip = (
-            "检测到已有暂存内容。分批流程会先清空暂存区，再按批次重新暂存。"
-            if chinese
-            else "Staged changes detected. Splitflow will unstage everything first, then re-stage per batch."
-        )
-        console.print(f"[yellow]{tip}[/yellow]")
-        if not Confirm.ask(
-            "确认清空暂存区并继续？" if chinese else "Unstage all and continue?",
-            default=True,
-        ):
-            console.print("已取消。" if chinese else "Aborted.")
-            flush("plan")
-            raise typer.Exit(code=0)
-        git_unadd(["."])
-        console.print(
-            "[green]已清空暂存区。[/green]" if chinese else "[green]Index cleared.[/green]"
-        )
-
-    reused_plan = plan is not None and bool(plan.batches)
-    if reused_plan:
-        console.print(
-            "[dim]沿用刚才的分批建议。[/dim]"
-            if chinese
-            else "[dim]Reusing the suggested batch plan.[/dim]"
-        )
-        assert plan is not None
+def _flow_commit(message: str, snapshot: StagedSnapshot) -> None:
+    session = current_session()
+    if session:
+        session.batch["selected_message"] = message
+        session.save()
+        session.commit(message, snapshot,
+                       lambda: git_commit(message, expected_snapshot=snapshot))
     else:
-        status_text = (
-            "正在让 AI 按主题拆分 commit 边界..."
-            if chinese
-            else "Asking AI to split coherent commit batches..."
-        )
-        with console.status(f"[bold]{status_text}[/bold]"):
-            plan = suggest_commit_batches(chinese=chinese)
-
-        if not plan.parsed_ok:
-            console.print(
-                f"[yellow]{plan.summary}[/yellow]"
-                if plan.summary
-                else (
-                    "[yellow]模型计划不可用，已使用回退分组。[/yellow]"
-                    if chinese
-                    else "[yellow]Model plan unavailable; using fallback groups.[/yellow]"
-                )
-            )
-
-    assert plan is not None
-    cleaned = sanitize_commit_batches(plan.batches)
-    if len(cleaned) != len(plan.batches):
-        plan = CommitBatchPlan(
-            batches=cleaned,
-            summary=plan.summary,
-            raw_text=plan.raw_text,
-            parsed_ok=plan.parsed_ok and bool(cleaned),
-        )
-    if not plan.batches:
-        tip = (
-            "分批计划为空（可提交路径均被忽略或属于本地 .gai/）。"
-            if chinese
-            else "Batch plan is empty (paths are ignored or under local .gai/)."
-        )
-        err_console.print(f"[yellow]{tip}[/yellow]")
-        flush("plan")
-        raise typer.Exit(code=1)
-    if not reused_plan:
-        _print_batch_plan(plan.batches, summary=plan.summary, chinese=chinese)
-        if not Confirm.ask(
-            f"按以上 {len(plan.batches)} 个批次依次审查并提交？"
-            if chinese
-            else f"Proceed with these {len(plan.batches)} batches (review+commit each)?",
-            default=True,
-        ):
-            console.print("已取消。" if chinese else "Aborted.")
-            flush("plan")
-            raise typer.Exit(code=0)
-    else:
-        _print_batch_plan(plan.batches, summary=plan.summary, chinese=chinese)
-
-    message_langs = _ask_splitflow_message_langs(plan.batches, chinese=chinese)
-    flush("plan")
-
-    review_cn = _review_language(chinese=chinese)
-    committed = 0
-    total = len(plan.batches)
-
-    for idx, batch in enumerate(plan.batches, start=1):
-        prefer_lang = message_langs[idx - 1]
-        step(
-            idx,
-            (
-                f"一级批次 {idx}/{total}：{batch.title}"
-                if chinese
-                else f"Level-1 batch {idx}/{total}: {batch.title}"
-            ),
-        )
-        console.print("[dim]" + " ".join(batch.paths) + "[/dim]")
-
-        if has_staged_changes():
-            git_unadd(["."])
-        git_add(batch.paths)
-        if not has_staged_changes():
-            tip = (
-                "本批次暂存后仍为空，已跳过。"
-                if chinese
-                else "Nothing staged for this batch; skipped."
-            )
-            err_console.print(f"[yellow]{tip}[/yellow]")
-            flush(f"batch-{idx}-add")
-            continue
-        status = short_status()
-        if status:
-            console.print("[dim]" + status + "[/dim]")
-        flush(f"batch-{idx}-add")
-
-        _, _, exceeds = staged_diff_size()
-        if exceeds and len(batch.paths) >= 2:
-            # Level-2 re-split (max depth 2): unstage, plan, confirm once, auto-run.
-            git_unadd(["."])
-            status_text = (
-                "一级批次仍过大，正在拆二级批次并生成提交词..."
-                if chinese
-                else "Level-1 batch still too large; planning level-2 batches + messages..."
-            )
-            with console.status(f"[bold]{status_text}[/bold]"):
-                l2_plan = suggest_commit_batches(
-                    chinese=chinese,
-                    paths=list(batch.paths),
-                    message_lang=prefer_lang,
-                    require_concrete_messages=True,
-                )
-            if len(l2_plan.batches) < 2:
-                # Cannot usefully split further; fall back to truncated single batch.
-                tip = (
-                    "无法再拆成多个二级批次，将对本一级批次继续（可能截断审查）。"
-                    if chinese
-                    else "Could not split into multiple level-2 batches; continuing this level-1 batch (review may truncate)."
-                )
-                console.print(f"[yellow]{tip}[/yellow]")
-                git_add(batch.paths)
-                reviewed_snapshot = _run_staged_review(
-                    chinese=chinese,
-                    review_cn=review_cn,
-                    flush=flush,
-                    allow_truncated=True,
-                )
-                if reviewed_snapshot is None:
-                    raise typer.Exit(code=0)
-                if not _pick_and_commit_message(
-                    expected_snapshot=reviewed_snapshot,
-                    chinese=chinese,
-                    flush=flush,
-                    hint_en=batch.message_hint_en,
-                    hint_cn=batch.message_hint_cn,
-                    allow_truncated=True,
-                    prefer_lang=prefer_lang,
-                ):
-                    raise typer.Exit(code=0)
-                committed += 1
-                continue
-
-            _print_level2_plan(
-                l2_plan.batches,
-                parent_idx=idx,
-                parent_title=batch.title,
-                summary=l2_plan.summary,
-                chinese=chinese,
-                message_lang=prefer_lang,
-            )
-            if not Confirm.ask(
-                (
-                    f"确认按以上 {len(l2_plan.batches)} 个二级批次依次审查并提交？"
-                    if chinese
-                    else f"Confirm these {len(l2_plan.batches)} level-2 batches (review+commit each)?"
-                ),
-                default=True,
-            ):
-                console.print(
-                    "[yellow]已跳过该一级批次。[/yellow]"
-                    if chinese
-                    else "[yellow]Skipped this level-1 batch.[/yellow]"
-                )
-                flush(f"batch-{idx}-l2-skip")
-                continue
-
-            for j, sub in enumerate(l2_plan.batches, start=1):
-                step(
-                    f"{idx}.{j}",
-                    (
-                        f"二级 {idx}.{j}/{len(l2_plan.batches)}：{sub.title}"
-                        if chinese
-                        else f"Level-2 {idx}.{j}/{len(l2_plan.batches)}: {sub.title}"
-                    ),
-                )
-                console.print("[dim]" + " ".join(sub.paths) + "[/dim]")
-                if sub.commit_message:
-                    console.print(
-                        (
-                            f"[dim]提交词：{sub.commit_message}[/dim]"
-                            if chinese
-                            else f"[dim]Message: {sub.commit_message}[/dim]"
-                        )
-                    )
-                if has_staged_changes():
-                    git_unadd(["."])
-                git_add(sub.paths)
-                if not has_staged_changes():
-                    tip = (
-                        "该二级批次暂存后为空，已跳过。"
-                        if chinese
-                        else "Nothing staged for this level-2 batch; skipped."
-                    )
-                    err_console.print(f"[yellow]{tip}[/yellow]")
-                    flush(f"batch-{idx}-{j}-add")
-                    continue
-                flush(f"batch-{idx}-{j}-add")
-                # Max depth 2: allow truncated review; no per-batch confirms.
-                reviewed_snapshot = _run_staged_review(
-                    chinese=chinese,
-                    review_cn=review_cn,
-                    flush=flush,
-                    allow_truncated=True,
-                    auto_continue=True,
-                )
-                if reviewed_snapshot is None:
-                    raise typer.Exit(code=0)
-                if not _commit_fixed_message(
-                    sub.commit_message,
-                    expected_snapshot=reviewed_snapshot,
-                    chinese=chinese,
-                    flush=flush,
-                    confirm=False,
-                ):
-                    raise typer.Exit(code=0)
-                committed += 1
-            continue
-
-        # Level-1 fits (or single oversized path): review + pick message.
-        reviewed_snapshot = _run_staged_review(
-            chinese=chinese,
-            review_cn=review_cn,
-            flush=flush,
-            allow_truncated=True,
-        )
-        if reviewed_snapshot is None:
-            raise typer.Exit(code=0)
-
-        if not _pick_and_commit_message(
-            expected_snapshot=reviewed_snapshot,
-            chinese=chinese,
-            flush=flush,
-            hint_en=batch.message_hint_en,
-            hint_cn=batch.message_hint_cn,
-            allow_truncated=True,
-            prefer_lang=prefer_lang,
-        ):
-            raise typer.Exit(code=0)
-        committed += 1
-
-    if committed == 0:
-        tip = (
-            "没有产生任何提交。"
-            if chinese
-            else "No commits were created."
-        )
-        err_console.print(f"[yellow]{tip}[/yellow]")
-        flush("push")
-        raise typer.Exit(code=1)
-
-    step(total + 1, "推送 (push)" if chinese else "Push")
-    tip = (
-        f"已完成本地提交 {committed} 个。"
-        if chinese
-        else f"Created {committed} local commit(s)."
-    )
-    console.print(tip)
-    if not Confirm.ask(
-        "确认推送到远程？" if chinese else "Push to remote?",
-        default=True,
-    ):
-        console.print(
-            "已跳过推送。提交已保留在本地。"
-            if chinese
-            else "Push skipped. Commit(s) kept locally."
-        )
-        flush("push")
-        raise typer.Exit(code=0)
-
-    _do_push(remote=remote, yes=True, chinese=chinese)
-    flush("push")
+        git_commit(message, expected_snapshot=snapshot)
 
 
-def _run_devflow(
-    *,
-    chinese: bool,
-    remote: str | None,
-    trace: bool = False,
-    suggest_split: bool = False,
-) -> None:
-    """Interactive add → review → commit → push pipeline."""
-    step = lambda n, title: console.print(
-        f"\n[bold cyan]━━ {n}. {title} ━━[/bold cyan]"
-    )
-    flush = lambda label: _print_step_trace(trace=trace, chinese=chinese, step=label)
-
+def _stage_devflow(session, *, chinese: bool, flush) -> None:
     # ----- 1) ADD (AI suggest) -----
-    step(1, "暂存 (add)" if chinese else "Stage (add)")
+    console.print("暂存 / Stage", markup=False)
     if not is_worktree_dirty():
+        session.update(phase="done")
         tip = (
             "工作区干净，没有可暂存或可提交的变更。"
             if chinese
@@ -874,8 +603,16 @@ def _run_devflow(
             if chinese
             else "Asking AI which paths to stage..."
         )
-        with console.status(f"[bold]{status_text}[/bold]"):
-            suggestion = suggest_stage_paths(chinese=chinese)
+        key = session.cache_key("stage", chinese=chinese)
+        cached = session.data.get("stage_suggestion")
+        if cached and cached["key"] == key:
+            suggestion = StageSuggestion(**cached["result"])
+        else:
+            with console.status(f"[bold]{status_text}[/bold]"):
+                suggestion = suggest_stage_paths(chinese=chinese)
+            session.verify()
+            if suggestion.parsed_ok:
+                session.update(stage_suggestion={"key": key, "result": asdict(suggestion)})
 
         reason_label = "建议理由：" if chinese else "Why:"
         paths_label = "建议暂存：" if chinese else "Suggested paths:"
@@ -920,7 +657,12 @@ def _run_devflow(
             flush("add")
             raise typer.Exit(code=1)
 
-        git_add(targets)
+        from gai.common.git import filter_addable_paths
+        targets = filter_addable_paths(targets)
+        if not targets:
+            raise RuntimeError("No stageable paths selected")
+        session.index_write("add", targets, lambda: git_add(targets),
+                            updates={"phase": "running", "batch_status": "staged"})
         msg = (
             f"已暂存：{' '.join(targets)}"
             if chinese
@@ -950,42 +692,18 @@ def _run_devflow(
 
     flush("add")
 
-    # ----- 2) REVIEW -----
-    step(2, "代码审查 (review)" if chinese else "Code review")
-    review_cn = _review_language(chinese=chinese)
-    reviewed_snapshot = _run_staged_review(
-        chinese=chinese,
-        review_cn=review_cn,
-        flush=flush,
-        offer_splitflow=True,
-        suggest_split=suggest_split,
-        remote=remote,
-        trace=trace,
-    )
-    if reviewed_snapshot is None:
-        raise typer.Exit(code=0)
+    session.batch["status"] = "staged"
+    session.update(phase="running")
 
-    # ----- 3) COMMIT (bilingual choice) -----
-    step(3, "提交 (commit)" if chinese else "Commit")
-    if not _pick_and_commit_message(
-        chinese=chinese, flush=flush, expected_snapshot=reviewed_snapshot,
-    ):
-        raise typer.Exit(code=0)
 
-    # ----- 4) PUSH -----
-    step(4, "推送 (push)" if chinese else "Push")
-    if not Confirm.ask(
-        "确认推送到远程？" if chinese else "Push to remote?",
-        default=True,
-    ):
-        console.print(
-            "已跳过推送。提交已保留在本地。"
-            if chinese
-            else "Push skipped. Commit kept locally."
-        )
-        flush("push")
-        raise typer.Exit(code=0)
+def _run_splitflow(*, chinese: bool, remote: str | None, trace: bool = False,
+                   plan: CommitBatchPlan | None = None, resume: bool = False, yes: bool = False) -> None:
+    from gai.flow.runner import run_splitflow
+    run_splitflow(chinese=chinese, remote=remote, trace=trace, plan=plan, resume=resume, yes=yes)
 
-    _do_push(remote=remote, yes=True, chinese=chinese)
-    flush("push")
 
+def _run_devflow(*, chinese: bool, remote: str | None, trace: bool = False,
+                 suggest_split: bool = False, resume: bool = False) -> None:
+    from gai.flow.runner import run_devflow
+    run_devflow(chinese=chinese, remote=remote, trace=trace,
+                suggest_split=suggest_split, resume=resume)
