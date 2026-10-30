@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Optional
 
 import typer
+from rich.prompt import Confirm
 
 from gai.cli_common import (
     _print_error,
@@ -35,6 +36,13 @@ from gai.review.helpers import _SUGGEST_SPLIT_HELP, _offer_splitflow_instead
     ),
 )
 def splitflow_cmd(
+    resume: bool = typer.Option(False, "--resume", help=H("Resume the saved flow.", "从已保存的检查点继续。")),
+    yes: bool = typer.Option(
+        False, "--yes", "-y", help=H(
+            "Auto-confirm through push; only ask for commit message language. Saved on resume.",
+            "自动确认直到推送，只询问提交词语言；断点恢复沿用此设置。",
+        ),
+    ),
     cn: bool = typer.Option(
         False,
         "--cn",
@@ -65,7 +73,7 @@ def splitflow_cmd(
     """Plan commit batches with AI, then run review→commit for each batch."""
     _start_trace(trace, action="splitflow")
     try:
-        _run_splitflow(chinese=cn, remote=remote, trace=trace)
+        _run_splitflow(chinese=cn, remote=remote, trace=trace, resume=resume, yes=yes)
     except typer.Exit:
         if get_traced_commands():
             _print_step_trace(
@@ -74,7 +82,7 @@ def splitflow_cmd(
                 step="中断前" if cn else "before exit",
             )
         raise
-    except (GitError, LLMError, RuntimeError) as exc:
+    except (GitError, LLMError, RuntimeError, OSError) as exc:
         _print_step_trace(trace=trace, chinese=cn, step="error" if not cn else "出错时")
         _print_error(exc, chinese=cn, trace=trace)
         raise typer.Exit(code=1) from exc
@@ -102,6 +110,7 @@ def splitflow_cmd(
     ),
 )
 def devflow_cmd(
+    resume: bool = typer.Option(False, "--resume", help=H("Resume the saved flow.", "从已保存的检查点继续。")),
     cn: bool = typer.Option(
         False,
         "--cn",
@@ -138,7 +147,7 @@ def devflow_cmd(
     _start_trace(trace, action="devflow")
     try:
         _run_devflow(
-            chinese=cn, remote=remote, trace=trace, suggest_split=suggest_split
+            chinese=cn, remote=remote, trace=trace, suggest_split=suggest_split, resume=resume
         )
     except typer.Exit:
         # Mid-flow cancel / early exit: show leftover git for the interrupted step.
@@ -159,7 +168,7 @@ def devflow_cmd(
             chars=exc.chars,
             limit=exc.limit,
         )
-    except (GitError, LLMError, RuntimeError) as exc:
+    except (GitError, LLMError, RuntimeError, OSError) as exc:
         # Flush whatever this step accumulated before reporting the error.
         _print_step_trace(trace=trace, chinese=cn, step="error" if not cn else "出错时")
         _print_error(exc, chinese=cn, trace=trace)
@@ -179,5 +188,70 @@ def devflow_cmd(
         _print_llm_usage(chinese=cn)
         if trace and get_traced_commands():
             _print_trace(trace=True, chinese=cn)
+
+
+flow_app = typer.Typer(help=H("Inspect or discard saved flows.", "查看或放弃已保存的流程。"))
+app.add_typer(flow_app, name="flow")
+
+
+@flow_app.command("status")
+def flow_status(cn: bool = typer.Option(False, "--cn")) -> None:
+    from gai.flow.session import read_state
+    _start_trace(False, action="flow-status")
+    try:
+        data = read_state()
+        if data is None:
+            console.print("没有流程记录。" if cn else "No saved flow.")
+            return
+        done = sum(b["status"] == "committed" for b in data["batches"])
+        if data["kind"] == "splitflow":
+            console.print(f"自动确认 / Auto-confirm: {'on' if data.get('auto_confirm') else 'off'}")
+        console.print(f"{data['kind']}  {data['id']}\n"
+                      f"阶段 / Phase: {data['phase']}\n"
+                      f"已提交 / Committed: {done}/{len(data['batches'])}", markup=False)
+        for batch in data["batches"]:
+            console.print(f"{batch['label']}: {batch['batch']['title']} — {batch['status']} "
+                          f"{batch.get('commit', '')}", markup=False)
+        if data.get("pending"):
+            console.print(f"待核实操作 / Pending operation: {data['pending']['operation']}", markup=False)
+        if data["phase"] not in {"done", "aborted"}:
+            console.print(f"gai {data['kind']} --resume", markup=False)
+    except (GitError, RuntimeError, OSError) as exc:
+        _print_error(exc, chinese=cn, trace=False)
+        raise typer.Exit(1) from exc
+
+
+@flow_app.command("abort")
+def flow_abort(cn: bool = typer.Option(False, "--cn")) -> None:
+    from gai.flow.session import atomic_json, flow_lock, read_state, session_dir
+    _start_trace(False, action="flow-abort")
+    try:
+        directory = session_dir()
+        with flow_lock(directory):
+            try:
+                data = read_state(directory)
+            except RuntimeError:
+                if Confirm.ask(
+                    "检查点损坏，归档并放弃这份记录？文件、暂存区和提交均保留。" if cn
+                    else "Archive the unreadable checkpoint? Git state will be kept.", default=False,
+                ):
+                    import uuid
+                    (directory / "current.json").replace(directory / f"corrupt-{uuid.uuid4().hex}.json")
+                    console.print("已归档损坏的记录。" if cn else "Unreadable checkpoint archived.")
+                return
+            if data is None or data["phase"] in {"done", "aborted"}:
+                console.print("没有未完成流程。" if cn else "No unfinished flow.")
+                return
+            if not Confirm.ask(
+                "放弃流程记录？文件、暂存区和已有提交均保留。" if cn
+                else "Discard flow? Files, index and existing commits will be kept.", default=False,
+            ):
+                return
+            data["phase"] = "aborted"
+            atomic_json(directory / "current.json", data)
+            console.print("已放弃流程，代码与提交保持原样。" if cn else "Flow discarded; Git state unchanged.")
+    except (GitError, RuntimeError, OSError) as exc:
+        _print_error(exc, chinese=cn, trace=False)
+        raise typer.Exit(1) from exc
 
 
