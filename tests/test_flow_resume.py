@@ -297,23 +297,23 @@ sys.exit(run(["devflow", "--cn"] + (["--resume"] if sys.argv[1] == "resume" else
 
 
 def test_successful_push_interrupted_before_checkpoint_is_not_repeated(repo, model, monkeypatch):
-    from gai.sync import push_pull
+    from gai.flow import push as flow_push
     remote = repo.parent / (repo.name + "_remote.git")
     git(repo, "init", "--bare", str(remote))
     git(repo, "remote", "add", "origin", str(remote))
     monkeypatch.setattr(lib.Prompt, "ask", lambda prompt, **k: "y" if "暂存方式" in prompt else "1")
     monkeypatch.setattr(lib.Confirm, "ask", lambda *a, **k: True)
-    actual = lib._do_push
-    def interrupt(**kwargs):
-        actual(**kwargs)
+    actual = lib._do_flow_push
+    def interrupt(*args, **kwargs):
+        actual(*args, **kwargs)
         raise KeyboardInterrupt()
-    monkeypatch.setattr(lib, "_do_push", interrupt)
+    monkeypatch.setattr(lib, "_do_flow_push", interrupt)
     assert run(["devflow", "--cn"]) == 130
     assert read_state()["phase"] == "push"
     assert git(remote, "rev-parse", "main") == git(repo, "rev-parse", "HEAD")
     calls_before = dict(model[0])
-    monkeypatch.setattr(lib, "_do_push", actual)
-    monkeypatch.setattr(push_pull, "git_push", lambda **k: pytest.fail("must not repeat completed push"))
+    monkeypatch.setattr(lib, "_do_flow_push", actual)
+    monkeypatch.setattr(flow_push, "push_exact", lambda *a, **k: pytest.fail("must not repeat completed push"))
     assert run(["devflow", "--resume", "--cn"]) == 0
     assert read_state()["phase"] == "done"
     assert model[0] == calls_before
