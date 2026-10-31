@@ -656,6 +656,10 @@ gai guide                # 首屏英文
 
 页面内可随时切换语言 / 主题（与用量报告共用偏好）；命令行会打印可点击的 `file://` 链接。再次执行会覆盖同步。
 
+左侧可切换 **文字指南 / 图形化指南**。图形化指南按用途组织命令，覆盖 `gai splitflow` 等二级指令及 `gai flow status`、`gai completion install` 等下级指令；点击流程节点查看每一步的说明，下方列出参数和可复制的用法示例。支持搜索命令、用途或参数，以及中英文、日夜主题和手机布局。复制仅复制文本，运行命令仍需在终端执行。
+
+图形化入口为 `guide.html#visual`，可直接定位到 `guide.html#visual/splitflow` 或 `guide.html#visual/flow/status`。`splitflow` / `devflow` 页还提供恢复状态入口和 `--resume` 示例。命令层级与参数从当前 CLI 注册信息生成，更新工具后重新运行 `gai guide` 即可刷新指南；原有 `guide.html#commit` 等文字指南深链继续有效。
+
 | 参数 | 说明 |
 |------|------|
 | `--cn` | 首屏使用中文（页面内仍可切到英文） |
