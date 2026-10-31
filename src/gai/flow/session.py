@@ -5,7 +5,6 @@ import hashlib
 import json
 import os
 import stat
-import subprocess
 import tempfile
 import uuid
 from contextlib import contextmanager
@@ -17,12 +16,6 @@ from gai.common.git import GitError, ensure_repo, run_git, staged_snapshot
 
 _CURRENT: ContextVar[FlowSession | None] = ContextVar("gai_flow_session", default=None)
 TERMINAL = {"done", "aborted"}
-
-
-def _valid_snapshot(value) -> bool:
-    return (isinstance(value, dict) and isinstance(value.get("worktree"), str)
-            and isinstance(value.get("snapshot"), dict)
-            and all(isinstance(value["snapshot"].get(k), str) for k in ("head", "tree", "ref")))
 
 
 def current_session():
@@ -41,41 +34,48 @@ def session_dir() -> Path:
     return Path(git_text("rev-parse", "--absolute-git-dir")) / "gai" / "flows"
 
 
-def read_state(directory: Path | None = None) -> dict | None:
-    path = (directory or session_dir()) / "current.json"
-    if not path.exists():
+def read_state(directory: Path | None = None, *, allow_backup=False) -> dict | None:
+    from gai.flow.checkpoint import load
+    directory = directory or session_dir()
+    path = directory / "current.json"
+    if not path.exists() and not (directory / "previous.json").exists():
         return None
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if (not isinstance(data, dict) or data.get("schema") != 1
-                or data.get("kind") not in {"devflow", "splitflow"}
-                or data.get("phase") not in {"prepare", "plan", "running", "push", *TERMINAL}
-                or not isinstance(data.get("root"), str)
-                or not Path(data["root"]).is_absolute()
-                or not isinstance(data.get("batches"), list)
-                or not _valid_snapshot(data.get("observed"))
-                or not isinstance(data.get("id"), str)
-                or len(data["id"]) != 32 or any(c not in "0123456789abcdef" for c in data["id"])
-                or not isinstance(data.get("cursor"), int)
-                or not 0 <= data["cursor"] <= len(data["batches"])):
-            raise ValueError("Invalid checkpoint schema")
-        for batch in data["batches"]:
-            if (not isinstance(batch, dict) or not isinstance(batch.get("batch"), dict)
-                    or not isinstance(batch.get("label"), str)
-                    or batch.get("status") not in {"pending", "staged", "splitting", "committed", "skipped"}
-                    or not isinstance(batch["batch"].get("title"), str)
-                    or not isinstance(batch["batch"].get("paths"), list)):
-                raise ValueError("Invalid checkpoint batch")
-        pending = data.get("pending")
-        if pending is not None and (
-            not isinstance(pending, dict) or pending.get("operation") not in {"add", "unadd", "commit"}
-            or not _valid_snapshot(pending.get("before")) or not isinstance(pending.get("tree"), str)
-            or not isinstance(pending.get("updates"), dict)
-        ):
-            raise ValueError("Invalid pending operation")
+        return load(path)
+    except RuntimeError:
+        if not allow_backup:
+            raise
+        data = load(directory / "previous.json")
+        data.pop("checksum", None)
+        data["recovered_backup"] = True
+        data["_backup_pending"] = True
         return data
-    except (ValueError, OSError) as exc:
-        raise RuntimeError(f"无法读取流程检查点 / Cannot read flow checkpoint: {path}") from exc
+
+
+def write_checkpoint(directory, data):
+    from datetime import datetime, timezone
+    from gai.flow.checkpoint import load, checksum
+    path = directory / "current.json"
+    if path.exists():
+        try:
+            previous = load(path)
+        except RuntimeError:
+            # Preserve corrupt bytes for diagnosis; never use them as the backup.
+            path.replace(directory / f"corrupt-{uuid.uuid4().hex}.json")
+        else:
+            atomic_json(directory / "previous.json", previous)
+    updated = dict(data)
+    updated.pop("checksum", None)
+    updated["revision"] = data.get("revision", 0) + 1
+    updated["updated_at"] = datetime.now(timezone.utc).isoformat()
+    updated.setdefault("created_at", updated["updated_at"])
+    updated["checksum"] = checksum(updated)
+    atomic_json(path, updated)
+    if updated["phase"] in TERMINAL:
+        # A backup must not revive an intentionally finished/discarded session.
+        atomic_json(directory / "previous.json", updated)
+    data.clear()
+    data.update(updated)
 
 
 def atomic_json(path: Path, value: dict) -> None:
@@ -153,8 +153,28 @@ def worktree_digest(root: Path) -> str:
     return digest.hexdigest()
 
 
-def observed(root: Path) -> dict:
-    return {"snapshot": asdict(staged_snapshot(root)), "worktree": worktree_digest(root)}
+def observed(root: Path, *, cache=None, strict=True, legacy=False) -> dict:
+    if legacy:
+        return {"snapshot": asdict(staged_snapshot(root)), "worktree": worktree_digest(root)}
+    from gai.flow.fingerprint import file_manifest, manifest_digest
+    files = file_manifest(root, cache=cache, strict=strict)
+    return {"snapshot": asdict(staged_snapshot(root)), "worktree": manifest_digest(files), "files": files}
+
+
+def state_differences(expected, actual):
+    from gai.flow.fingerprint import changed_files
+    changes = []
+    labels = {"ref": "分支 / branch", "head": "HEAD", "tree": "暂存区 / index"}
+    for key, label in labels.items():
+        if expected["snapshot"][key] != actual["snapshot"][key]:
+            changes.append(f"{label}: {expected['snapshot'][key]} → {actual['snapshot'][key]}")
+    if expected["worktree"] != actual["worktree"]:
+        if "files" in expected and "files" in actual:
+            names = changed_files(expected["files"], actual["files"])
+            changes.append("文件 / files: " + ", ".join(names[:12]) + (" …" if len(names) > 12 else ""))
+        else:
+            changes.append("文件内容变化（旧检查点无逐文件记录） / Working files changed")
+    return changes
 
 
 def mismatch() -> RuntimeError:
@@ -165,14 +185,54 @@ def mismatch() -> RuntimeError:
     )
 
 
+def check_git_idle():
+    ref = run_git("symbolic-ref", "-q", "HEAD").stdout.strip()
+    paths = ["index.lock", "HEAD.lock", "packed-refs.lock", "MERGE_HEAD", "rebase-merge", "rebase-apply"]
+    if ref:
+        paths.append(ref + ".lock")
+    busy = [name for name in paths if Path(git_text("rev-parse", "--git-path", name)).exists()]
+    if busy:
+        raise GitError("Git 操作尚未结束或留有锁；不会自动删除。 / Git operation or lock present: "
+                       + ", ".join(busy), code="git_busy")
+
+
+def preview_recovery():
+    """Use a detached state copy to reconcile intent without writing a checkpoint."""
+    import copy
+    from gai.cli_common import console
+    directory = session_dir()
+    with flow_lock(directory):
+        check_git_idle()
+        data = read_state(directory, allow_backup=True)
+        if not data:
+            return
+        candidate = FlowSession(directory, copy.deepcopy(data))
+        if ensure_repo().resolve() != candidate.root:
+            raise mismatch()
+        candidate.save = lambda: None
+        candidate.reconcile()
+        console.print("恢复预检通过；未执行暂存、提交或推送。 / Recovery preflight passed.", markup=False)
+
+
 class FlowSession:
     def __init__(self, directory: Path, data: dict):
         self.directory = directory
         self.data = data
         self.root = Path(data["root"])
+        self.from_backup = data.pop("_backup_pending", False)
+        self.saved_ok = False
+        self.save_failed = False
+        self.file_cache = {}
 
     def save(self):
-        atomic_json(self.directory / "current.json", self.data)
+        self.saved_ok = False
+        try:
+            write_checkpoint(self.directory, self.data)
+        except BaseException:
+            self.save_failed = True
+            raise
+        self.saved_ok = True
+        self.save_failed = False
 
     def update(self, **values):
         self.data.update(values)
@@ -182,9 +242,39 @@ class FlowSession:
     def batch(self) -> dict:
         return self.data["batches"][self.data["cursor"]]
 
-    def verify(self):
-        if ensure_repo().resolve() != self.root or observed(self.root) != self.data["observed"]:
+    def actual(self, *, strict=True):
+        return observed(self.root, cache=self.file_cache, strict=strict,
+                        legacy=not self.data["observed"]["worktree"].startswith("v2:"))
+
+    def differences(self):
+        if ensure_repo().resolve() != self.root:
+            return ["仓库位置变化 / Repository location changed"]
+        return state_differences(self.data["observed"], self.actual())
+
+    def verify(self, *, strict=False):
+        if ensure_repo().resolve() != self.root:
             raise mismatch()
+        actual = self.actual(strict=strict)
+        changes = state_differences(self.data["observed"], actual)
+        if changes:
+            raise RuntimeError(str(mismatch()) + "\n" + "\n".join(changes))
+
+    def record_failure(self, exc):
+        # Annotate the last durable state, never flush a failed in-memory update.
+        if self.save_failed or (self.from_backup and not self.saved_ok):
+            return
+        from datetime import datetime, timezone
+        try:
+            durable = read_state(self.directory)
+            if not durable or durable["phase"] in TERMINAL:
+                return
+            kind = getattr(exc, "kind", None) or getattr(exc, "code", None) or type(exc).__name__
+            durable["last_error"] = {"kind": kind, "phase": durable["phase"],
+                "step": durable.get("step", durable["phase"]),
+                "batch": durable["cursor"], "at": datetime.now(timezone.utc).isoformat()}
+            write_checkpoint(self.directory, durable)
+        except (OSError, RuntimeError):
+            pass  # Preserve the original failure.
 
     def cache_key(self, purpose: str, **options) -> str:
         from gai.common.config import load_settings
@@ -197,15 +287,14 @@ class FlowSession:
 
     def index_write(self, operation: str, paths: list[str], callback, *, updates: dict):
         """Predict the index tree in a disposable index before touching the real one."""
-        self.verify()
+        self.verify(strict=True)
         before = self.data["observed"]
         fd, filename = tempfile.mkstemp(prefix="index-", dir=self.directory)
         os.close(fd)
         Path(filename).unlink()
         env = dict(os.environ, GIT_INDEX_FILE=filename)
         def temporary_git(*args):
-            result = subprocess.run(["git", *args], cwd=self.root, env=env,
-                                    capture_output=True, text=True, encoding="utf-8", errors="replace")
+            result = run_git(*args, cwd=self.root, env=env)
             if result.returncode:
                 raise GitError(result.stderr.strip())
             return result.stdout.strip()
@@ -219,6 +308,7 @@ class FlowSession:
         finally:
             Path(filename).unlink(missing_ok=True)
             Path(filename + ".lock").unlink(missing_ok=True)
+        self.data["step"] = "stage" if operation == "add" else "unstage"
         self.update(pending={"operation": operation, "before": before,
                              "tree": tree, "updates": updates})
         self.verify()
@@ -226,7 +316,8 @@ class FlowSession:
         self.reconcile()
 
     def commit(self, message: str, snapshot, callback):
-        self.verify()
+        self.verify(strict=True)
+        self.data["step"] = "commit"
         self.update(pending={"operation": "commit", "before": self.data["observed"],
                              "tree": snapshot.tree, "message": message,
                              "updates": {"batch_status": "committed"}})
@@ -236,9 +327,9 @@ class FlowSession:
     def reconcile(self):
         pending = self.data.get("pending")
         if not pending:
-            self.verify()
+            self.verify(strict=True)
             return
-        actual = observed(self.root)
+        actual = self.actual(strict=True)
         before = pending["before"]
         operation = pending["operation"]
         if actual == before:
@@ -267,12 +358,14 @@ class FlowSession:
             self.batch["status"] = updates.pop("batch_status")
         if operation == "commit":
             self.batch["commit"] = snap["head"]
+        self.data["last_success"] = operation
         self.data.update(updates)
         self.update(observed=actual, pending=None)
 
 
 @contextmanager
-def session_scope(kind: str, *, resume: bool, chinese: bool, remote: str | None):
+def session_scope(kind: str, *, resume: bool, chinese: bool, remote: str | None,
+                  recovery=None, yes=False, interactive=False):
     nested = current_session()
     if nested is not None:
         if kind != "splitflow" or nested.data["kind"] != "devflow":
@@ -284,9 +377,10 @@ def session_scope(kind: str, *, resume: bool, chinese: bool, remote: str | None)
         return
     directory = session_dir()
     with flow_lock(directory):
+        check_git_idle()
         from gai.common.git import clear_diff_cache
         clear_diff_cache()
-        data = read_state(directory)
+        data = read_state(directory, allow_backup=resume)
         if resume:
             if not data or data["phase"] in TERMINAL:
                 raise RuntimeError("没有可恢复的流程 / No unfinished flow to resume")
@@ -306,23 +400,36 @@ def session_scope(kind: str, *, resume: bool, chinese: bool, remote: str | None)
                     "observed": observed(root), "pending": None}
             data["initial_snapshot"] = data["observed"]["snapshot"]
         session = FlowSession(directory, data)
-        if resume:
-            if ensure_repo().resolve() != session.root:
-                raise mismatch()
-            session.reconcile()
-        session.save()
-        token = _CURRENT.set(session)
+        token = None
         previous_cwd = Path.cwd()
         try:
+            if resume:
+                if ensure_repo().resolve() != session.root:
+                    raise mismatch()
+                if recovery:
+                    from gai.flow.recovery import accept_changes
+                    accept_changes(session, recovery, yes=yes or (data.get("auto_confirm", False) and not interactive))
+                else:
+                    session.reconcile()
+                if not session.data["observed"]["worktree"].startswith("v2:"):
+                    session.data["observed"] = observed(session.root)
+            session.save()
+            token = _CURRENT.set(session)
             os.chdir(session.root)
             yield session
+        except BaseException as exc:
+            if getattr(exc, "exit_code", None) != 0:
+                session.record_failure(exc)
+            raise
         finally:
             os.chdir(previous_cwd)
-            _CURRENT.reset(token)
-            if session.data["phase"] not in TERMINAL:
+            if token is not None:
+                _CURRENT.reset(token)
+            if token is not None and session.data["phase"] not in TERMINAL:
                 from gai.cli_common import console
                 console.print(
-                    f"流程进度已保存 / Progress saved: gai {session.data['kind']} --resume\n"
-                    "查看 / Inspect: gai flow status; 放弃 / Discard: gai flow abort",
+                    (f"流程进度已保存 / Progress saved: gai {session.data['kind']} --resume\n"
+                     if session.saved_ok else "最新进度保存失败；请先查看检查点 / Checkpoint save failed; inspect saved state.\n") +
+                    "查看 / Inspect: gai flow status --check; 放弃 / Discard: gai flow abort",
                     markup=False,
                 )
