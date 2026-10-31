@@ -56,21 +56,36 @@ def run_git(
     *args: str,
     cwd: Path | None = None,
     trace: bool = True,
+    env: dict[str, str] | None = None,
 ) -> GitResult:
     if trace:
         _record_trace(*args)
     try:
-        completed = subprocess.run(
-            ["git", *args],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
-        )
+        from gai.common.git.process import command_timeout, run_managed, SUPERVISED
+        timeout = command_timeout(args)
+        if any(a in SUPERVISED for a in args[:3]):
+            completed = run_managed(["git", *args], cwd=cwd, env=env, timeout=timeout)
+        else:
+            completed = subprocess.run(
+                ["git", *args],
+                cwd=cwd,
+                env=env,
+                timeout=timeout,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+            )
+    except subprocess.TimeoutExpired as exc:
+        raise GitError("Git 操作超时，已停止本次操作的子进程；恢复前将核实实际结果。 / "
+                       "Git timed out; reconcile its result before retrying.", code="timeout") from exc
+    except ValueError as exc:
+        raise GitError(str(exc), code="configuration") from exc
     except FileNotFoundError as exc:
         raise GitError("git executable not found on PATH", code="no_git") from exc
+    except OSError as exc:
+        raise GitError(f"无法启动或管理 Git 进程 / Cannot manage Git process: {exc}", code="process_failed") from exc
 
     return GitResult(
         stdout=completed.stdout or "",
