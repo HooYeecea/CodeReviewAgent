@@ -2,14 +2,13 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-import hashlib
 
 import typer
 
 from gai.flow import lib
 from gai.flow.devflow import CommitBatch, CommitBatchPlan
-from gai.flow.session import git_text, session_scope
-from gai.common.git import filter_addable_paths, plan_push
+from gai.flow.session import session_scope
+from gai.common.git import filter_addable_paths
 
 
 def record(batch: CommitBatch, label: str, *, lang: str = "", depth: int = 1,
@@ -48,36 +47,22 @@ def unstage(session, *, updates):
 
 
 def finish_push(session, *, chinese, flush):
-    session.verify()
-    session.update(phase="push")
+    session.verify(strict=True)
+    session.update(phase="push", step="push")
+    if session.data.get("no_push"):
+        session.update(phase="done", completion="local_only")
+        lib.console.print("本地流程已完成，未推送 / Local flow completed without pushing", markup=False)
+        return
     # Never replay a push blindly. The normal push helper fetches and checks the
     # remote on every attempt, including an interrupted successful push.
     if not auto_confirm(session) and not lib.Confirm.ask(
         "确认检查并推送？" if chinese else "Check and push to remote?", default=True,
     ):
         pause()
-    session.verify()
-    plan = plan_push(remote=session.data.get("remote"))
-    urls = git_text("remote", "get-url", "--push", "--all", plan.remote)
-    target = {"remote": plan.remote, "branch": plan.branch,
-              "url_hash": hashlib.sha256(urls.encode()).hexdigest()}
-    previous = session.data.get("push_target")
-    if previous and previous != target:
-        raise RuntimeError("推送目标已变化 / Push target changed; inspect and abort this flow")
-    session.update(push_target=target)
-    try:
-        lib._do_push(remote=plan.remote, yes=auto_confirm(session), chinese=chinese)
-    except typer.Exit as exc:
-        # _do_push uses Exit(0) for both cancellation and 'nothing to push'.
-        # Verify remote reachability before treating either as completed.
-        if exc.exit_code != 0:
-            raise
-        from gai.common.git import check_sync
-        sync = check_sync(remote=plan.remote, for_push=True)
-        if sync.ahead > 0:
-            raise
-    session.verify()
-    session.update(phase="done")
+    session.verify(strict=True)
+    lib._do_flow_push(session, chinese=chinese, yes=auto_confirm(session))
+    session.verify(strict=True)
+    session.update(phase="done", completion="pushed", last_success="push")
     flush("push")
 
 
@@ -131,6 +116,14 @@ def execute_batches(session, *, chinese, flush, trace, suggest_split=False):
             continue
         batch = CommitBatch(**item["batch"])
         lib.console.print(f"批次 / Batch {item['label']}: {batch.title}", markup=False)
+        if item["status"] == "restaging":
+            if lib.has_staged_changes():
+                paths = batch.paths
+                session.index_write("unadd", paths, lambda: lib.git_unadd(paths),
+                                    updates={"batch_status": "pending"})
+            else:
+                item["status"] = "pending"
+                session.save()
         if item["status"] == "pending":
             if lib.has_staged_changes():
                 # Initial index clearing and previous batch completion are explicit.
@@ -173,22 +166,40 @@ def execute_batches(session, *, chinese, flush, trace, suggest_split=False):
             pause()
         if item["status"] != "committed":
             raise RuntimeError("Commit completed without a durable checkpoint")
-    if not any(b["status"] == "committed" for b in session.data["batches"]):
+    if not any(b["status"] == "committed" for b in session.data["batches"]) and not session.data.get("completed_batches"):
         raise RuntimeError("没有产生提交 / No commits created")
     session.update(phase="push")
 
 
-def run_splitflow(*, chinese, remote, trace=False, plan: CommitBatchPlan | None = None, resume=False, yes=False):
-    with session_scope("splitflow", resume=resume, chinese=chinese, remote=remote) as session:
+def run_splitflow(*, chinese, remote, trace=False, plan: CommitBatchPlan | None = None,
+                  resume=False, yes=False, interactive=False, no_push=False,
+                  review_current=False, replan=False):
+    if yes and interactive:
+        raise RuntimeError("--yes 与 --interactive 不能同时使用 / Choose --yes or --interactive")
+    if review_current and replan:
+        raise RuntimeError("--review-current 与 --replan 不能同时使用 / Choose one recovery mode")
+    if (review_current or replan) and not resume:
+        raise RuntimeError("重新审查或规划需要 --resume / Recovery mode requires --resume")
+    recovery = "current" if review_current else "replan" if replan else None
+    with session_scope("splitflow", resume=resume, chinese=chinese, remote=remote,
+                       recovery=recovery, yes=yes, interactive=interactive) as session:
         chinese = session.data["chinese"]
+        if session.data["phase"] == "done":
+            return
         # Omission on resume preserves the saved mode; explicit --yes can enable it.
-        if yes or "auto_confirm" not in session.data:
+        if interactive:
+            session.update(auto_confirm=False)
+        elif yes or "auto_confirm" not in session.data:
             session.update(auto_confirm=bool(yes))
+        if no_push or "no_push" not in session.data:
+            session.update(no_push=bool(no_push))
         automatic = auto_confirm(session)
         if automatic:
             lib.console.print(
-                "自动确认已开启：仅选择提交词语言，随后自动执行至推送。" if chinese else
-                "Auto-confirm enabled: choose commit message language, then continue through push.",
+                ("自动确认已开启（仅本地提交）。" if session.data["no_push"] else
+                 "自动确认已开启：仅选择提交词语言，随后自动执行至推送。") if chinese else
+                ("Auto-confirm enabled (local commits only)." if session.data["no_push"] else
+                 "Auto-confirm enabled: choose commit message language, then continue through push."),
                 markup=False,
             )
         flush = flush_for(chinese, trace)
@@ -203,6 +214,7 @@ def run_splitflow(*, chinese, remote, trace=False, plan: CommitBatchPlan | None 
             unstage(session, updates={"phase": "plan"})
         if session.data["phase"] == "plan":
             if session.data["plan"] is None:
+                session.update(step="plan")
                 if plan is None:
                     with lib.console.status("正在规划..." if chinese else "Planning..."):
                         plan = lib.suggest_commit_batches(chinese=chinese)
@@ -211,7 +223,7 @@ def run_splitflow(*, chinese, remote, trace=False, plan: CommitBatchPlan | None 
                 if not batches:
                     lib.err_console.print("分批计划为空 / Empty batch plan")
                     raise typer.Exit(1)
-                session.update(plan={"batches": [asdict(b) for b in batches], "summary": plan.summary})
+                session.update(plan={"batches": [asdict(b) for b in batches], "summary": plan.summary}, last_success="plan")
             saved = session.data["plan"]
             batches = [CommitBatch(**b) for b in saved["batches"]]
             lib._print_batch_plan(batches, summary=saved["summary"], chinese=chinese)
@@ -227,7 +239,8 @@ def run_splitflow(*, chinese, remote, trace=False, plan: CommitBatchPlan | None 
                 session.update(review_cn=chinese if automatic else lib._review_language(chinese=chinese))
             session.verify()
             session.update(phase="running", batches=[
-                record(b, str(i), lang=lang) for i, (b, lang) in enumerate(zip(batches, session.data["languages"]), 1)
+                record(b, str(i + len(session.data.get("completed_batches", []))), lang=lang)
+                for i, (b, lang) in enumerate(zip(batches, session.data["languages"]), 1)
             ])
         if session.data["phase"] == "running":
             execute_batches(session, chinese=chinese, flush=flush, trace=trace)

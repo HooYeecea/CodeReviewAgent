@@ -59,6 +59,7 @@ from gai.review.helpers import (
 )
 from gai.sync.push_pull import _do_push
 from gai.flow.session import current_session
+from gai.flow.push import push_flow as _do_flow_push
 
 def _print_batch_plan(
     batches: list[CommitBatch],
@@ -129,6 +130,7 @@ def _run_staged_review(
     cached = session.batch.get("review") if session else None
     if session:
         session.verify()
+        session.update(step="review")
     if cached and cached["key"] == key:
         result = parse_review_response(json.dumps(cached["result"]))
         result.truncated_diff = cached["result"].get("truncated_diff", False)
@@ -148,7 +150,7 @@ def _run_staged_review(
             session.verify()
             if result.parsed_ok:
                 session.batch["review"] = {"key": key, "result": result.to_dict()}
-                session.save()
+                session.update(last_success="review")
     render_review(result, console, chinese=review_cn)
     flush("review")
     if not result.parsed_ok:
@@ -409,6 +411,8 @@ def _pick_and_commit_message(
         else "Generating English + Chinese commit messages..."
     )
     session = current_session()
+    if session:
+        session.update(step="message")
     key = session.cache_key("messages", truncated=allow_truncated) if session else ""
     cached = session.batch.get("messages") if session else None
     if cached and cached["key"] == key:
@@ -420,7 +424,7 @@ def _pick_and_commit_message(
             session.verify()
             if messages.parsed_ok:
                 session.batch["messages"] = {"key": key, "result": asdict(messages)}
-                session.save()
+                session.update(last_success="message")
 
     options: list[tuple[str, str]] = []
     en = messages.message_en or hint_en
@@ -697,9 +701,12 @@ def _stage_devflow(session, *, chinese: bool, flush) -> None:
 
 
 def _run_splitflow(*, chinese: bool, remote: str | None, trace: bool = False,
-                   plan: CommitBatchPlan | None = None, resume: bool = False, yes: bool = False) -> None:
+                   plan: CommitBatchPlan | None = None, resume: bool = False, yes: bool = False,
+                   interactive: bool = False, no_push: bool = False,
+                   review_current: bool = False, replan: bool = False) -> None:
     from gai.flow.runner import run_splitflow
-    run_splitflow(chinese=chinese, remote=remote, trace=trace, plan=plan, resume=resume, yes=yes)
+    run_splitflow(chinese=chinese, remote=remote, trace=trace, plan=plan, resume=resume, yes=yes,
+                  interactive=interactive, no_push=no_push, review_current=review_current, replan=replan)
 
 
 def _run_devflow(*, chinese: bool, remote: str | None, trace: bool = False,
