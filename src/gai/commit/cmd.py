@@ -32,6 +32,7 @@ from gai.review.helpers import (
     _offer_splitflow_instead,
 )
 from gai.sync.push_pull import _do_push
+from gai.review.archive import collect_reviews, save_review as archive_review, link_commit
 
 @app.command(
     "commit",
@@ -40,7 +41,11 @@ from gai.sync.push_pull import _do_push
         "审查已暂存变更，建议提交信息，确认后提交。",
     ),
 )
+@collect_reviews("commit")
 def commit_cmd(
+    save_review: bool = typer.Option(False, "--save-review", help=H(
+        "Save actual reviews as Markdown and JSON in .gai/reviews/.",
+        "将实际代码审查结果保存为 Markdown 和 JSON，位于 .gai/reviews/。")),
     message: Optional[str] = typer.Option(
         None,
         "--message",
@@ -173,6 +178,7 @@ def commit_cmd(
                 )
 
             if not no_review and result is not None:
+                archive_review(result, diff_info.snapshot, chinese=cn)
                 render_review(result, console, chinese=cn)
                 console.print()
 
@@ -306,6 +312,7 @@ def _do_commit(
     expected_snapshot: StagedSnapshot | None = None,
 ) -> None:
     git_commit(message, expected_snapshot=expected_snapshot)
+    link_commit()
     label = "已提交：" if chinese else "Committed:"
     console.print(f"[green]{label}[/green] {message}")
     if do_push:
