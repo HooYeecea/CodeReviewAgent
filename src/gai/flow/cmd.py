@@ -20,6 +20,7 @@ from gai.common.git import GitError, get_traced_commands
 from gai.common.i18n import H
 from gai.common.llm.client import LLMError
 from gai.review import DiffTooLargeError
+from gai.review.archive import collect_reviews
 
 from gai.flow.lib import (  # noqa: F401
     _run_devflow,
@@ -35,7 +36,11 @@ from gai.review.helpers import _SUGGEST_SPLIT_HELP, _offer_splitflow_instead
         "把大量未提交改动按主题拆成多次审查/提交（合理 commit 边界）。",
     ),
 )
+@collect_reviews("splitflow")
 def splitflow_cmd(
+    save_review: bool = typer.Option(False, "--save-review", help=H(
+        "Save batch reviews in .gai/reviews/; resume preserves this setting.",
+        "将各批次审查结果保存到 .gai/reviews/；断点恢复沿用设置。")),
     resume: bool = typer.Option(False, "--resume", help=H("Resume the saved flow.", "从已保存的检查点继续。")),
     interactive: bool = typer.Option(False, "--interactive", help=H("Restore interactive confirmations.", "恢复人工确认，保留流程进度。")),
     no_push: bool = typer.Option(False, "--no-push", help=H("Complete locally without pushing.", "完成本地提交后结束，不推送。")),
@@ -114,7 +119,11 @@ def splitflow_cmd(
         "引导式流程：AI 暂存建议 → 审查 → 中英提交词自选 → 推送。",
     ),
 )
+@collect_reviews("devflow")
 def devflow_cmd(
+    save_review: bool = typer.Option(False, "--save-review", help=H(
+        "Save reviews in .gai/reviews/; resume preserves this setting.",
+        "将审查结果保存到 .gai/reviews/；断点恢复沿用设置。")),
     resume: bool = typer.Option(False, "--resume", help=H("Resume the saved flow.", "从已保存的检查点继续。")),
     cn: bool = typer.Option(
         False,
@@ -273,6 +282,9 @@ def flow_abort(cn: bool = typer.Option(False, "--cn")) -> None:
             ):
                 return
             data["phase"] = "aborted"
+            from gai.flow.session import FlowSession
+            from gai.review.archive import sync_flow
+            sync_flow(FlowSession(directory, data))
             write_checkpoint(directory, data)
             console.print("已放弃流程，代码与提交保持原样。" if cn else "Flow discarded; Git state unchanged.")
     except (GitError, RuntimeError, OSError) as exc:

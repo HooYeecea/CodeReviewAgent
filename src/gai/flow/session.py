@@ -226,13 +226,19 @@ class FlowSession:
 
     def save(self):
         self.saved_ok = False
+        from gai.review.archive import sync_flow
         try:
+            # Finish exports before making the session non-resumable. On export
+            # failure the last durable phase remains available to --resume.
+            if self.data["phase"] in TERMINAL:
+                sync_flow(self)
             write_checkpoint(self.directory, self.data)
         except BaseException:
             self.save_failed = True
             raise
         self.saved_ok = True
         self.save_failed = False
+        sync_flow(self)
 
     def update(self, **values):
         self.data.update(values)
@@ -400,6 +406,8 @@ def session_scope(kind: str, *, resume: bool, chinese: bool, remote: str | None,
                     "observed": observed(root), "pending": None}
             data["initial_snapshot"] = data["observed"]["snapshot"]
         session = FlowSession(directory, data)
+        from gai.review.archive import bind_flow
+        bind_flow(session)
         token = None
         previous_cwd = Path.cwd()
         try:

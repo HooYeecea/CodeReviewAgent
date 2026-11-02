@@ -60,6 +60,7 @@ from gai.review.helpers import (
 from gai.sync.push_pull import _do_push
 from gai.flow.session import current_session
 from gai.flow.push import push_flow as _do_flow_push
+from gai.review.archive import save_review as archive_review
 
 def _print_batch_plan(
     batches: list[CommitBatch],
@@ -134,6 +135,8 @@ def _run_staged_review(
     if cached and cached["key"] == key:
         result = parse_review_response(json.dumps(cached["result"]))
         result.truncated_diff = cached["result"].get("truncated_diff", False)
+        result.model = cached.get("model", "")
+        result.reviewed_at = cached.get("reviewed_at", "")
         console.print("复用已保存的审查结果 / Reusing saved review", markup=False)
     else:
         if session:
@@ -149,8 +152,11 @@ def _run_staged_review(
         if session:
             session.verify()
             if result.parsed_ok:
-                session.batch["review"] = {"key": key, "result": result.to_dict()}
+                session.batch["review"] = {"key": key, "result": result.to_dict(),
+                                          "model": result.model, "reviewed_at": result.reviewed_at}
                 session.update(last_success="review")
+    archive_review(result, diff_info.snapshot, chinese=review_cn,
+                   cached=bool(cached and cached["key"] == key))
     render_review(result, console, chinese=review_cn)
     flush("review")
     if not result.parsed_ok:

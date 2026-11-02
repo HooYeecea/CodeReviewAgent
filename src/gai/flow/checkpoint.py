@@ -116,6 +116,9 @@ def validate(data):
             require(isinstance(data["push_target"]["head"], str))
     if "recovery_history" in data:
         require(isinstance(data["recovery_history"], list))
+    if "review_archive" in data:
+        from gai.review.archive import validate_archive
+        validate_archive(data["review_archive"])
     if "parents" in data:
         require(isinstance(data["parents"], dict))
     if "checksum" in data:
