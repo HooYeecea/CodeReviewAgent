@@ -121,6 +121,8 @@ class ReviewResult:
     parsed_ok: bool = True
     truncated_diff: bool = False
     snapshot: StagedSnapshot | None = None
+    model: str = ""
+    reviewed_at: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -323,6 +325,9 @@ def run_review(
         assert_staged_snapshot(info.snapshot)
     result.truncated_diff = truncated
     result.snapshot = info.snapshot
+    from gai.review.archive import now
+    result.model = settings.model
+    result.reviewed_at = now()
     return result
 
 

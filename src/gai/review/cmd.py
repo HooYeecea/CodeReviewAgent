@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from contextlib import redirect_stdout
+import sys
+
 import typer
 
 from gai.cli_common import (
@@ -16,6 +19,7 @@ from gai.cli_common import (
 from gai.common.git import GitError, has_staged_changes
 from gai.common.i18n import H
 from gai.common.llm.client import LLMError
+from gai.review.archive import collect_reviews, save_review as archive_review
 from gai.review import (
     DiffTooLargeError,
     load_staged_diff_info,
@@ -36,7 +40,11 @@ from gai.review.helpers import (
         "审查已暂存变更（不提交）。",
     ),
 )
+@collect_reviews("review")
 def review_cmd(
+    save_review: bool = typer.Option(False, "--save-review", help=H(
+        "Save actual reviews as Markdown and JSON in .gai/reviews/.",
+        "将实际代码审查结果保存为 Markdown 和 JSON，位于 .gai/reviews/。")),
     as_json: bool = typer.Option(
         False,
         "--json",
@@ -111,7 +119,7 @@ def review_cmd(
             )
 
         status_text = "正在调用大模型审查..." if cn else "Calling LLM for code review..."
-        with console.status(f"[bold]{status_text}[/bold]"):
+        with (err_console if as_json else console).status(f"[bold]{status_text}[/bold]"):
             result = run_review(
                 message_only=message_only,
                 review_only=not message_only,
@@ -119,6 +127,8 @@ def review_cmd(
                 diff_info=diff_info,
             )
 
+        if not message_only:
+            archive_review(result, diff_info.snapshot, chinese=cn)
         if as_json:
             console.print_json(data=result.to_dict())
         else:
@@ -152,6 +162,10 @@ def review_cmd(
         _print_error(exc, chinese=cn, trace=trace)
         raise typer.Exit(code=1) from exc
     finally:
-        _print_footer(trace=trace, chinese=cn)
+        if as_json:
+            with redirect_stdout(sys.stderr):
+                _print_footer(trace=trace, chinese=cn)
+        else:
+            _print_footer(trace=trace, chinese=cn)
 
 
