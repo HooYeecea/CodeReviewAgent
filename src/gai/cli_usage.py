@@ -24,10 +24,12 @@ _COMMAND_EXAMPLES: dict[str, tuple[tuple[str, str, str], ...]] = {
         ("gai uncommit --cn", "Soft-undo the latest commit (keeps changes staged)", "软撤销最近一次提交（改动仍保留在暂存区）"),
     ),
     "review": (
+        ("gai review --save-review --cn", "Save a Markdown and JSON review locally", "将审查保存为本地 Markdown 和 JSON 报告"),
         ("gai review --cn", "AI-review staged changes only (no commit)", "仅审查已暂存变更（不提交）"),
         ("gai review --json", "Output the review result as JSON", "以 JSON 输出审查结果"),
     ),
     "commit": (
+        ("gai commit --save-review --cn", "Save the review and link the resulting commit", "保存审查并关联实际提交"),
         ("gai commit --cn", "Review → suggest message → confirm → commit", "审查 → 建议提交信息 → 确认 → 提交"),
         ("gai commit -y --cn", "Commit with defaults, skip interactive confirm", "按默认流程提交，跳过交互确认"),
         ("gai commit --cn --push", "Commit then push to the configured remote", "提交成功后推送到已配置的远程"),
@@ -38,6 +40,7 @@ _COMMAND_EXAMPLES: dict[str, tuple[tuple[str, str, str], ...]] = {
         ),
     ),
     "devflow": (
+        ("gai devflow --save-review --cn", "Keep review reports across flow resumes", "保存审查报告，恢复流程时继续留档"),
         (
             "gai devflow --cn",
             "Guided add→review→commit→push; UI in Chinese, pick EN/CN commit message",
@@ -55,6 +58,7 @@ _COMMAND_EXAMPLES: dict[str, tuple[tuple[str, str, str], ...]] = {
         ),
     ),
     "splitflow": (
+        ("gai splitflow --save-review --cn", "Save each batch review and a flow summary", "保存各批次审查及流程汇总"),
         (
             "gai splitflow --cn",
             "AI-split a large dirty tree; choose all-EN / all-CN / per-batch commit message language",

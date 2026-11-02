@@ -203,6 +203,37 @@ gai report --cn -o .\reports\                # 目录不存在则自动创建
 
 ## 命令参考
 
+### 保存代码审查结果：`--save-review`
+
+`review`、`commit`、`devflow`、`splitflow` 均支持可选参数 `--save-review`。仅在实际执行代码审查时生成报告；`review --message-only`、`commit --no-review` 和 `commit --no-ai` 不生成审查报告。不指定此参数时保持原有行为。
+
+```bash
+gai review --save-review --cn
+gai review --save-review --json       # 报告路径提示写到 stderr，不混入 JSON 结果
+gai commit --save-review --cn
+gai devflow --save-review --cn
+gai splitflow --save-review --cn --yes --no-push
+gai splitflow --resume --cn          # 自动继承保存设置，继续写入同一目录
+```
+
+报告固定保存到**当前 Git 仓库根目录**的 `.gai/reviews/`，从子目录运行也是如此。每次独立运行使用时间戳与唯一 ID 创建新目录；一个流程中的多个批次和重新审查使用独立审查 ID，不覆盖旧结果。
+
+```text
+.gai/reviews/<时间戳>_<运行ID>/
+  summary.md                   # 人工阅读的运行/流程汇总
+  index.json                   # 结构化汇总
+  review-<审查ID>.md           # 单次或单个批次的审查报告
+  review-<审查ID>.json         # 对应的结构化数据
+```
+
+报告包含审查时间、命令、配置的模型、分支、审查时的 HEAD 与暂存树哈希、暂存文件及忽略规则、摘要、问题位置/严重度/建议、解析与截断状态、流程和批次。提交成功后关联实际提交哈希；重新审查前的旧记录保留，不会误标成新提交的审查。保存解析失败的结果时会明确标为失败，不会视为审查通过。默认不额外保存完整 diff、API 请求、密钥或原始模型响应。
+
+恢复流程时复用已保存的有效审查，补齐缺失或未写完的报告；实际提交成功但随后中断时，在恢复核验后补充提交关联。`--review-current` / `--replan` 保留旧报告并继续追加。中途切换到 `splitflow` 也继承保存设置。首次恢复时才加 `--save-review` 可以开启后续留档，但不会重新调用模型补审已完成批次。
+
+报告保存失败会报错并停止后续提交/推送。对 `splitflow/devflow`，修复目录权限或磁盘空间后用 `--resume` 重试；普通 `review/commit` 没有流程检查点，需要自行检查后再运行。如果提交已成功、仅提交关联写入失败，已有提交会保留，**不要直接重复提交**。
+
+报告不自动加入暂存或提交。如果仓库尚未忽略该目录，会在本地 Git 的 `info/exclude` 中追加 `/.gai/reviews/`，不改项目的 `.gitignore`。目录已有受版本控制的文件或无法有效忽略时拒绝写入，以免将报告带入后续审查。
+
 ### `gai add`
 
 包装 `git add`。未给路径时默认 `git add .`。
