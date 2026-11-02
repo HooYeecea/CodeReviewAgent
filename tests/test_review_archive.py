@@ -14,7 +14,7 @@ from gai.review import archive
 
 
 def reports(root):
-    return sorted((root / ".gai" / "reviews").glob("*/review-*.json"))
+    return sorted(p for p in (root / ".gai" / "reviews").glob("*/*.json") if p.name != "index.json")
 
 
 def test_review_json_export_and_local_ignore(staged_repo, monkeypatch, capsys):
@@ -109,7 +109,7 @@ def test_splitflow_resume_repairs_partial_export_without_repeating_review(repo, 
     calls, _ = model
     original = archive.atomic_text
     def fail_markdown(path, text):
-        if path.name.startswith("review-") and path.suffix == ".md":
+        if path.name != "summary.md" and path.suffix == ".md":
             raise OSError("disk full")
         original(path, text)
     monkeypatch.setattr(archive, "atomic_text", fail_markdown)
