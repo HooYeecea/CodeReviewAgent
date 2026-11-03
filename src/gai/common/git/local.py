@@ -114,7 +114,9 @@ def _should_ignore(path: str, patterns: tuple[str, ...] | list[str]) -> bool:
     return False
 
 
-_DIFF_FILE_HEADER = re.compile(r"^diff --git a/(.*) b/(.*)$", re.MULTILINE)
+_DIFF_FILE_HEADER = re.compile(r"^diff --git .*?$", re.MULTILINE)
+_PATCH_OPTIONS = ("--no-color", "--no-ext-diff", "--no-textconv", "--no-relative",
+                  "--src-prefix=a/", "--dst-prefix=b/")
 
 
 def filter_diff_by_ignore(diff_text: str, ignore_patterns: tuple[str, ...] | list[str]) -> str:
@@ -125,18 +127,18 @@ def filter_diff_by_ignore(diff_text: str, ignore_patterns: tuple[str, ...] | lis
     # Split on "diff --git" keeping delimiters conceptually
     chunks: list[str] = []
     positions = [m.start() for m in _DIFF_FILE_HEADER.finditer(diff_text)]
-    if not positions:
-        return diff_text
+    if not positions or diff_text[:positions[0]].strip():
+        raise GitError("无法识别 Diff 路径，已停止发送审查 / Cannot safely filter diff paths", code="diff_paths")
 
     positions.append(len(diff_text))
     for idx in range(len(positions) - 1):
         start, end = positions[idx], positions[idx + 1]
         chunk = diff_text[start:end]
-        header = _DIFF_FILE_HEADER.match(chunk)
-        if not header:
-            chunks.append(chunk)
-            continue
-        path_a, path_b = header.group(1), header.group(2)
+        from gai.common.git.diff_paths import patch_paths
+        try:
+            path_a, path_b = patch_paths(chunk)
+        except ValueError as exc:
+            raise GitError("无法识别 Diff 路径，已停止发送审查 / Cannot safely filter diff paths", code="diff_paths") from exc
         if _should_ignore(path_a, ignore_patterns) or _should_ignore(path_b, ignore_patterns):
             continue
         chunks.append(chunk)
@@ -163,7 +165,7 @@ def get_staged_diff(
     if hit is not None:
         return hit
 
-    result = run_git("diff", "--cached", "--no-color", cwd=cwd)
+    result = run_git("diff", "--cached", *_PATCH_OPTIONS, cwd=cwd)
     if result.returncode != 0:
         raise GitError(result.stderr.strip() or "failed to get staged diff")
     assert_staged_snapshot(snapshot, cwd)
@@ -193,6 +195,19 @@ def commit(
         raise GitError("commit message must not be empty", code="empty_message")
     if expected_snapshot is not None:
         assert_staged_snapshot(expected_snapshot, cwd)
+        # A resolved merge legitimately has more than one parent. Capture its
+        # intended parents before hooks run, then compare the actual commit.
+        parents = [expected_snapshot.head] if expected_snapshot.head else []
+        merge_path = run_git("rev-parse", "--git-path", "MERGE_HEAD", cwd=cwd)
+        if merge_path.returncode:
+            raise GitError(merge_path.stderr.strip() or "Cannot inspect merge state")
+        try:
+            merge_heads = ((cwd or Path.cwd()) / merge_path.stdout.strip()).read_text(encoding="ascii")
+        except FileNotFoundError:
+            merge_heads = ""
+        except (OSError, UnicodeError) as exc:
+            raise GitError("Cannot inspect merge parents before committing") from exc
+        parents.extend(merge_heads.split())
     result = run_git("commit", "-m", message, cwd=cwd)
     clear_diff_cache()
     if result.returncode != 0:
@@ -200,6 +215,27 @@ def commit(
             result.stderr.strip() or result.stdout.strip() or "git commit failed",
             code="commit_failed",
         )
+    if expected_snapshot is not None:
+        try:
+            actual = staged_snapshot(cwd)
+            details = run_git("show", "-s", "--format=%H%x00%T%x00%P", "HEAD", cwd=cwd)
+        except GitError as exc:
+            raise GitError(
+                "提交已创建，但无法完成提交后核验；已停止后续操作，请先检查现有提交。 / "
+                "Commit created but verification failed; inspect the existing commit before retrying.",
+                code="commit_review_mismatch",
+            ) from exc
+        fields = details.stdout.strip().split("\0")
+        if (details.returncode or len(fields) != 3
+                or fields[0] != actual.head or actual.head == expected_snapshot.head
+                or fields[1] != expected_snapshot.tree or fields[2].split() != parents
+                or actual.ref != expected_snapshot.ref or actual.tree != expected_snapshot.tree):
+            raise GitError(
+                "提交已创建，但提交内容、父提交、分支或暂存区与审查版本不一致；"
+                "已停止后续操作，请检查现有提交，不要直接重复提交。 / "
+                "Commit created but differs from the reviewed state; subsequent actions stopped. Inspect before retrying.",
+                code="commit_review_mismatch",
+            )
 
 
 def add(paths: list[str] | tuple[str, ...] | None = None, cwd: Path | None = None) -> None:
@@ -402,17 +438,17 @@ def get_unstaged_diff(
     hit = _UNSTAGED_DIFF_CACHE.get(cache_key)
     if hit is not None:
         return hit
-    result = run_git("diff", "--no-color", cwd=cwd)
+    result = run_git("diff", *_PATCH_OPTIONS, cwd=cwd)
     if result.returncode != 0:
         raise GitError(result.stderr.strip() or "failed to get unstaged diff")
     diff = result.stdout or ""
-    untracked = run_git("ls-files", "--others", "--exclude-standard", cwd=cwd)
-    if untracked.returncode == 0 and untracked.stdout.strip():
-        names = [ln.strip() for ln in untracked.stdout.splitlines() if ln.strip()]
-        if names:
-            diff += "\n\n# Untracked files:\n" + "\n".join(f"+ {n}" for n in names) + "\n"
     if patterns:
         diff = filter_diff_by_ignore(diff, patterns)
+    untracked = run_git("ls-files", "--others", "--exclude-standard", "--full-name", "-z", cwd=cwd)
+    if untracked.returncode == 0 and untracked.stdout.strip():
+        names = [name for name in untracked.stdout.split("\0") if name and not _should_ignore(name, patterns)]
+        if names:
+            diff += "\n\n# Untracked files:\n" + "\n".join(f"+ {n}" for n in names) + "\n"
     truncated = False
     if max_chars is not None and len(diff) > max_chars:
         diff = (
