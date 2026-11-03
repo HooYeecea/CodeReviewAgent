@@ -13,6 +13,7 @@ from typing import Iterable
 
 from gai.common.config import CONFIG_DIR
 from gai.common.llm.history import project_root
+from gai.common.jsonl import log_lock, replace_lines
 
 _USAGE_NAME = "usage.jsonl"
 _COMMANDS_NAME = "commands.jsonl"
@@ -90,12 +91,12 @@ def _line_fingerprint(data: dict) -> str:
     return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
-def _read_jsonl_dicts(path: Path) -> list[dict]:
-    if not path.is_file():
+def _read_jsonl_dicts(path: Path, *, strict: bool = False) -> list[dict]:
+    if not strict and not path.is_file():
         return []
     out: list[dict] = []
     try:
-        with path.open("r", encoding="utf-8") as f:
+        with log_lock(path), path.open("r", encoding="utf-8") as f:
             for raw in f:
                 line = raw.strip()
                 if not line:
@@ -106,16 +107,17 @@ def _read_jsonl_dicts(path: Path) -> list[dict]:
                     continue
                 if isinstance(data, dict):
                     out.append(data)
+    except FileNotFoundError:
+        return []
     except OSError:
+        if strict:
+            raise
         return []
     return out
 
 
 def _write_jsonl_dicts(path: Path, rows: Iterable[dict]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as f:
-        for row in rows:
-            f.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n")
+    replace_lines(path, (json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n" for row in rows))
 
 
 def merge_jsonl_into(
@@ -126,26 +128,30 @@ def merge_jsonl_into(
 
     Returns number of newly appended rows.
     """
-    existing = _read_jsonl_dicts(target)
-    seen = {_line_fingerprint(d) for d in existing}
-    added = 0
+    # Read source snapshots before taking the target lock. Two reverse merges
+    # must never wait for each other's target while holding their own.
+    incoming = []
     for src, default_repo in sources:
-        if not src.is_file():
-            continue
         for data in _read_jsonl_dicts(src):
             row = dict(data)
             if not str(row.get("repo_name") or "").strip() and default_repo:
                 row["repo_name"] = default_repo
+            incoming.append(row)
+    with log_lock(target):
+        existing = _read_jsonl_dicts(target, strict=True)
+        seen = {_line_fingerprint(d) for d in existing}
+        added = 0
+        for row in incoming:
             fp = _line_fingerprint(row)
             if fp in seen:
                 continue
             existing.append(row)
             seen.add(fp)
             added += 1
-    if added:
-        # Keep chronological order when timestamps are comparable.
-        existing.sort(key=lambda d: str(d.get("ts") or ""))
-        _write_jsonl_dicts(target, existing)
+        if added:
+            # Keep chronological order when timestamps are comparable.
+            existing.sort(key=lambda d: str(d.get("ts") or ""))
+            _write_jsonl_dicts(target, existing)
     return added
 
 
@@ -252,39 +258,39 @@ def cleanup_global_logs(
         ("usage", global_usage_log_path(), usage_idx),
         ("commands", global_command_log_path(), cmd_idx),
     ):
-        rows = _read_jsonl_dicts(path)
-        if not rows:
-            continue
-        cleaned: list[dict] = []
-        dropped = 0
-        changed = 0
-        seen: set[str] = set()
-        for row in rows:
-            if _is_ephemeral_test_row(row):
-                dropped += 1
+        with log_lock(path):
+            rows = _read_jsonl_dicts(path, strict=True)
+            if not rows:
                 continue
-            fixed = _backfill_repo_name(row)
-            if not str(fixed.get("repo_name") or "").strip():
-                guess = idx.get(str(fixed.get("ts") or ""))
-                if guess:
-                    fixed = dict(fixed)
-                    fixed["repo_name"] = guess
-                else:
-                    # Orphan rows with no project attribution (old/test leftovers).
+            cleaned: list[dict] = []
+            dropped = 0
+            changed = 0
+            seen: set[str] = set()
+            for row in rows:
+                if _is_ephemeral_test_row(row):
                     dropped += 1
                     continue
-            if fixed.get("repo_name") != row.get("repo_name"):
-                changed += 1
-            fp = _line_fingerprint(fixed)
-            if fp in seen:
-                dropped += 1
-                continue
-            seen.add(fp)
-            cleaned.append(fixed)
-        if dropped or changed or len(cleaned) != len(rows):
-            _write_jsonl_dicts(path, cleaned)
-        stats[f"{kind}_dropped"] = dropped
-        stats[f"{kind}_rewritten"] = changed
+                fixed = _backfill_repo_name(row)
+                if not str(fixed.get("repo_name") or "").strip():
+                    guess = idx.get(str(fixed.get("ts") or ""))
+                    if guess:
+                        fixed = dict(fixed)
+                        fixed["repo_name"] = guess
+                    else:
+                        dropped += 1
+                        continue
+                if fixed.get("repo_name") != row.get("repo_name"):
+                    changed += 1
+                fp = _line_fingerprint(fixed)
+                if fp in seen:
+                    dropped += 1
+                    continue
+                seen.add(fp)
+                cleaned.append(fixed)
+            if dropped or changed or len(cleaned) != len(rows):
+                _write_jsonl_dicts(path, cleaned)
+            stats[f"{kind}_dropped"] = dropped
+            stats[f"{kind}_rewritten"] = changed
     return stats
 
 

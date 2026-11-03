@@ -230,12 +230,11 @@ def extract_command(argv: list[str]) -> tuple[str, str]:
 
 
 def _append_command_to(target: Path, record: CommandRecord) -> None:
+    from gai.common.jsonl import append_row, log_lock
     try:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        line = json.dumps(record.to_dict(), ensure_ascii=False, separators=(",", ":"))
-        with target.open("a", encoding="utf-8") as f:
-            f.write(line + "\n")
-        _maybe_rotate(target)
+        with log_lock(target):
+            append_row(target, record.to_dict())
+            _maybe_rotate(target)
     except OSError:
         return
     try:
@@ -287,7 +286,8 @@ def load_command_records(
     command_key = (command or "").strip().lower()
     items: list[CommandRecord] = []
     try:
-        with target.open("r", encoding="utf-8") as f:
+        from gai.common.jsonl import log_lock
+        with log_lock(target), target.open("r", encoding="utf-8") as f:
             for line in f:
                 text = line.strip()
                 if not text:
@@ -452,16 +452,8 @@ def _parse_ts(ts: str) -> datetime | None:
 
 
 def _maybe_rotate(path: Path) -> None:
+    from gai.common.jsonl import rotate
     try:
-        if not path.is_file() or path.stat().st_size <= _MAX_BYTES:
-            return
-        with path.open("r", encoding="utf-8") as f:
-            lines = f.readlines()
-        if len(lines) <= _KEEP_TAIL_LINES:
-            return
-        kept = lines[-_KEEP_TAIL_LINES:]
-        tmp = path.with_suffix(path.suffix + ".tmp")
-        tmp.write_text("".join(kept), encoding="utf-8")
-        tmp.replace(path)
+        rotate(path, max_bytes=_MAX_BYTES, keep_lines=_KEEP_TAIL_LINES)
     except OSError:
         return
