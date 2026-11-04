@@ -246,7 +246,7 @@ def add(paths: list[str] | tuple[str, ...] | None = None, cwd: Path | None = Non
     If every path is skipped, this is a no-op (caller may then see an empty index).
     """
     ensure_repo(cwd)
-    targets = [p for p in (paths or []) if str(p).strip()]
+    targets = [p for p in (paths or []) if str(p)]
     if not targets:
         targets = ["."]
     if targets != ["."]:
@@ -267,7 +267,7 @@ def unadd(paths: list[str] | tuple[str, ...] | None = None, cwd: Path | None = N
     ensure_repo(cwd)
     if not has_staged_changes(cwd):
         raise GitError("nothing staged to unadd", code="nothing_to_unadd")
-    targets = [p for p in (paths or []) if str(p).strip()]
+    targets = [p for p in (paths or []) if str(p)]
     if not targets:
         targets = ["."]
     result = run_git("restore", "--staged", "--", *targets, cwd=cwd)
@@ -385,7 +385,7 @@ def filter_addable_paths(
     """
     out: list[str] = []
     for raw in paths or []:
-        path = str(raw or "").strip()
+        path = str(raw or "")
         if not path:
             continue
         if path == ".":
@@ -403,19 +403,22 @@ def filter_addable_paths(
 
 def list_change_entries(cwd: Path | None = None) -> list[ChangeEntry]:
     """Parse porcelain status into path entries (rename uses the new path)."""
-    raw = porcelain_status(cwd)
+    ensure_repo(cwd)
+    result = run_git("status", "--porcelain", "-z", "-uall", cwd=cwd)
+    if result.returncode:
+        raise GitError(result.stderr.strip() or "Cannot read workspace status")
+    fields = iter(result.stdout.split("\0"))
     entries: list[ChangeEntry] = []
-    for line in raw.splitlines():
+    for line in fields:
         if not line:
             continue
         if len(line) < 3:
             continue
-        index, worktree, rest = line[0], line[1], line[2:]
-        path = rest.lstrip()
-        # Rename / copy in porcelain: "R  old -> new"
-        if " -> " in path and (index in {"R", "C"} or worktree in {"R", "C"}):
-            path = path.split(" -> ", 1)[1].strip()
-        path = path.strip().strip('"')
+        index, worktree, path = line[0], line[1], line[3:]
+        # In -z mode the destination comes first, followed by the source.
+        if index in {"R", "C"} or worktree in {"R", "C"}:
+            if next(fields, None) is None:
+                raise GitError("Incomplete rename status")
         if not path:
             continue
         entry = ChangeEntry(path=path, index=index, worktree=worktree)
@@ -434,10 +437,6 @@ def get_unstaged_diff(
     """Return unstaged worktree diff (+ untracked file list), optionally truncated."""
     ensure_repo(cwd)
     patterns = tuple(ignore_patterns or ())
-    cache_key = (_cwd_key(cwd), patterns, max_chars)
-    hit = _UNSTAGED_DIFF_CACHE.get(cache_key)
-    if hit is not None:
-        return hit
     result = run_git("diff", *_PATCH_OPTIONS, cwd=cwd)
     if result.returncode != 0:
         raise GitError(result.stderr.strip() or "failed to get unstaged diff")
@@ -457,7 +456,6 @@ def get_unstaged_diff(
         )
         truncated = True
     out = (diff, truncated)
-    _UNSTAGED_DIFF_CACHE[cache_key] = out
     return out
 
 
