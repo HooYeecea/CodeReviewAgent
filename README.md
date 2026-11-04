@@ -72,7 +72,7 @@ Remove-Item Env:_GAI_COMPLETE, Env:_TYPER_COMPLETE_ARGS, Env:_TYPER_COMPLETE_WOR
 
 支持 OpenAI 兼容接口（OpenAI / DeepSeek / 通义兼容模式 / 硅基流动等）。
 
-**优先级：环境变量 > `~/.gai/config.toml` > 默认值**
+**审查设置优先级：命令行 > 环境变量（已有的同名设置） > 仓库 `.gai.toml` > `~/.gai/config.toml` > 默认值。密钥、模型和服务地址仍只从环境变量和个人配置读取。**
 
 ### 环境变量（推荐）
 
@@ -180,7 +180,7 @@ gai report --cn -o .\reports\                # 目录不存在则自动创建
 | `gai add` | 暂存（默认 `.`） |
 | `gai unadd` | 撤销暂存（需确认） |
 | `gai uncommit` | 软撤销最近一次提交（需确认） |
-| `gai review` | 审查已暂存变更，不提交 |
+| `gai review` | 默认审查已暂存变更；`--base` 审查分支，不提交 |
 | `gai commit` | 审查 → 建议信息 → 确认 → 提交 |
 | `gai devflow` | 引导式串联：AI 暂存建议 → 审查 → 中英提交词 → 推送 |
 | `gai splitflow` | 大量未提交改动：AI 按主题拆 commit → 分批审查/提交 → 可选推送 |
@@ -202,6 +202,73 @@ gai report --cn -o .\reports\                # 目录不存在则自动创建
 | `gai config` | 查看 / 写入 `~/.gai/config.toml` |
 
 ## 命令参考
+
+### 审查门槛、项目规则与完整度
+
+`review`、`commit`、`devflow`、`splitflow` 支持 `--fail-on critical|warning|info|none`。
+级别达到或高于门槛时停止，`--yes` 不绕过门槛。默认 `none` 保持原有行为。
+`--require-complete` 拒绝截断审查，`--allow-incomplete` 显式允许；默认允许但会标记不完整。
+流程会保存显式参数，恢复时沿用；可以在恢复命令中显式修改。项目规则变化会使缓存审查失效。
+`commit --no-ai` / `--no-review` 仍是显式跳过审查，不执行审查门槛。
+
+在 Git 仓库根目录建立可提交的 `.gai.toml`，团队共享非敏感规则：
+
+```toml
+[review]
+fail_on = "critical"
+require_complete = true
+max_diff_chars = 80000
+rules = [
+  "重点检查事务边界、错误处理和数据一致性",
+  "业务层不得直接依赖命令行模块",
+]
+# 可选：显式设置会替换默认忽略规则；空数组表示不过滤。
+# ignore_patterns = ["*.png", "*.zip", "package-lock.json"]
+```
+
+不支持的字段会报错，密钥、服务地址和模型配置不应写入此文件。规则作为审查要求传给模型，不会被当作本地命令执行。
+
+审查 JSON 新增 `coverage`（完整、未完成、失败及对应文件列表）。被忽略的文件单独列出；
+截断后的结果状态为 `incomplete`，即使模型未发现问题也不会标记为 `passed`。
+这里的“完整”仅指未忽略的 diff 全部发送完成，不代表模型保证找出所有缺陷。
+
+```bash
+gai review --chunked --save-review --cn
+gai review --base main --chunked --save-review --cn
+gai splitflow --yes --fail-on critical --require-complete --cn
+```
+
+`review --chunked` 按文件、代码块和完整行分段，汇总发现，不改变暂存区或拆分提交。
+每段不超过 `max_diff_chars`，最多 128 个片段；单行或元数据过大时停止并提示调整限制。
+分段会增加模型调用次数；中途 API 错误不会生成“完整通过”的结果，独立 review 重试会重新审查。
+
+`review --base main` 仅检查当前 HEAD 相对与 `main` 的共同祖先的已提交改动，不包含工作区或暂存区修改，
+不自动 fetch、切分支或提交。基准不存在、无共同祖先、多重共同祖先或审查期间引用变化时停止。
+分支报告保存基准、共同祖先和被审查 HEAD；与暂存区报告可明确区分。
+
+### 环境诊断与审查报告库
+
+```bash
+gai doctor --cn                           # 本地 Git、配置、权限预检、冲突和未完成流程
+gai doctor --network --remote origin --cn  # 额外查询模型列表、验证远程读取
+gai doctor --json
+gai reviews                              # 列出保存的审查 ID、时间、主题和结果
+gai reviews --branch main --severity critical --since 2026-01-01
+gai reviews --query "事务" --until 2026-12-31 --json
+gai reviews --commit abc123
+gai reviews show REVIEW_ID
+gai reviews compare OLD_REVIEW_ID NEW_REVIEW_ID
+gai reviews --html --open
+```
+
+`doctor` 默认不联网、不修改 Git 状态；联网检查不会调用聊天接口或输出密钥。
+服务商不支持模型列表时提示无法验证，不直接判断模型不可用。
+远程可读不等于可推送，本地写权限也仅是预检；检查出现错误时退出码为 1。
+
+报告库读取当前仓库 `.gai/reviews/`，支持唯一 ID 前缀。日期按记录中的日期字段筛选，格式为 `YYYY-MM-DD`。
+对比按“文件 + 问题文本”匹配，区分新增、仍然报告和待确认解决；文字改写、忽略规则和审查范围变化可能影响匹配，
+未再报告的问题不会自动认定已修复。损坏或不安全的报告目录会跳过并提示。
+HTML 浏览页位于 `.gai/reviews/browser.html`，支持本地搜索、筛选、详情与对比，无外部脚本依赖。
 
 ### 保存代码审查结果：`--save-review`
 
@@ -286,7 +353,7 @@ gai uncommit --cn
 
 ### `gai review`
 
-只审查，不提交。只看 **已暂存** 内容。若 diff 超过 `max_diff_chars`，会提示改用 `gai splitflow` 并询问是否切换（`--json` 只提示不切换）。加 `--suggest-split` 时，即使未超限也会让 AI 判断是否适合拆成多次提交（可拒绝后继续整包审查；默认关闭以免额外耗 token）。
+只审查，不提交。默认只看 **已暂存** 内容；`--base` 检查分支已提交改动。`--chunked` 可在不拆提交的情况下分段审查大 diff。不指定这些参数且 diff 超过 `max_diff_chars` 时，会提示改用 `gai splitflow` 并询问是否切换（`--json` 只提示不切换）。加 `--suggest-split` 时，即使未超限也会让 AI 判断是否适合拆成多次提交（可拒绝后继续整包审查；默认关闭以免额外耗 token）。
 
 | 参数 | 说明 |
 |------|------|
@@ -790,7 +857,7 @@ gai balance
 
 ## 设计要点
 
-- 审查 / 提交只看 staged diff（`git diff --cached`）。
+- 默认审查 / 提交只看 staged diff（`git diff --cached`）；`review --base` 单独支持已提交分支范围。
 - 审查结果会校验结构；无效结果按审查失败处理，命令返回非零退出码，普通提交和拆分提交流程都会停止。
 - AI 审查／生成提交词时记录暂存区与 HEAD 快照；提交前发现暂存内容或分支发生变化会停止，需重新审查。仅修改未暂存内容不会阻止提交。
 - 提交成功后再次核验实际提交的内容、父提交、分支和暂存区，不依赖 `--save-review`。若 Git 钩子等改变了已审查内容，会保留已创建的提交并停止后续批次和推送；请先检查现有提交，不要直接重复提交。
