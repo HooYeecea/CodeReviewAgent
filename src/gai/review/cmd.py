@@ -36,12 +36,16 @@ from gai.review.helpers import (
 @app.command(
     "review",
     help=H(
-        "Review staged changes without committing.",
-        "审查已暂存变更（不提交）。",
+        "Review staged or committed branch changes without committing.",
+        "审查暂存或分支改动（不提交）。",
     ),
 )
 @collect_reviews("review")
 def review_cmd(
+    fail_on: str | None = typer.Option(None, "--fail-on", help=H("Block at critical, warning, info; none disables.", "阻断级别：critical、warning、info；none 关闭。")),
+    require_complete: bool | None = typer.Option(None, "--require-complete/--allow-incomplete", help=H("Require complete coverage.", "要求完整审查覆盖。")),
+    base: str | None = typer.Option(None, "--base", help=H("Review committed branch changes since the merge base.", "审查分支相对共同祖先的已提交改动。")),
+    chunked: bool = typer.Option(False, "--chunked", help=H("Review large diffs in chunks without splitting commits.", "分段审查大改动，不拆分提交。")),
     save_review: bool = typer.Option(False, "--save-review", help=H(
         "Save actual reviews as Markdown and JSON in .gai/reviews/.",
         "将实际代码审查结果保存为 Markdown 和 JSON，位于 .gai/reviews/。")),
@@ -84,7 +88,9 @@ def review_cmd(
     """Review staged changes without committing."""
     _start_trace(trace, action="review")
     try:
-        if not has_staged_changes():
+        if (base or chunked) and message_only:
+            raise RuntimeError("--base / --chunked cannot be combined with --message-only")
+        if not base and not has_staged_changes():
             tip = (
                 "没有已暂存变更。请先运行 `gai add` / `gai add .`。"
                 if cn
@@ -93,8 +99,11 @@ def review_cmd(
             err_console.print(f"[red]{tip}[/red]")
             raise typer.Exit(code=1)
 
-        diff_info = load_staged_diff_info()
-        if diff_info.exceeds:
+        from gai.review.branch import load_branch_diff_info
+        diff_info = load_branch_diff_info(base) if base else load_staged_diff_info()
+        if diff_info.exceeds and not chunked:
+            if base:
+                raise RuntimeError("分支改动过大，请加 --chunked / Branch diff too large; use --chunked")
             if as_json:
                 _print_diff_too_large(
                     chars=diff_info.chars, limit=diff_info.limit, chinese=cn
@@ -113,7 +122,7 @@ def review_cmd(
                 chars=diff_info.chars,
                 limit=diff_info.limit,
             )
-        elif suggest_split and not as_json:
+        elif suggest_split and not as_json and not base and not chunked:
             _maybe_suggest_optional_splitflow(
                 chinese=cn, trace=trace, interactive=True
             )
@@ -125,6 +134,7 @@ def review_cmd(
                 review_only=not message_only,
                 chinese=cn,
                 diff_info=diff_info,
+                **({"chunked": True} if chunked else {}),
             )
 
         if not message_only:
@@ -139,6 +149,9 @@ def review_cmd(
                 console.print(f"[bold]{label}[/bold] {result.commit_message}")
         if not result.parsed_ok:
             raise typer.Exit(code=1)
+        if not message_only:
+            from gai.review.policy import enforce
+            enforce(result)
     except typer.Exit:
         raise
     except DiffTooLargeError as exc:

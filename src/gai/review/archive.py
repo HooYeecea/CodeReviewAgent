@@ -111,6 +111,14 @@ def review_markdown(record: dict) -> str:
              f"- Diff 截断 / Truncated: {result['truncated_diff']}", "",
              "## 摘要 / Summary", "", md(result.get("summary", "")), "",
              "## 问题 / Findings", ""]
+    if result.get("coverage"):
+        lines.extend(["审查覆盖 / Coverage: " + md(result["coverage"].get("state", "unknown")), ""])
+        for key in ("ignored_files", "partially_reviewed_files", "unreviewed_files"):
+            lines.append(md(key) + ": " + md(", ".join(result["coverage"].get(key, []))))
+    if result.get("scope", {}).get("kind") == "branch":
+        scope = result["scope"]
+        lines.extend(["", "分支审查 / Branch review: " + md(scope["merge_base"] + ".." + scope["head"]),
+                      "不包含未提交改动 / Uncommitted changes are excluded.", ""])
     if not result["parsed_ok"]:
         lines.append("解析失败，本次审查不能视为通过。 / Parsing failed; this is not a passing review.")
     elif not result["review"]:
@@ -327,8 +335,22 @@ def collect_reviews(command: str):
         @wraps(function)
         def wrapped(*args, **kwargs):
             arguments = signature.bind_partial(*args, **kwargs).arguments
-            with collection(command, arguments.get("save_review") is True) as collector:
+            from gai.review.policy import options
+            with options(fail_on=arguments.get("fail_on"),
+                         require_complete=arguments.get("require_complete")), collection(
+                             command, arguments.get("save_review") is True) as collector:
                 try:
+                    # Validate policies before a flow can clear or restage the index.
+                    # Explicit --no-ai retains its standalone Git-only behavior.
+                    if arguments.get("no_ai") is not True:
+                        try:
+                            from gai.common.config import load_settings
+                            load_settings()
+                        except (RuntimeError, ValueError, OSError) as exc:
+                            import typer
+                            from gai.cli_common import _print_error
+                            _print_error(exc, chinese=arguments.get("cn") is True, trace=False)
+                            raise typer.Exit(1) from exc
                     return function(*args, **kwargs)
                 finally:
                     if collector.path and (collector.path / "summary.md").is_file():
@@ -345,6 +367,8 @@ def collect_reviews(command: str):
 
 
 def bind_flow(session):
+    from gai.review.policy import bind_session
+    bind_session(session)
     collector = _CURRENT.get()
     if collector:
         collector.bind(session)
@@ -373,13 +397,19 @@ def save_review(result, snapshot, *, chinese=False, cached=False):
     if snapshot is None:
         raise ReviewSaveError("缺少审查版本标识，无法保存 / Missing reviewed snapshot")
     settings = load_settings()
-    assert_staged_snapshot(snapshot)
+    from gai.review.branch import validate_scope
+    branch_review = getattr(result, "scope", {}).get("kind") == "branch"
+    if branch_review:
+        validate_scope(result.scope)
+    else:
+        assert_staged_snapshot(snapshot)
     result_data = result.to_dict()
     if not result.parsed_ok:
         # The parser's fallback summary can be a raw-response excerpt.
         result_data["summary"] = "审查响应解析失败 / Review response could not be parsed."
-    files = [p for _, p in staged_name_status()]
-    assert_staged_snapshot(snapshot)
+    files = result.scope["files"] if branch_review else [p for _, p in staged_name_status()]
+    if not branch_review:
+        assert_staged_snapshot(snapshot)
     record = {"schema": 1, "id": uuid.uuid4().hex,
               "reviewed_at": getattr(result, "reviewed_at", "") or (None if cached else now()),
               "saved_at": now(), "command": collector.archive["command"],

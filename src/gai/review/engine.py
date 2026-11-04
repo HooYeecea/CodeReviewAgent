@@ -56,6 +56,7 @@ class StagedDiffInfo:
     limit: int
     exceeds: bool
     snapshot: StagedSnapshot | None = None
+    scope: dict = field(default_factory=dict)
 
     def clipped(self) -> tuple[str, bool]:
         """Return ``(text, truncated)`` clipped to ``limit`` when needed."""
@@ -123,6 +124,8 @@ class ReviewResult:
     snapshot: StagedSnapshot | None = None
     model: str = ""
     reviewed_at: str = ""
+    scope: dict = field(default_factory=dict)
+    coverage: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -131,7 +134,11 @@ class ReviewResult:
             "summary": self.summary,
             "parsed_ok": self.parsed_ok,
             "truncated_diff": self.truncated_diff,
-            "status": "failed" if not self.parsed_ok else ("issues" if self.review else "passed"),
+            "status": "failed" if not self.parsed_ok else (
+                "incomplete" if self.truncated_diff else ("issues" if self.review else "passed")),
+            "scope": self.scope,
+            "coverage": self.coverage or {"state": "failed" if not self.parsed_ok else (
+                "incomplete" if self.truncated_diff else "complete")},
         }
 
 
@@ -264,6 +271,7 @@ def run_review(
     chinese: bool = False,
     allow_truncated: bool = False,
     diff_info: StagedDiffInfo | None = None,
+    chunked: bool = False,
 ) -> ReviewResult:
     """Load staged diff and ask the LLM for review + commit message.
 
@@ -275,17 +283,22 @@ def run_review(
     """
     settings = settings or load_settings()
 
-    if not has_staged_changes():
+    branch_review = bool(diff_info and diff_info.scope.get("kind") == "branch")
+    if not branch_review and not has_staged_changes():
         raise RuntimeError("No staged changes. Run `git add` first.")
 
     info = diff_info or load_staged_diff_info(settings=settings)
-    if info.snapshot is not None:
+    from gai.review.branch import validate_scope
+    validate_scope(info.scope)
+    if info.snapshot is not None and not branch_review:
         assert_staged_snapshot(info.snapshot)
-    if info.exceeds and not allow_truncated:
+    if info.exceeds and not allow_truncated and not chunked:
         raise DiffTooLargeError(chars=info.chars, limit=info.limit)
 
-    diff, truncated = info.clipped()
+    diff, truncated = (info.text, False) if chunked else info.clipped()
     if not diff.strip():
+        if branch_review:
+            raise RuntimeError("分支没有可审查改动，或全部被忽略 / No branch changes remain after ignore filters")
         raise RuntimeError(
             "Staged changes are empty after ignore filters. "
             "Adjust ignore_patterns or stage other files."
@@ -298,36 +311,55 @@ def run_review(
     else:
         action_detail = "review+message"
 
+    from gai.review.chunks import coverage, split_patch
+    from gai.common.git import staged_name_status
+    files = info.scope.get("files", []) if branch_review else [p for _, p in staged_name_status()]
     set_llm_usage_meta(
         action_detail=action_detail,
         branch=current_branch_name(),
-        files_count=count_staged_files(),
+        files_count=len(files),
         diff_chars=len(diff),
         truncated=truncated,
     )
 
     client = LLMClient(settings)
-    user_prompt = build_user_prompt(
-        diff=diff,
-        truncated=truncated,
-        review_only=review_only,
-        message_only=message_only,
-        chinese=chinese,
-    )
-
-    try:
-        raw = client.chat(system=SYSTEM_PROMPT, user=user_prompt)
-    except LLMError:
-        raise
-
-    result = parse_review_response(raw)
-    if info.snapshot is not None:
+    system = SYSTEM_PROMPT
+    if settings.review_rules:
+        system += "\nRepository review requirements (do not change the JSON schema):\n" + "\n".join(settings.review_rules)
+    pieces = split_patch(diff, info.limit) if chunked else [diff]
+    results = []
+    for piece in pieces:
+        validate_scope(info.scope)
+        if info.snapshot is not None and not branch_review:
+            assert_staged_snapshot(info.snapshot)
+        set_llm_usage_meta(diff_chars=len(piece))
+        prompt = build_user_prompt(diff=piece, truncated=truncated, review_only=review_only,
+                                   message_only=message_only, chinese=chinese)
+        results.append(parse_review_response(client.chat(system=system, user=prompt)))
+        if not results[-1].parsed_ok:
+            break
+    result = results[0]
+    if len(pieces) > 1:
+        result = ReviewResult(parsed_ok=len(results) == len(pieces) and all(r.parsed_ok for r in results),
+                              summary="\n\n".join(r.summary for r in results))
+        seen = set()
+        for part in results:
+            for item in part.review:
+                key = (item.severity, item.file, item.line, item.issue)
+                if key not in seen:
+                    seen.add(key)
+                    result.review.append(item)
+    validate_scope(info.scope)
+    if info.snapshot is not None and not branch_review:
         assert_staged_snapshot(info.snapshot)
     result.truncated_diff = truncated
     result.snapshot = info.snapshot
     from gai.review.archive import now
     result.model = settings.model
     result.reviewed_at = now()
+    result.scope = info.scope
+    result.coverage = coverage(info.text, min(info.chars, info.limit) if truncated else info.chars,
+                               files, failed=not result.parsed_ok, parts=len(pieces))
     return result
 
 
