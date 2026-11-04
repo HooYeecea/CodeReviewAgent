@@ -288,7 +288,8 @@ class FlowSession:
         settings = load_settings()
         # Hash configuration, never persist credentials or the endpoint URL.
         value = [purpose, settings.model, settings.base_url, settings.max_diff_chars,
-                 settings.ignore_patterns, options, Path(prompts.__file__).read_text(encoding="utf-8")]
+                 settings.ignore_patterns, settings.review_rules, settings.fail_on,
+                 settings.require_complete, options, Path(prompts.__file__).read_text(encoding="utf-8")]
         return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
 
     def index_write(self, operation: str, paths: list[str], callback, *, updates: dict):

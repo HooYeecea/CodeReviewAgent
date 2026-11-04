@@ -62,6 +62,9 @@ class Settings:
     max_diff_chars: int = DEFAULT_MAX_DIFF_CHARS
     ignore_patterns: tuple[str, ...] = DEFAULT_IGNORE_PATTERNS
     profile: str = DEFAULT_PROFILE
+    fail_on: str = "none"
+    require_complete: bool = False
+    review_rules: tuple[str, ...] = ()
 
 
 @dataclass
@@ -221,12 +224,53 @@ def load_settings() -> Settings:
     file_cfg = _load_toml()
     llm = file_cfg.get("llm", {}) if isinstance(file_cfg.get("llm"), dict) else {}
     review = file_cfg.get("review", {}) if isinstance(file_cfg.get("review"), dict) else {}
+    # Only non-secret review settings are accepted from the repository.
+    from gai.common.git.core import run_git, GitError
+    try:
+        located = run_git("rev-parse", "--show-toplevel", trace=False)
+    except GitError:
+        located = None
+    if located is not None and located.returncode == 0:
+        policy_path = Path(located.stdout.strip()) / ".gai.toml"
+        try:
+            with policy_path.open("rb") as stream:
+                project = tomllib.load(stream)
+        except FileNotFoundError:
+            project = {}
+        except (OSError, ValueError) as exc:
+            raise RuntimeError("无法读取项目规则 / Cannot read .gai.toml") from exc
+        if set(project) - {"review"} or not isinstance(project.get("review", {}), dict):
+            raise RuntimeError(".gai.toml only accepts a [review] table; keep credentials in personal config")
+        project_review = project.get("review", {})
+        allowed = {"ignore_patterns", "max_diff_chars", "fail_on", "require_complete", "rules"}
+        if set(project_review) - allowed:
+            raise RuntimeError("Unknown .gai.toml review settings: " + ", ".join(sorted(set(project_review) - allowed)))
+        review = {**review, **project_review}
+    from gai.review.policy import overrides, LEVELS
+    review = {**review, **overrides()}
+    fail_on = review.get("fail_on", "none")
+    complete = review.get("require_complete", False)
+    rules = review.get("rules", [])
+    if (not isinstance(fail_on, str) or fail_on not in LEVELS or type(complete) is not bool or not isinstance(rules, list)
+            or any(not isinstance(rule, str) for rule in rules)):
+        raise RuntimeError("Invalid review policy: fail_on, require_complete or rules")
 
     ignore = review.get("ignore_patterns")
-    if isinstance(ignore, list) and ignore:
+    if ignore is not None and (not isinstance(ignore, list) or any(not isinstance(p, str) for p in ignore)):
+        raise RuntimeError("ignore_patterns must be an array of strings")
+    if isinstance(ignore, list):
         ignore_patterns = tuple(str(x) for x in ignore)
     else:
         ignore_patterns = DEFAULT_IGNORE_PATTERNS
+    limit_value = os.environ.get("GAI_MAX_DIFF_CHARS") or review.get("max_diff_chars", DEFAULT_MAX_DIFF_CHARS)
+    if isinstance(limit_value, bool) or not isinstance(limit_value, (str, int)):
+        raise RuntimeError("max_diff_chars must be a positive integer")
+    try:
+        diff_limit = int(limit_value)
+    except ValueError as exc:
+        raise RuntimeError("max_diff_chars must be a positive integer") from exc
+    if diff_limit <= 0:
+        raise RuntimeError("max_diff_chars must be positive")
 
     profile = get_active_profile_name(file_cfg)
     file_map = _file_profiles(llm)
@@ -258,14 +302,15 @@ def load_settings() -> Settings:
             or llm.get("timeout")
             or DEFAULT_TIMEOUT
         ),
-        max_diff_chars=int(
-            os.environ.get("GAI_MAX_DIFF_CHARS")
-            or review.get("max_diff_chars")
-            or DEFAULT_MAX_DIFF_CHARS
-        ),
+        max_diff_chars=diff_limit,
         ignore_patterns=ignore_patterns,
         profile=profile,
+        fail_on=fail_on,
+        require_complete=complete,
+        review_rules=tuple(rules),
     )
+    if settings.max_diff_chars <= 0:
+        raise RuntimeError("max_diff_chars must be positive")
     return settings
 
 

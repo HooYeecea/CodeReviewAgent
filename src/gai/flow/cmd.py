@@ -38,6 +38,8 @@ from gai.review.helpers import _SUGGEST_SPLIT_HELP, _offer_splitflow_instead
 )
 @collect_reviews("splitflow")
 def splitflow_cmd(
+    fail_on: str | None = typer.Option(None, "--fail-on", help=H("Block at critical, warning, info; none disables.", "阻断级别：critical、warning、info；none 关闭。")),
+    require_complete: bool | None = typer.Option(None, "--require-complete/--allow-incomplete", help=H("Require complete coverage.", "要求完整审查覆盖。")),
     save_review: bool = typer.Option(False, "--save-review", help=H(
         "Save batch reviews in .gai/reviews/; resume preserves this setting.",
         "将各批次审查结果保存到 .gai/reviews/；断点恢复沿用设置。")),
@@ -121,6 +123,8 @@ def splitflow_cmd(
 )
 @collect_reviews("devflow")
 def devflow_cmd(
+    fail_on: str | None = typer.Option(None, "--fail-on", help=H("Block at critical, warning, info; none disables.", "阻断级别：critical、warning、info；none 关闭。")),
+    require_complete: bool | None = typer.Option(None, "--require-complete/--allow-incomplete", help=H("Require complete coverage.", "要求完整审查覆盖。")),
     save_review: bool = typer.Option(False, "--save-review", help=H(
         "Save reviews in .gai/reviews/; resume preserves this setting.",
         "将审查结果保存到 .gai/reviews/；断点恢复沿用设置。")),

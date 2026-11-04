@@ -43,6 +43,8 @@ from gai.review.archive import collect_reviews, save_review as archive_review, l
 )
 @collect_reviews("commit")
 def commit_cmd(
+    fail_on: str | None = typer.Option(None, "--fail-on", help=H("Block at critical, warning, info; none disables.", "阻断级别：critical、warning、info；none 关闭。")),
+    require_complete: bool | None = typer.Option(None, "--require-complete/--allow-incomplete", help=H("Require complete coverage.", "要求完整审查覆盖。")),
     save_review: bool = typer.Option(False, "--save-review", help=H(
         "Save actual reviews as Markdown and JSON in .gai/reviews/.",
         "将实际代码审查结果保存为 Markdown 和 JSON，位于 .gai/reviews/。")),
@@ -181,6 +183,8 @@ def commit_cmd(
                 archive_review(result, diff_info.snapshot, chinese=cn)
                 render_review(result, console, chinese=cn)
                 console.print()
+                from gai.review.policy import enforce
+                enforce(result)
 
             if not result.parsed_ok:
                 raise LLMError("Review output failed validation; commit stopped", kind="bad_response")

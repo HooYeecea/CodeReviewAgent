@@ -135,6 +135,8 @@ def _run_staged_review(
     if cached and cached["key"] == key:
         result = parse_review_response(json.dumps(cached["result"]))
         result.truncated_diff = cached["result"].get("truncated_diff", False)
+        result.coverage = cached["result"].get("coverage", {})
+        result.scope = cached["result"].get("scope", {})
         result.model = cached.get("model", "")
         result.reviewed_at = cached.get("reviewed_at", "")
         console.print("复用已保存的审查结果 / Reusing saved review", markup=False)
@@ -161,6 +163,8 @@ def _run_staged_review(
     flush("review")
     if not result.parsed_ok:
         raise LLMError("Review output failed validation; commit stopped", kind="bad_response")
+    from gai.review.policy import enforce
+    enforce(result)
     if diff_info.snapshot is None:
         raise RuntimeError("Missing reviewed index snapshot")
     if auto_continue:
