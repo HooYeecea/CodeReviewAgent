@@ -26,6 +26,16 @@ __all__ = [
 # Titles/blurbs stay here; example lines are shared with cli_usage.command_examples().
 _COMMAND_META: list[dict[str, Any]] = [
     {
+        "id": "doctor",
+        "en": {"title": "Environment diagnostics", "blurb": "Inspect Git, configuration and unfinished flows; network checks are opt-in."},
+        "cn": {"title": "环境诊断", "blurb": "检查 Git、配置和未完成流程；联网检查需显式开启。"},
+    },
+    {
+        "id": "reviews",
+        "en": {"title": "Review library", "blurb": "Search, view and compare saved reviews in a local browser."},
+        "cn": {"title": "审查报告库", "blurb": "检索历史审查、查看详情，并在本地页面对比两次结果。"},
+    },
+    {
         "id": "add",
         "en": {
             "title": "Stage files",
@@ -56,9 +66,9 @@ _COMMAND_META: list[dict[str, Any]] = [
         "id": "review",
         "en": {
             "title": "AI code review",
-            "blurb": "Review staged changes only — no commit.",
+            "blurb": "Review staged changes, or use --base for a committed branch; no commit is created.",
         },
-        "cn": {"title": "AI 代码审查", "blurb": "只审查已暂存变更，不提交。"},
+        "cn": {"title": "AI 代码审查", "blurb": "默认审查暂存内容；--base 审查分支已提交改动，不创建提交。"},
     },
     {
         "id": "commit",

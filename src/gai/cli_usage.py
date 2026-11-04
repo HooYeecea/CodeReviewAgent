@@ -11,6 +11,16 @@ from click.exceptions import NoSuchOption, UsageError
 
 # Subcommand → (command, English what-it-does, Chinese what-it-does)
 _COMMAND_EXAMPLES: dict[str, tuple[tuple[str, str, str], ...]] = {
+    "doctor": (
+        ("gai doctor --cn", "Diagnose local setup", "诊断本地环境"),
+        ("gai doctor --network --cn", "Also check API and remote read access", "额外检查模型接口与远程读取"),
+    ),
+    "reviews": (
+        ("gai reviews --html --open", "Browse saved reviews", "打开审查报告浏览页"),
+        ("gai reviews --severity critical", "Find critical findings", "筛选严重问题"),
+    ),
+    "reviews show": (("gai reviews show REVIEW_ID", "Show a review", "查看审查详情"),),
+    "reviews compare": (("gai reviews compare OLD_ID NEW_ID", "Compare reviews", "对比审查结果"),),
     "add": (
         ("gai add", "Stage all changes in the current directory", "暂存当前目录全部变更"),
         ("gai add src/", "Stage files under src/", "暂存 src/ 目录下的文件"),
@@ -24,6 +34,7 @@ _COMMAND_EXAMPLES: dict[str, tuple[tuple[str, str, str], ...]] = {
         ("gai uncommit --cn", "Soft-undo the latest commit (keeps changes staged)", "软撤销最近一次提交（改动仍保留在暂存区）"),
     ),
     "review": (
+        ("gai review --base main --chunked --cn", "Review committed branch changes in chunks", "分段审查分支已提交改动"),
         ("gai review --save-review --cn", "Save a Markdown and JSON review locally", "将审查保存为本地 Markdown 和 JSON 报告"),
         ("gai review --cn", "AI-review staged changes only (no commit)", "仅审查已暂存变更（不提交）"),
         ("gai review --json", "Output the review result as JSON", "以 JSON 输出审查结果"),

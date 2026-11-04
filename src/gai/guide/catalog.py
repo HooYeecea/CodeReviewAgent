@@ -20,8 +20,8 @@ MEMBERS = {
     "workspace": "add unadd uncommit status",
     "branches": "branch switch merge rebase stash",
     "sync": "push pull",
-    "insight": "log graph report usage history",
-    "setup": "balance config completion guide",
+    "insight": "log graph report usage history reviews",
+    "setup": "balance config completion guide doctor",
 }
 
 
@@ -31,6 +31,14 @@ def pair(cn, en):
 
 # Steps describe the default path; flags and recovery branches are shown separately.
 STEPS = {
+    "doctor": [
+        ("本地检查", "Local checks", "检查 Git、配置、权限提示和未完成流程。", "Inspect Git, configuration, access hints and saved flows."),
+        ("可选联网", "Optional network", "--network 查询模型列表和远程读取，不创建提交或推送。", "--network checks model listing and remote reads without committing or pushing."),
+        ("处理问题", "Resolve issues", "根据检查结果修正配置；远程可读不代表有推送权限。", "Use results to fix setup; remote read access does not prove push access.")],
+    "reviews": [
+        ("找到报告", "Find reports", "按日期、分支、提交、问题严重度或关键词筛选。", "Filter by date, branch, commit, severity or keywords."),
+        ("浏览详情", "Read details", "--html --open 打开本地页面，查看摘要、问题和覆盖范围。", "--html --open displays findings, summaries and coverage locally."),
+        ("对比结果", "Compare results", "对比两次结果；未再报告的问题需要人工确认是否解决。", "Compare two reviews; missing findings still need resolution confirmation.")],
     "splitflow": [
         ("拆分计划", "Plan", "将未提交改动按主题分组，并选择提交词语言。", "Group uncommitted changes and choose commit message language."),
         ("暂存批次", "Stage", "只暂存当前批次的文件。", "Stage the files in the current batch."),
@@ -54,6 +62,14 @@ STEPS = {
 }
 
 EXTRA_EXAMPLES = {
+    "doctor": [("gai doctor --cn", "检查本地环境", "Inspect local environment"),
+               ("gai doctor --network --cn", "显式检查模型接口与远程读取", "Check API and remote read connectivity")],
+    "reviews": [("gai reviews --html --open", "打开审查报告浏览页面", "Open the review library"),
+                ("gai reviews --severity critical --since 2026-01-01", "筛选严重问题和日期", "Filter by severity and date")],
+    "reviews show": [("gai reviews show REVIEW_ID", "按审查 ID 查看详情", "Inspect a review by ID")],
+    "reviews compare": [("gai reviews compare OLD_ID NEW_ID", "对比两次审查", "Compare two reviews")],
+    "review": [("gai review --base main --chunked --save-review --cn", "分段审查整个分支并留档", "Review a branch in chunks and save results"),
+               ("gai review --fail-on critical --require-complete", "启用严重问题与完整度门槛", "Require complete coverage and block critical findings")],
     "splitflow": [
         ("gai splitflow --cn --yes", "只选提交词语言，自动确认到推送", "Choose message language; auto-confirm through push"),
         ("gai splitflow --cn --yes --no-push", "自动处理批次，仅保留本地提交", "Process batches automatically, finishing locally"),
