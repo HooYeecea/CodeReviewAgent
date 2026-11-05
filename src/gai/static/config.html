@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>gai · 配置中心</title><link rel="stylesheet" href="/config.css"><script src="/config.js" defer></script></head>
+<body>
+<div class="shell">
+  <aside><div class="brand">gai<span>配置中心</span></div><p class="muted">让下一次审查准备就绪。</p>
+    <nav aria-label="配置页面"><button data-tab="personal" class="active">个人配置<span>模型连接与审查偏好</span></button><button data-tab="project">当前项目<span>仓库专属审查规则</span></button><button data-tab="environment">环境变量<span>高级设置与覆盖关系</span></button></nav>
+    <div class="side-note">默认保存到个人配置文件。<br>密钥不会写入项目配置。</div>
+    <button id="close" class="quiet">退出配置服务</button>
+  </aside>
+  <main>
+    <header><div><span class="eyebrow">LOCAL CONFIGURATION</span><h1 id="page-title">个人配置</h1></div><button id="refresh" class="quiet">重新读取</button></header>
+    <div id="status" role="status" aria-live="polite"></div>
+    <section id="personal" class="tab">
+      <p class="intro">填写要保存的配置。环境变量中的值不会自动复制到这里。</p><p id="personal-path" class="path"></p>
+      <div class="card"><h2>模型连接</h2><div class="grid">
+        <label>编辑配置档<input id="profile" list="profiles" value="0" maxlength="100"><datalist id="profiles"></datalist><small>选择已有配置档，或输入新名称。</small></label>
+        <label>默认使用的配置档<input id="current" list="profiles"><small>若存在 GAI_PROFILE，将优先使用环境变量。</small></label>
+        <label class="wide">API 地址<input id="base_url" type="url" placeholder="https://api.example.com/v1"></label>
+        <label>模型名称<input id="model" placeholder="填写服务商支持的模型 ID"></label>
+        <label>请求超时（秒）<input id="timeout" type="number" min="0.1" step="any"></label>
+        <label class="wide">API Key<input id="api_key" type="password" autocomplete="new-password" placeholder="留空保留已有密钥"><small id="key-hint"></small></label>
+      </div><label class="check"><input id="clear-key" type="checkbox">删除此配置档保存在文件中的密钥</label></div>
+      <div class="card"><h2>默认审查设置</h2><div id="personal-review" class="grid"></div></div>
+    </section>
+    <section id="project" class="tab" hidden><p class="intro">仅覆盖勾选的审查设置；取消勾选后使用个人配置或默认值。模型和密钥不保存在仓库。</p><p id="project-path" class="path"></p><div class="card"><h2>项目审查规则</h2><div id="project-review" class="grid"></div></div></section>
+    <section id="environment" class="tab" hidden>
+      <p class="intro">仅管理 gai 支持的变量。系统级变量只读；用户级变量修改后，需要重新打开终端或 IDE。</p>
+      <div class="card"><h2>修改一个环境变量</h2><div class="grid">
+        <label>变量名称<input id="env-name" list="env-names" value="GAI_MODEL"><datalist id="env-names"></datalist><small>编号配置档示例：GAI_MODEL1、GAI_API_KEY2。</small></label>
+        <label>保存范围<select id="env-scope"><option value="user">Windows 当前用户（持久保存）</option><option value="process">仅本 GUI 进程（关闭后失效）</option></select></label>
+        <label>操作<select id="env-action"><option value="set">设置 / 替换</option><option value="delete">删除，恢复回退值</option></select></label>
+        <label>新值<input id="env-value" autocomplete="off"></label>
+      </div><p class="note">仅本 GUI 进程：只影响本页面的生效预览和连接测试，不能更改父终端或其他 gai 命令。OPENAI_* 也可能被其他工具使用，修改前请核对。</p></div>
+      <div class="card"><h2>已有值与来源</h2><p class="muted">点击变量名称开始编辑。密钥只显示是否已设置。</p><div class="table-wrap"><table><thead><tr><th>变量</th><th>当前 GUI 进程</th><th>Windows 用户级</th><th>系统级（只读）</th></tr></thead><tbody id="env-table"></tbody></table></div></div>
+    </section>
+    <div class="actions"><button id="preview" class="primary">预览修改</button><span class="muted">预览不会保存，确认后才写入。</span></div>
+    <section id="preview-panel" class="card" hidden aria-label="保存前预览">
+      <span class="eyebrow">REVIEW CHANGES</span><h2>确认这次修改</h2><p id="destination" class="path"></p><div id="preview-notes" class="note"></div>
+      <div class="table-wrap"><table><thead><tr><th>设置</th><th>修改前</th><th>修改后</th></tr></thead><tbody id="changes"></tbody></table></div>
+      <div id="fallback" class="note" hidden></div>
+      <h3>保存后的生效情况</h3><div class="table-wrap"><table><thead><tr><th>设置</th><th>当前值</th><th>保存后</th><th>保存后的来源</th></tr></thead><tbody id="after"></tbody></table></div>
+      <div class="actions"><button id="apply" class="primary">确认保存</button><button id="test" class="quiet">测试预览中的生效连接</button><button id="cancel" class="quiet">取消</button></div><small>连接测试仅请求模型列表，不发送代码审查，也不保存配置。</small>
+    </section>
+    <section class="card"><h2>当前生效配置</h2><p class="muted">仅表示本 GUI 进程的配置，不包括其他命令临时传入的参数。环境变量优先于项目配置，项目配置优先于个人配置。</p><div class="table-wrap"><table><thead><tr><th>设置</th><th>生效值</th><th>来源</th></tr></thead><tbody id="effective"></tbody></table></div></section>
+  </main>
+</div>
+</body></html>
