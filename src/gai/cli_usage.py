@@ -198,6 +198,7 @@ _COMMAND_EXAMPLES: dict[str, tuple[tuple[str, str, str], ...]] = {
         ("gai balance", "Same in English", "英文输出余额查询结果"),
     ),
     "config": (
+        ("gai config --gui", "Open the local configuration editor", "打开本地图形配置界面，预览修改后保存"),
         ("gai config --show --cn", "Show effective config (secrets masked)", "查看当前生效配置（密钥已掩码）"),
         (
             "gai config --list --cn",

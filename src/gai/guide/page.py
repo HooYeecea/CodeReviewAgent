@@ -261,11 +261,11 @@ _COMMAND_META: list[dict[str, Any]] = [
         "id": "config",
         "en": {
             "title": "Configuration",
-            "blurb": "View or update ~/.gai/config.toml (env vars still win).",
+            "blurb": "Use --gui to edit personal/project settings and supported environment variables, with a preview before saving.",
         },
         "cn": {
             "title": "配置",
-            "blurb": "查看或更新 ~/.gai/config.toml（环境变量优先级更高）。",
+            "blurb": "用 --gui 图形化编辑个人、项目及环境变量配置，预览修改与回退值后保存。",
         },
     },
     {

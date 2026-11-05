@@ -153,8 +153,8 @@ STEPS.update({
         ("浏览全局历史", "Explore globally", "--report 或 --serve 查看跨仓库的命令记录。", "Use --report or --serve for history across repositories."),
     ],
     "config": [
-        ("查看配置", "Inspect settings", "用 --show 查看当前配置，--list 查看配置列表。", "Use --show for current settings and --list for available profiles."),
-        ("设置服务", "Set provider", "根据服务填写 API 地址、模型名与密钥。", "Set the API URL, model and key for your provider."),
+        ("查看配置", "Inspect settings", "用 --gui 打开图形配置中心，--show 查看生效配置。", "Use --gui for the configuration editor or --show for effective settings."),
+        ("预览保存", "Preview and save", "默认编辑个人配置；高级页管理环境变量，预览覆盖关系与删除后的回退值，再确认保存。", "Edit personal settings or supported environment variables; preview changes, overrides and fallback values before saving."),
         ("选择配置", "Select profile", "用 --use 切换配置，再执行需要 AI 的命令。", "Switch profiles with --use, then run commands that need AI."),
     ],
     "balance": [
