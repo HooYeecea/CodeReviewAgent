@@ -12,6 +12,8 @@ LLM credentials support multiple profiles:
 from __future__ import annotations
 
 import os
+import json
+import math
 import re
 import stat
 import tomllib
@@ -88,8 +90,7 @@ def _load_toml() -> dict:
 
 
 def _toml_str(value: str) -> str:
-    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-    return f'"{escaped}"'
+    return json.dumps(value, ensure_ascii=False)
 
 
 def _file_profiles(llm: dict) -> dict[str, dict[str, Any]]:
@@ -121,22 +122,23 @@ def _file_profiles(llm: dict) -> dict[str, dict[str, Any]]:
     return out
 
 
-def _env_profile_fields(name: str) -> dict[str, str]:
+def _env_profile_fields(name: str, env=None) -> dict[str, str]:
     """Env overlays for a numeric profile id (\"0\", \"1\", ...). Named → empty."""
     if not name.isdigit():
         return {}
+    env = os.environ if env is None else env
     if name == DEFAULT_PROFILE:
-        key = os.environ.get("GAI_API_KEY") or os.environ.get("OPENAI_API_KEY") or ""
+        key = env.get("GAI_API_KEY") or env.get("OPENAI_API_KEY") or ""
         url = (
-            os.environ.get("GAI_BASE_URL")
-            or os.environ.get("OPENAI_BASE_URL")
+            env.get("GAI_BASE_URL")
+            or env.get("OPENAI_BASE_URL")
             or ""
         )
-        model = os.environ.get("GAI_MODEL") or ""
+        model = env.get("GAI_MODEL") or ""
     else:
-        key = os.environ.get(f"GAI_API_KEY{name}") or ""
-        url = os.environ.get(f"GAI_BASE_URL{name}") or ""
-        model = os.environ.get(f"GAI_MODEL{name}") or ""
+        key = env.get(f"GAI_API_KEY{name}") or ""
+        url = env.get(f"GAI_BASE_URL{name}") or ""
+        model = env.get(f"GAI_MODEL{name}") or ""
     fields: dict[str, str] = {}
     if key:
         fields["api_key"] = key
@@ -167,8 +169,9 @@ def _discover_env_profile_names() -> list[str]:
     return sorted(names, key=lambda n: (not n.isdigit(), int(n) if n.isdigit() else 0, n))
 
 
-def get_active_profile_name(file_cfg: dict | None = None) -> str:
-    env_prof = (os.environ.get("GAI_PROFILE") or "").strip()
+def get_active_profile_name(file_cfg: dict | None = None, env=None) -> str:
+    env = os.environ if env is None else env
+    env_prof = (env.get("GAI_PROFILE") or "").strip()
     if env_prof:
         return env_prof
     cfg = file_cfg if file_cfg is not None else _load_toml()
@@ -220,10 +223,7 @@ def list_profiles() -> list[ProfileInfo]:
     return result
 
 
-def load_settings() -> Settings:
-    file_cfg = _load_toml()
-    llm = file_cfg.get("llm", {}) if isinstance(file_cfg.get("llm"), dict) else {}
-    review = file_cfg.get("review", {}) if isinstance(file_cfg.get("review"), dict) else {}
+def load_project_config() -> dict:
     # Only non-secret review settings are accepted from the repository.
     from gai.common.git.core import run_git, GitError
     try:
@@ -239,15 +239,27 @@ def load_settings() -> Settings:
             project = {}
         except (OSError, ValueError) as exc:
             raise RuntimeError("无法读取项目规则 / Cannot read .gai.toml") from exc
-        if set(project) - {"review"} or not isinstance(project.get("review", {}), dict):
-            raise RuntimeError(".gai.toml only accepts a [review] table; keep credentials in personal config")
-        project_review = project.get("review", {})
-        allowed = {"ignore_patterns", "max_diff_chars", "fail_on", "require_complete", "rules"}
-        if set(project_review) - allowed:
-            raise RuntimeError("Unknown .gai.toml review settings: " + ", ".join(sorted(set(project_review) - allowed)))
-        review = {**review, **project_review}
-    from gai.review.policy import overrides, LEVELS
-    review = {**review, **overrides()}
+        return project
+    return {}
+
+
+def load_settings() -> Settings:
+    from gai.review.policy import overrides
+    return resolve_settings(_load_toml(), load_project_config(), os.environ, overrides())
+
+
+def resolve_settings(file_cfg: dict, project: dict, env, cli: dict | None = None) -> Settings:
+    """Resolve explicit inputs, also used for GUI previews without changing the process."""
+    from gai.review.policy import LEVELS
+    llm = file_cfg.get("llm", {}) if isinstance(file_cfg.get("llm"), dict) else {}
+    review = file_cfg.get("review", {}) if isinstance(file_cfg.get("review"), dict) else {}
+    if set(project) - {"review"} or not isinstance(project.get("review", {}), dict):
+        raise RuntimeError(".gai.toml only accepts a [review] table; keep credentials in personal config")
+    project_review = project.get("review", {})
+    allowed = {"ignore_patterns", "max_diff_chars", "fail_on", "require_complete", "rules"}
+    if set(project_review) - allowed:
+        raise RuntimeError("Unknown .gai.toml review settings: " + ", ".join(sorted(set(project_review) - allowed)))
+    review = {**review, **project_review, **(cli or {})}
     fail_on = review.get("fail_on", "none")
     complete = review.get("require_complete", False)
     rules = review.get("rules", [])
@@ -262,7 +274,7 @@ def load_settings() -> Settings:
         ignore_patterns = tuple(str(x) for x in ignore)
     else:
         ignore_patterns = DEFAULT_IGNORE_PATTERNS
-    limit_value = os.environ.get("GAI_MAX_DIFF_CHARS") or review.get("max_diff_chars", DEFAULT_MAX_DIFF_CHARS)
+    limit_value = env.get("GAI_MAX_DIFF_CHARS") or review.get("max_diff_chars", DEFAULT_MAX_DIFF_CHARS)
     if isinstance(limit_value, bool) or not isinstance(limit_value, (str, int)):
         raise RuntimeError("max_diff_chars must be a positive integer")
     try:
@@ -272,10 +284,10 @@ def load_settings() -> Settings:
     if diff_limit <= 0:
         raise RuntimeError("max_diff_chars must be positive")
 
-    profile = get_active_profile_name(file_cfg)
+    profile = get_active_profile_name(file_cfg, env)
     file_map = _file_profiles(llm)
     file_body = file_map.get(profile, {})
-    env_body = _env_profile_fields(profile)
+    env_body = _env_profile_fields(profile, env)
 
     api_key = str(
         env_body.get("api_key")
@@ -298,7 +310,7 @@ def load_settings() -> Settings:
         base_url=base_url,
         model=model,
         timeout=float(
-            os.environ.get("GAI_TIMEOUT")
+            env.get("GAI_TIMEOUT")
             or llm.get("timeout")
             or DEFAULT_TIMEOUT
         ),
@@ -311,10 +323,18 @@ def load_settings() -> Settings:
     )
     if settings.max_diff_chars <= 0:
         raise RuntimeError("max_diff_chars must be positive")
+    if not math.isfinite(settings.timeout) or settings.timeout <= 0:
+        raise RuntimeError("timeout must be a positive finite number")
     return settings
 
 
-def save_settings(
+def save_settings(**kwargs) -> Path:
+    from gai.common.jsonl import log_lock
+    with log_lock(CONFIG_FILE):
+        return _save_settings(**kwargs)
+
+
+def _save_settings(
     *,
     api_key: str | None = None,
     base_url: str | None = None,
@@ -336,6 +356,9 @@ def save_settings(
     review = dict(existing.get("review") or {}) if isinstance(existing.get("review"), dict) else {}
 
     profiles = _file_profiles(llm)
+    for name, body in llm.get("profiles", {}).items():
+        if isinstance(body, dict):
+            profiles[name] = {**body, **profiles.get(name, {})}
     current_name = str(llm.get("current") or DEFAULT_PROFILE).strip() or DEFAULT_PROFILE
     target = (profile or set_current or current_name or DEFAULT_PROFILE).strip()
     if not target:
@@ -363,56 +386,27 @@ def save_settings(
     elif "current" not in llm:
         llm["current"] = target
 
-    current_effective = load_settings()
     if timeout is not None:
         llm["timeout"] = timeout
     else:
-        llm.setdefault("timeout", current_effective.timeout)
+        llm.setdefault("timeout", DEFAULT_TIMEOUT)
 
     if max_diff_chars is not None:
         review["max_diff_chars"] = max_diff_chars
     else:
-        review.setdefault("max_diff_chars", current_effective.max_diff_chars)
+        review.setdefault("max_diff_chars", DEFAULT_MAX_DIFF_CHARS)
 
-    review.setdefault("ignore_patterns", list(current_effective.ignore_patterns))
+    review.setdefault("ignore_patterns", list(DEFAULT_IGNORE_PATTERNS))
 
     # Drop legacy flat credential keys; profiles own them now.
     for legacy in ("api_key", "base_url", "model"):
         llm.pop(legacy, None)
     llm["profiles"] = profiles
 
-    lines = ["# gai configuration", "", "[llm]"]
-    lines.append(f"current = {_toml_str(str(llm.get('current') or DEFAULT_PROFILE))}")
-    timeout_val = llm.get("timeout", DEFAULT_TIMEOUT)
-    lines.append(f"timeout = {timeout_val}")
-
-    for name in sorted(
-        profiles.keys(),
-        key=lambda n: (0, int(n), n) if n.isdigit() else (1, 0, n),
-    ):
-        p = profiles[name]
-        lines.append("")
-        lines.append(f"[llm.profiles.{_toml_str(name)}]")
-        for key in ("api_key", "base_url", "model"):
-            val = str(p.get(key) or "")
-            if key == "api_key" and not val:
-                continue
-            if key == "base_url" and not val:
-                continue
-            if key == "model" and not val:
-                continue
-            lines.append(f"{key} = {_toml_str(val)}")
-
-    lines.extend(["", "[review]", f"max_diff_chars = {review['max_diff_chars']}"])
-    patterns = review.get("ignore_patterns") or list(DEFAULT_IGNORE_PATTERNS)
-    lines.append("ignore_patterns = [")
-    for p in patterns:
-        lines.append(f"  {_toml_str(str(p))},")
-    lines.append("]")
-    lines.append("")
-
-    CONFIG_FILE.write_text("\n".join(lines), encoding="utf-8")
-    _tighten_config_permissions(CONFIG_FILE)
+    existing["llm"] = llm
+    existing["review"] = review
+    from gai.setup.config_store import write_config
+    write_config(CONFIG_FILE, existing)
     return CONFIG_FILE
 
 
