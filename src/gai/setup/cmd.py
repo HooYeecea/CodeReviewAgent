@@ -125,6 +125,8 @@ def _attach_profile_balances(
     ),
 )
 def config_cmd(
+    gui: bool = typer.Option(False, "--gui", help=H("Open the local configuration editor.", "打开本地图形配置界面。")),
+    no_open: bool = typer.Option(False, "--no-open", help=H("With --gui, print the URL without opening a browser.", "与 --gui 联用，只显示地址，不自动打开浏览器。")),
     show: bool = typer.Option(
         False,
         "--show",
@@ -216,6 +218,14 @@ def config_cmd(
             "max_diff_chars": max_diff_chars,
         }
         has_updates = any(v is not None for v in updates.values())
+        if gui:
+            if has_updates or use_profile is not None or profile_name is not None or show or list_profiles_flag:
+                raise typer.BadParameter("--gui 不能与配置读写参数混用 / Use --gui separately")
+            from gai.setup.gui import serve_config
+            serve_config(open_browser=not no_open)
+            return
+        if no_open:
+            raise typer.BadParameter("--no-open 需要 --gui / --no-open requires --gui")
         if use_profile is not None and not str(use_profile).strip():
             console.print(
                 "[red]错误：--use 需要配置档名称。[/red]"
