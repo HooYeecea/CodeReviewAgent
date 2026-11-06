@@ -21,7 +21,43 @@ from gai.common.git import (
     is_local_gai_path,
     is_path_ignored,
     list_change_entries,
+    unadd,
 )
+
+
+@pytest.mark.parametrize("operation", ["add", "unadd"])
+def test_literal_paths_do_not_select_similarly_named_files(tmp_path, operation):
+    def git(*args):
+        return subprocess.check_output(["git", *args], cwd=tmp_path, stderr=subprocess.STDOUT).decode()
+    git("init", "-b", "main")
+    git("config", "user.email", "test@example.com")
+    git("config", "user.name", "Tester")
+    for name in ("[ab].txt", "a.txt", "b.txt", "-option.txt", "sp ace.txt"):
+        (tmp_path / name).write_text("old\n")
+    git("add", ".")
+    git("commit", "-m", "initial")
+    for name in ("[ab].txt", "a.txt", "b.txt", "-option.txt", "sp ace.txt"):
+        (tmp_path / name).write_text("new\n")
+    if operation == "unadd":
+        add(["."], cwd=tmp_path)
+        unadd(["[ab].txt", "-option.txt", "sp ace.txt"], cwd=tmp_path)
+        expected = {"a.txt", "b.txt"}
+    else:
+        add(["[ab].txt", "-option.txt", "sp ace.txt"], cwd=tmp_path)
+        expected = {"[ab].txt", "-option.txt", "sp ace.txt"}
+    assert set(git("diff", "--cached", "--name-only", "-z").split("\0")) - {""} == expected
+
+
+def test_literal_add_still_stages_directory(tmp_path):
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    folder = tmp_path / "[ab]"
+    folder.mkdir()
+    (folder / "file.txt").write_text("new\n")
+    (tmp_path / "a").mkdir()
+    (tmp_path / "a" / "other.txt").write_text("not selected\n")
+    add(["[ab]/"], cwd=tmp_path)
+    staged = subprocess.check_output(["git", "diff", "--cached", "--name-only"], cwd=tmp_path).decode()
+    assert staged.strip() == "[ab]/file.txt"
 
 
 SAMPLE_DIFF = """\

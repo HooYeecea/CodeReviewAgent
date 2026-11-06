@@ -253,7 +253,7 @@ def add(paths: list[str] | tuple[str, ...] | None = None, cwd: Path | None = Non
         targets = filter_addable_paths(targets, cwd=cwd)
         if not targets:
             return
-    result = run_git("add", "--", *targets, cwd=cwd)
+    result = run_git("--literal-pathspecs", "add", "--", *targets, cwd=cwd)
     clear_diff_cache()
     if result.returncode != 0:
         raise GitError(
@@ -270,7 +270,7 @@ def unadd(paths: list[str] | tuple[str, ...] | None = None, cwd: Path | None = N
     targets = [p for p in (paths or []) if str(p)]
     if not targets:
         targets = ["."]
-    result = run_git("restore", "--staged", "--", *targets, cwd=cwd)
+    result = run_git("--literal-pathspecs", "restore", "--staged", "--", *targets, cwd=cwd)
     clear_diff_cache()
     if result.returncode != 0:
         raise GitError(

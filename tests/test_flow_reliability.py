@@ -14,6 +14,32 @@ from gai.flow import lib
 from gai.flow.session import read_state, session_dir
 
 
+def test_literal_batch_staging_survives_review_interruption(repo, model, monkeypatch):
+    from gai.common.llm.client import LLMError
+    (repo / "[ab].txt").write_text("separate batch\n")
+    _, chat = model
+    interrupted = False
+    def review(self, **kwargs):
+        nonlocal interrupted
+        if "split a large dirty" in kwargs["system"]:
+            return json.dumps({"summary": "literal paths", "batches": [
+                {"title": name, "paths": [name], "reason": "test"}
+                for name in ("[ab].txt", "a.txt", "b.txt")
+            ]})
+        if "expert code reviewer" in kwargs["system"] and not interrupted:
+            interrupted = True
+            raise LLMError("offline", kind="network")
+        return chat(self, **kwargs)
+    monkeypatch.setattr("gai.common.llm.client.LLMClient.chat", review)
+    assert run(["splitflow", "--cn", "--yes", "--no-push"]) == 1
+    assert git(repo, "diff", "--cached", "--name-only") == "[ab].txt"
+    assert read_state()["pending"] is None
+    assert run(["splitflow", "--resume", "--cn", "--yes", "--no-push"]) == 0
+    data = read_state()
+    for batch, name in zip(data["batches"], ("[ab].txt", "a.txt", "b.txt")):
+        assert git(repo, "diff-tree", "--no-commit-id", "--name-only", "-r", batch["commit"]) == name
+
+
 def test_managed_timeout_kills_descendants(tmp_path):
     from gai.common.git.process import run_managed
     marker = tmp_path / "escaped"

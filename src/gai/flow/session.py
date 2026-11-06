@@ -308,9 +308,9 @@ class FlowSession:
         try:
             temporary_git("read-tree", before["snapshot"]["tree"])
             if operation == "add":
-                temporary_git("add", "--", *paths)
+                temporary_git("--literal-pathspecs", "add", "--", *paths)
             else:
-                temporary_git("restore", "--staged", "--", *paths)
+                temporary_git("--literal-pathspecs", "restore", "--staged", "--", *paths)
             tree = temporary_git("write-tree")
         finally:
             Path(filename).unlink(missing_ok=True)
