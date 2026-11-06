@@ -8,12 +8,14 @@ from pathlib import Path
 import pytest
 
 from gai.common.git import (
+    GitError,
     NothingToPull,
     NothingToPush,
     check_sync,
     is_worktree_dirty,
     pull,
     push,
+    plan_push,
 )
 
 BRANCH = "main"
@@ -231,3 +233,154 @@ def test_mismatched_remote_check_is_rejected(synced_pair, tmp_path):
     with pytest.raises(GitError) as caught:
         pull(local, remote="backup", check=sync)
     assert caught.value.code == "sync_target_changed"
+
+
+def _value(repo, *args):
+    return subprocess.check_output(["git", *args], cwd=repo, text=True).strip()
+
+
+def test_push_ignores_configured_destination_mapping(synced_pair):
+    local, bare = synced_pair
+    original = _value(bare, "rev-parse", BRANCH)
+    _git(local, "config", "remote.origin.push", "refs/heads/main:refs/heads/release")
+    _git(local, "config", "push.followTags", "true")
+    _commit_file(local, "feature.txt", "new\n")
+    _git(local, "tag", "-a", "private-tag", "-m", "stay local")
+    plan = push(local)
+    assert plan.head == _value(bare, "rev-parse", BRANCH)
+    assert plan.head != original
+    assert _value(bare, "for-each-ref", "--format=%(refname)") == "refs/heads/main"
+
+
+@pytest.mark.parametrize("change", ["head", "branch", "url"])
+def test_push_rejects_changes_after_check(synced_pair, tmp_path, change):
+    local, bare = synced_pair
+    original = _value(bare, "rev-parse", BRANCH)
+    _commit_file(local, "feature.txt", "new\n")
+    sync = check_sync(local, for_push=True)
+    if change == "head":
+        _commit_file(local, "later.txt", "not confirmed\n")
+    elif change == "branch":
+        _git(local, "switch", "-c", "other")
+    else:
+        backup = _add_backup(local, bare, tmp_path)
+        _git(local, "remote", "set-url", "--push", "origin", str(backup))
+    with pytest.raises(GitError) as error:
+        push(local, check=sync)
+    assert error.value.code == "sync_target_changed"
+    assert _value(bare, "rev-parse", BRANCH) == original
+
+
+def test_push_pins_sha_when_head_moves_during_execution(synced_pair, monkeypatch):
+    from gai.common.git import remote as impl
+    local, bare = synced_pair
+    _commit_file(local, "checked.txt", "checked\n")
+    sync = check_sync(local, for_push=True)
+    actual = impl.run_git
+    def concurrent(*args, **kwargs):
+        if args[0] == "push":
+            _commit_file(local, "later.txt", "unconfirmed\n")
+        return actual(*args, **kwargs)
+    monkeypatch.setattr(impl, "run_git", concurrent)
+    with pytest.raises(GitError) as error:
+        push(local, check=sync)
+    assert error.value.code == "sync_target_changed"
+    assert _value(bare, "rev-parse", BRANCH) == sync.push_plan.head
+    assert _value(local, "rev-parse", "HEAD") != sync.push_plan.head
+
+
+@pytest.mark.parametrize("multiple", [False, True])
+def test_push_checks_actual_push_urls(synced_pair, tmp_path, multiple):
+    local, bare = synced_pair
+    backup = _add_backup(local, bare, tmp_path)
+    _commit_file(local, "new.txt", "new\n")
+    _git(local, "push", "origin", BRANCH)  # fetch URL is already up to date
+    _git(local, "remote", "set-url", "--push", "origin", str(backup))
+    if multiple:
+        _git(local, "remote", "set-url", "--add", "--push", "origin", str(bare))
+    sync = check_sync(local, for_push=True)
+    assert sync.ahead == 1
+    push(local, check=sync)
+    assert _value(backup, "rev-parse", BRANCH) == _value(local, "rev-parse", "HEAD")
+    assert check_sync(local, for_push=True).ahead == 0
+    assert _value(local, "for-each-ref", "refs/gai/push-check") == ""
+
+
+def test_push_verifies_remote_after_reported_success(synced_pair, monkeypatch):
+    from gai.common.git import remote as impl, GitResult
+    local, _ = synced_pair
+    _commit_file(local, "new.txt", "new\n")
+    actual = impl.run_git
+    def no_write(*args, **kwargs):
+        return GitResult("", "", 0) if args[0] == "push" else actual(*args, **kwargs)
+    monkeypatch.setattr(impl, "run_git", no_write)
+    with pytest.raises(GitError, match="does not contain"):
+        push(local)
+
+
+def test_first_push_sets_upstream_without_refspec_mapping(tmp_path):
+    local, bare = tmp_path / "local", tmp_path / "remote.git"
+    _init_repo(local)
+    _git(tmp_path, "init", "--bare", str(bare))
+    _commit_file(local, "new.txt", "new\n")
+    _git(local, "remote", "add", "origin", str(bare))
+    _git(local, "config", "remote.origin.push", "refs/heads/main:refs/heads/release")
+    plan = plan_push(local)
+    push(local, check=check_sync(local, for_push=True, push_plan=plan))
+    assert _value(bare, "rev-parse", BRANCH) == plan.head
+    assert _value(local, "config", "branch.main.remote") == "origin"
+    assert _value(local, "config", "branch.main.merge") == "refs/heads/main"
+    assert _value(local, "rev-parse", "--abbrev-ref", "@{u}") == "origin/main"
+
+
+def test_push_checks_all_destinations_before_writing(synced_pair, tmp_path):
+    local, bare = synced_pair
+    original = _value(bare, "rev-parse", BRANCH)
+    backup = _add_backup(local, bare, tmp_path)
+    other = tmp_path / "other"
+    _git(tmp_path, "clone", str(backup), str(other))
+    _git(other, "config", "user.email", "test@example.com")
+    _git(other, "config", "user.name", "Tester")
+    _commit_file(other, "remote.txt", "remote\n")
+    _git(other, "push", "origin", BRANCH)
+    _commit_file(local, "local.txt", "local\n")
+    _git(local, "remote", "set-url", "--push", "origin", str(bare))
+    _git(local, "remote", "set-url", "--add", "--push", "origin", str(backup))
+    with pytest.raises(GitError) as error:
+        push(local)
+    assert error.value.code == "rejected"
+    assert _value(bare, "rev-parse", BRANCH) == original
+
+
+def test_cli_push_keeps_plan_from_before_confirmation(synced_pair, monkeypatch):
+    from gai.sync import push_pull
+    local, bare = synced_pair
+    monkeypatch.chdir(local)
+    original = _value(bare, "rev-parse", BRANCH)
+    _commit_file(local, "checked.txt", "checked\n")
+    def confirm(*args, **kwargs):
+        _commit_file(local, "later.txt", "unconfirmed\n")
+        return True
+    monkeypatch.setattr(push_pull.Confirm, "ask", confirm)
+    with pytest.raises(GitError) as error:
+        push_pull._do_push()
+    assert error.value.code == "sync_target_changed"
+    assert _value(bare, "rev-parse", BRANCH) == original
+
+
+@pytest.mark.parametrize("rebase_config", ["pull.rebase", "branch.main.rebase"])
+def test_merge_pull_preserves_local_commits_despite_rebase_config(synced_pair, tmp_path, rebase_config):
+    local, bare = synced_pair
+    other = tmp_path / "other"
+    _git(tmp_path, "clone", str(bare), str(other))
+    _git(other, "config", "user.email", "test@example.com")
+    _git(other, "config", "user.name", "Tester")
+    _commit_file(other, "remote.txt", "remote\n")
+    _git(other, "push", "origin", BRANCH)
+    remote_head = _value(bare, "rev-parse", BRANCH)
+    _commit_file(local, "local.txt", "local\n")
+    local_head = _value(local, "rev-parse", "HEAD")
+    _git(local, "config", rebase_config, "true")
+    _git(local, "config", "pull.ff", "only")
+    pull(local, rebase=False)
+    assert _value(local, "show", "-s", "--format=%P", "HEAD").split() == [local_head, remote_head]
