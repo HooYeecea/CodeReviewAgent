@@ -3,6 +3,7 @@
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
+import pytest
 
 from gai.common.web import serve
 
@@ -17,7 +18,7 @@ def test_report_server_only_serves_public_assets(tmp_path, monkeypatch):
     (tmp_path / "private.html").write_text("private", encoding="utf-8")
 
     def inspect(url):
-        origin = f"http://{urlsplit(url).netloc}"
+        origin = url.rsplit("/", 1)[0]
         for path, expected in (
             ("/usage-report.html", b"report"),
             ("/usage-data.js?t=123", b"public-data"),
@@ -43,6 +44,38 @@ def test_report_server_only_serves_public_assets(tmp_path, monkeypatch):
 
     monkeypatch.setattr(serve.webbrowser, "open", inspect)
     serve.serve_gai_page(page, hold_seconds=0)
+
+
+def test_report_server_rejects_untrusted_origins_and_missing_token(tmp_path, monkeypatch, capsys):
+    page = tmp_path / "usage-report.html"
+    page.write_text("report")
+    (tmp_path / "usage-data.js").write_text("private data")
+    visited = []
+    def inspect(url):
+        visited.append(url)
+        authority = urlsplit(url).netloc
+        origin = "http://" + authority
+        for headers in ({"Host": "attacker.example"}, {"Origin": "https://attacker.example"},
+                        {"Origin": "null"}, {"Sec-Fetch-Site": "cross-site"}):
+            for method in ("GET", "HEAD"):
+                with pytest.raises(HTTPError) as error:
+                    urlopen(Request(url, headers=headers, method=method), timeout=3)
+                assert error.value.code == 403
+                error.value.close()
+        for suffix in ("/usage-data.js", "/wrong/usage-data.js"):
+            with pytest.raises(HTTPError) as error:
+                urlopen(origin + suffix, timeout=3)
+            assert error.value.code == 403
+            error.value.close()
+        with urlopen(url.replace("usage-report.html", "usage-data.js"), timeout=3) as response:
+            assert response.read() == b"private data"
+            assert response.headers["Referrer-Policy"] == "no-referrer"
+            assert response.headers["Cache-Control"] == "no-store"
+        return True
+    monkeypatch.setattr(serve.webbrowser, "open", inspect)
+    serve.serve_gai_page(page, hold_seconds=0)
+    captured = capsys.readouterr()
+    assert urlsplit(visited[0]).path.split("/")[1] not in captured.out + captured.err
 
 
 def test_report_server_rejects_symlink_assets(tmp_path, monkeypatch):

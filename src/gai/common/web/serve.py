@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import secrets
 import http.server
 import socketserver
 import threading
@@ -26,8 +27,17 @@ class _ReportHandler(http.server.SimpleHTTPRequestHandler):
         super().__init__(*args, **kwargs)
 
     def send_head(self):
-        path = unquote(urlsplit(self.path).path)
-        name = path.removeprefix("/")
+        origin = self.server.origin
+        if (self.headers.get_all("Host") != [origin.removeprefix("http://")]
+                or self.headers.get("Origin", origin) != origin
+                or self.headers.get("Sec-Fetch-Site") == "cross-site"):
+            self.send_error(403, "Forbidden")
+            return None
+        parsed = urlsplit(self.path)
+        token, _, name = unquote(parsed.path).removeprefix("/").partition("/")
+        if parsed.scheme or parsed.netloc or not secrets.compare_digest(token.encode(), self.server.token.encode()):
+            self.send_error(403, "Invalid report session")
+            return None
         root = Path(self.directory).resolve()
         candidate = root / name
         if (
@@ -38,7 +48,34 @@ class _ReportHandler(http.server.SimpleHTTPRequestHandler):
         ):
             self.send_error(404, "File not found")
             return None
-        return super().send_head()
+        original = self.path
+        try:
+            self.path = "/" + quote(name) + ("?" + parsed.query if parsed.query else "")
+            return super().send_head()
+        finally:
+            self.path = original
+
+    def log_message(self, *args):
+        # Session tokens must not be copied into access/error logs.
+        pass
+
+    def end_headers(self):
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Cross-Origin-Resource-Policy", "same-origin")
+        self.send_header("Content-Security-Policy", "frame-ancestors 'none'; base-uri 'none'; object-src 'none'")
+        super().end_headers()
+
+
+class _ReportServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+    def get_request(self):
+        sock, address = super().get_request()
+        sock.settimeout(10)
+        return sock, address
 
 
 def serve_gai_page(
@@ -61,10 +98,11 @@ def serve_gai_page(
         _ReportHandler, directory=str(root),
         allowed_files=_REPORT_ASSETS | {html_path.name},
     )
-    httpd = socketserver.TCPServer(("127.0.0.1", port), handler)
-    httpd.allow_reuse_address = True
+    httpd = _ReportServer(("127.0.0.1", port), handler)
     bound_port = httpd.server_address[1]
-    url = f"http://127.0.0.1:{bound_port}/{quote(html_path.name)}"
+    httpd.origin = f"http://127.0.0.1:{bound_port}"
+    httpd.token = secrets.token_urlsafe(32)
+    url = f"{httpd.origin}/{httpd.token}/{quote(html_path.name)}"
 
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
