@@ -17,7 +17,7 @@ import threading
 from pathlib import Path
 
 NETWORK = {"fetch", "push", "pull", "clone", "ls-remote"}
-SUPERVISED = NETWORK | {"add", "restore", "commit", "reset", "checkout", "switch",
+SUPERVISED = NETWORK | {"add", "rm", "restore", "commit", "reset", "checkout", "switch",
                         "merge", "rebase", "read-tree", "update-ref"}
 
 

@@ -248,9 +248,9 @@ def test_staged_diff_cache_reuses_until_add(
     calls: list[tuple[str, ...]] = []
     real_run_git = __import__("gai.common.git.local", fromlist=["run_git"]).run_git
 
-    def tracking_run_git(*args: str, cwd=None, trace: bool = True):
+    def tracking_run_git(*args: str, cwd=None, trace: bool = True, env=None):
         calls.append(args)
-        return real_run_git(*args, cwd=cwd, trace=trace)
+        return real_run_git(*args, cwd=cwd, trace=trace, env=env)
 
     monkeypatch.setattr("gai.common.git.local.run_git", tracking_run_git)
     d1, _ = get_staged_diff()

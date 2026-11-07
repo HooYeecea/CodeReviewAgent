@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fnmatch
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -238,6 +239,26 @@ def commit(
             )
 
 
+def index_args(operation: str, paths, *, has_head: bool = True) -> tuple[str, ...]:
+    """Shared by actual index writes and flow recovery predictions."""
+    literal = tuple(":(literal)" + str(path) for path in paths)
+    if operation == "add":
+        # A glob prefix also avoids Git treating an ignored .gai directory as
+        # an explicitly requested path when only individual files are added.
+        return ("add", "--", *literal, ":(top,exclude,glob)[.]gai",
+                ":(top,exclude,glob)[.]gai/**")
+    if not has_head:
+        # With no HEAD, unstaging means removing entries from the index only.
+        return ("rm", "--cached", "-r", "-f", "--", *literal)
+    return ("restore", "--staged", "--", *literal)
+
+
+def index_env(**extra) -> dict[str, str]:
+    # Explicit literal/exclusion magic must not inherit shell pathspec switches.
+    return {**os.environ, **{f"GIT_{name}_PATHSPECS": "0"
+            for name in ("LITERAL", "GLOB", "NOGLOB", "ICASE")}, **extra}
+
+
 def add(paths: list[str] | tuple[str, ...] | None = None, cwd: Path | None = None) -> None:
     """Stage files via `git add`. Defaults to `.` when paths is empty.
 
@@ -253,7 +274,7 @@ def add(paths: list[str] | tuple[str, ...] | None = None, cwd: Path | None = Non
         targets = filter_addable_paths(targets, cwd=cwd)
         if not targets:
             return
-    result = run_git("--literal-pathspecs", "add", "--", *targets, cwd=cwd)
+    result = run_git(*index_args("add", targets), cwd=cwd, env=index_env())
     clear_diff_cache()
     if result.returncode != 0:
         raise GitError(
@@ -270,7 +291,8 @@ def unadd(paths: list[str] | tuple[str, ...] | None = None, cwd: Path | None = N
     targets = [p for p in (paths or []) if str(p)]
     if not targets:
         targets = ["."]
-    result = run_git("--literal-pathspecs", "restore", "--staged", "--", *targets, cwd=cwd)
+    has_head = run_git("rev-parse", "--verify", "HEAD", cwd=cwd).returncode == 0
+    result = run_git(*index_args("unadd", targets, has_head=has_head), cwd=cwd, env=index_env())
     clear_diff_cache()
     if result.returncode != 0:
         raise GitError(
