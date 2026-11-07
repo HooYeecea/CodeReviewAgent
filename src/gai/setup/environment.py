@@ -26,7 +26,8 @@ def secret(name: str) -> bool:
 def safe_value(name: str, value):
     if secret(name):
         return "••••（已设置）" if value else "（未设置）"
-    return value
+    from gai.common.redact import redact_urls
+    return redact_urls(value) if isinstance(value, str) else value
 
 
 def validate_url(value: str) -> None:

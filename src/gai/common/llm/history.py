@@ -8,6 +8,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
+from gai.common.redact import redact_urls
 
 # Soft cap: ~2–3 MB of short JSON lines; rotate by keeping a tail.
 _MAX_BYTES = 3_000_000
@@ -47,6 +48,7 @@ class UsageRecord:
     def to_dict(self) -> dict[str, Any]:
         """Omit empty optional fields; always emit ``remote_name`` (may be JSON null)."""
         raw = asdict(self)
+        raw["base_url"] = redact_urls(raw["base_url"])
         out: dict[str, Any] = {}
         for key, value in raw.items():
             if key == "remote_name":

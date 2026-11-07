@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from gai.common.llm.history import now_iso, project_root
+from gai.common.redact import redact_urls
 
 # Soft cap similar to usage.jsonl.
 _MAX_BYTES = 3_000_000
@@ -187,7 +188,7 @@ def sanitize_argv(argv: list[str]) -> list[str]:
         else:
             out.append(token)
         i += 1
-    return out
+    return [redact_urls(token) for token in out]
 
 
 def extract_command(argv: list[str]) -> tuple[str, str]:

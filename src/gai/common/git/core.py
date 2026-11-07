@@ -6,12 +6,13 @@ import shlex
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from gai.common.redact import redact_urls
 
 class GitError(RuntimeError):
     """Raised when a git command fails or the cwd is not a repo."""
 
     def __init__(self, message: str, *, code: str | None = None) -> None:
-        super().__init__(message)
+        super().__init__(redact_urls(message))
         self.code = code
 
 
@@ -45,6 +46,7 @@ def clear_trace() -> None:
 def _record_trace(*args: str) -> None:
     if not _TRACE_ENABLED:
         return
+    args = tuple(redact_urls(arg) for arg in args)
     try:
         joined = shlex.join(args)
     except Exception:
