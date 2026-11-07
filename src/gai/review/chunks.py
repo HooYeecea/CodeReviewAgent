@@ -23,6 +23,9 @@ def coverage(text, sent_chars, all_files=(), *, failed=False, parts=1):
         end = offset + len(section)
         if failed or offset >= sent_chars:
             missing.append(name)
+        elif re.search(r"^(?:Binary files .* differ|GIT binary patch)$", section, re.MULTILINE):
+            # A binary marker/encoding contains no source text for the model.
+            partial.append(name)
         elif end <= sent_chars:
             reviewed.append(name)
         else:

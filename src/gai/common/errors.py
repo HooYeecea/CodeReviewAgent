@@ -60,6 +60,10 @@ _LLM_MESSAGES: dict[str, tuple[str, str]] = {
         "Unexpected LLM response format. Retry, or switch model.",
         "大模型返回格式异常。请重试，或更换模型。",
     ),
+    "incomplete_response": (
+        "The model response did not finish normally; subsequent actions stopped. Retry or use smaller review batches.",
+        "模型回复被截断、过滤或未正常完成，已停止后续操作。请重试或缩小审查批次。",
+    ),
     "api": (
         "LLM API request failed.",
         "大模型 API 请求失败。",

@@ -8,6 +8,7 @@ from typing import Any, Callable
 import httpx
 
 from gai.common.config import Settings
+from gai.common.redact import redact_urls
 from gai.common.git import current_git_identity, current_repo_identity
 from gai.common.llm.history import UsageRecord, append_usage_record, now_iso
 from gai.common.llm.usage import get_llm_action, get_llm_usage_meta, record_llm_call
@@ -29,10 +30,10 @@ class LLMError(RuntimeError):
         detail: str | None = None,
         retry_after: float | None = None,
     ) -> None:
-        super().__init__(message)
+        super().__init__(redact_urls(message))
         self.kind = kind
         self.status_code = status_code
-        self.detail = detail
+        self.detail = redact_urls(detail) if detail else detail
         self.retry_after = retry_after
 
 
@@ -228,6 +229,16 @@ class LLMClient:
 
         if not isinstance(content, str) or not content.strip():
             raise LLMError("LLM returned empty content", kind="empty")
+
+        # Some compatible services omit finish_reason. When present, only a
+        # normal stop is a complete answer, even if the partial text is valid JSON.
+        reason = data["choices"][0].get("finish_reason", "stop")
+        if reason != "stop":
+            raise LLMError("模型回复未正常完成，已停止后续操作。 / "
+                           "Incomplete model response; no review or commit may use it.",
+                           kind="incomplete_response")
+        if data["choices"][0]["message"].get("refusal"):
+            raise LLMError("Model declined the request", kind="incomplete_response")
 
         usage = data.get("usage") if isinstance(data, dict) else None
         prompt_tokens = completion_tokens = total_tokens = None

@@ -26,6 +26,23 @@ def fake_review(monkeypatch, findings=None, calls=None):
     monkeypatch.setattr("gai.common.llm.client.LLMClient.chat", chat)
 
 
+def test_binary_review_is_incomplete_and_complete_policy_blocks_commit(repo, monkeypatch):
+    (repo / "asset.dat").write_bytes(b"binary\0content")
+    (repo / ".gai.toml").write_text('[review]\nignore_patterns=[]\nrequire_complete=true\n')
+    git(repo, "add", "asset.dat")
+    fake_review(monkeypatch)
+    before = git(repo, "rev-parse", "HEAD")
+    result = run_review()
+    assert result.parsed_ok and not result.truncated_diff
+    assert result.to_dict()["status"] == "incomplete"
+    assert result.coverage["partially_reviewed_files"] == ["asset.dat"]
+    with pytest.raises(RuntimeError, match="Incomplete"):
+        enforce(result)
+    assert run(["commit", "--yes", "--save-review"]) == 1
+    assert git(repo, "rev-parse", "HEAD") == before
+    assert records()[0]["result"]["status"] == "incomplete"
+
+
 def critical():
     return {"severity": "critical", "file": "a.txt", "line": 1, "issue": "bug", "suggestion": "fix"}
 

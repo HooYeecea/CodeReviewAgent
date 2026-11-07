@@ -135,7 +135,8 @@ class ReviewResult:
             "parsed_ok": self.parsed_ok,
             "truncated_diff": self.truncated_diff,
             "status": "failed" if not self.parsed_ok else (
-                "incomplete" if self.truncated_diff else ("issues" if self.review else "passed")),
+                "incomplete" if self.truncated_diff or self.coverage.get("state") in {"incomplete", "failed"}
+                else ("issues" if self.review else "passed")),
             "scope": self.scope,
             "coverage": self.coverage or {"state": "failed" if not self.parsed_ok else (
                 "incomplete" if self.truncated_diff else "complete")},
@@ -380,6 +381,10 @@ def render_review(
             console.print(
                 "[yellow]Warning:[/yellow] Diff was truncated before sending to the model."
             )
+
+    if result.coverage.get("state") == "incomplete" and not result.truncated_diff:
+        console.print("[yellow]审查覆盖不完整：部分文件只有二进制元信息，需要人工检查。 / "
+                      "Incomplete coverage: binary content needs manual review.[/yellow]")
 
     if result.summary:
         title = "摘要" if chinese else "Summary"

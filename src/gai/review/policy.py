@@ -42,9 +42,9 @@ def enforce(result):
     settings = load_settings()
     if not result.parsed_ok:
         raise RuntimeError("审查解析失败，已停止 / Review parsing failed")
-    if settings.require_complete and result.truncated_diff:
-        raise RuntimeError("审查范围不完整，已停止；请缩小批次或调大 max_diff_chars。独立审查可用 --chunked。 / "
-                           "Incomplete review; reduce batch size or increase max_diff_chars. Standalone reviews support --chunked.")
+    if settings.require_complete and (result.truncated_diff or result.coverage.get("state") in {"incomplete", "failed"}):
+        raise RuntimeError("审查范围不完整，已停止；过长文本可分批审查，二进制内容需要人工检查。 / "
+                           "Incomplete review; use smaller batches or --chunked for long text; inspect binary files manually.")
     threshold = LEVELS[settings.fail_on]
     if threshold and any(LEVELS[item.severity] >= threshold for item in result.review):
         raise RuntimeError(f"审查问题达到阻断级别，已停止 / Review blocked: {settings.fail_on}")

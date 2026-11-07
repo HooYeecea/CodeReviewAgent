@@ -287,7 +287,9 @@ class FlowSession:
         from gai.common.llm import prompts
         settings = load_settings()
         # Hash configuration, never persist credentials or the endpoint URL.
-        value = [purpose, settings.model, settings.base_url, settings.max_diff_chars,
+        # Older caches predate finish-reason and binary-coverage validation.
+        # Re-run unfinished reviews/messages instead of trusting those results.
+        value = ["response-validation-v2", purpose, settings.model, settings.base_url, settings.max_diff_chars,
                  settings.ignore_patterns, settings.review_rules, settings.fail_on,
                  settings.require_complete, options, Path(prompts.__file__).read_text(encoding="utf-8")]
         return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
@@ -299,7 +301,8 @@ class FlowSession:
         fd, filename = tempfile.mkstemp(prefix="index-", dir=self.directory)
         os.close(fd)
         Path(filename).unlink()
-        env = dict(os.environ, GIT_INDEX_FILE=filename)
+        from gai.common.git.local import index_args, index_env
+        env = index_env(GIT_INDEX_FILE=filename)
         def temporary_git(*args):
             result = run_git(*args, cwd=self.root, env=env)
             if result.returncode:
@@ -307,10 +310,7 @@ class FlowSession:
             return result.stdout.strip()
         try:
             temporary_git("read-tree", before["snapshot"]["tree"])
-            if operation == "add":
-                temporary_git("--literal-pathspecs", "add", "--", *paths)
-            else:
-                temporary_git("--literal-pathspecs", "restore", "--staged", "--", *paths)
+            temporary_git(*index_args(operation, paths, has_head=bool(before["snapshot"]["head"])))
             tree = temporary_git("write-tree")
         finally:
             Path(filename).unlink(missing_ok=True)

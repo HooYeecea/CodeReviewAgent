@@ -40,6 +40,24 @@ def _ok_payload() -> dict[str, Any]:
     }
 
 
+@pytest.mark.parametrize("reason", ["length", "content_filter", "tool_calls", "function_call", None, "unknown"])
+def test_incomplete_finish_reason_rejected_even_with_valid_json(monkeypatch, reason):
+    payload = _ok_payload()
+    payload["choices"][0] = {"finish_reason": reason, "message": {
+        "content": '{"review":[],"summary":"ok","commit_message":"fix: update"}'}}
+    client = _client(monkeypatch, [_FakeResponse(200, payload=payload)])
+    with pytest.raises(LLMError) as caught:
+        client.chat(system="s", user="u")
+    assert caught.value.kind == "incomplete_response"
+    assert client._slept == []
+
+
+def test_normal_stop_is_accepted(monkeypatch):
+    payload = _ok_payload()
+    payload["choices"][0]["finish_reason"] = "stop"
+    assert _client(monkeypatch, [_FakeResponse(200, payload=payload)]).chat(system="s", user="u") == "hello"
+
+
 def _client(monkeypatch: pytest.MonkeyPatch, responses: list[_FakeResponse]) -> LLMClient:
     queue = list(responses)
 
