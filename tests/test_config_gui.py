@@ -57,6 +57,39 @@ def save(editor, payload):
     return preview
 
 
+@pytest.mark.parametrize("scope", ["user", "process"])
+def test_batch_repairs_multiple_invalid_environment_values(editor, scope):
+    editor.env.update(GAI_TIMEOUT="bad", GAI_MAX_DIFF_CHARS="bad")
+    editor.registry.user.update({k: (v, 1) for k, v in editor.env.items()})
+    changes = {"GAI_TIMEOUT": "12", "GAI_MAX_DIFF_CHARS": "1000", "GAI_API_KEY": "SECRET_BATCH"}
+    preview = editor.preview({"target": "environment", "scope": scope, "changes": changes})
+    assert editor.env["GAI_TIMEOUT"] == "bad"
+    assert len(preview["changes"]) == 3
+    assert "SECRET_BATCH" not in json.dumps(preview)
+    assert preview["after"]["timeout"]["value"] == 12
+    assert preview["after"]["max_diff_chars"]["value"] == 1000
+    editor.apply(preview["ticket"])
+    assert all(editor.env[k] == v for k, v in changes.items())
+    assert editor.registry.writes == ([changes] if scope == "user" else [])
+
+
+def test_batch_delete_shows_each_fallback_and_invalid_batch_writes_nothing(editor):
+    editor.env.update(GAI_TIMEOUT="bad", GAI_MAX_DIFF_CHARS="bad")
+    editor.registry.user.update({k: (v, 1) for k, v in editor.env.items()})
+    editor.registry.machine["GAI_TIMEOUT"] = ("25", 1)
+    preview = editor.preview({"target": "environment", "scope": "user",
+                              "changes": {"GAI_TIMEOUT": None, "GAI_MAX_DIFF_CHARS": None}})
+    fallbacks = {r["name"]: r for r in preview["fallbacks"]}
+    assert fallbacks["GAI_TIMEOUT"]["value"] == 25
+    assert "系统级" in fallbacks["GAI_TIMEOUT"]["note"]
+    assert fallbacks["GAI_MAX_DIFF_CHARS"]["value"] == config.DEFAULT_MAX_DIFF_CHARS
+    with pytest.raises(ValueError):
+        editor.preview({"target": "environment", "scope": "user",
+                        "changes": {"GAI_TIMEOUT": "10", "PATH": "bad"}})
+    assert editor.registry.writes == []
+    assert editor.env["GAI_TIMEOUT"] == "bad"
+
+
 def test_preview_is_read_only_secrets_redacted_and_ticket_one_shot(editor):
     payload = {"target": "personal", "fields": {"api_key": "SECRET_API_KEY", "model": "new-model"}}
     preview = editor.preview(payload)
@@ -286,6 +319,12 @@ def test_ui_javascript_syntax():
         pytest.skip("Node unavailable")
     root = Path(__file__).resolve().parents[1]
     subprocess.run(["node", "--check", str(root / "src/gai/static/config.js")], check=True, capture_output=True)
+
+
+def test_ui_environment_batch_queue():
+    if not shutil.which("node"):
+        pytest.skip("Node unavailable")
+    subprocess.run(["node", str(Path(__file__).with_name("test_config_gui_ui.js"))], check=True, capture_output=True)
 
 
 def test_registry_adapter_uses_current_user_and_restores_partial_failure(monkeypatch):

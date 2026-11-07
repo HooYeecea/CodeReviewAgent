@@ -2,6 +2,7 @@
 const $ = id => document.getElementById(id);
 const token = location.hash.slice(1);
 let state, tab = "personal", ticket = null, busy = false;
+let envDraft = Object.create(null);
 const labels = {profile:"当前配置档",current:"默认配置档",api_key:"API Key",base_url:"API 地址",model:"模型名称",timeout:"请求超时（秒）",max_diff_chars:"审查文本上限（字符）",ignore_patterns:"忽略规则（每行一项）",fail_on:"阻断提交的问题级别",require_complete:"要求完整审查",rules:"项目审查要求（每行一项）",review_rules:"审查要求"};
 const reviewFields = ["max_diff_chars","fail_on","require_complete","ignore_patterns","rules"];
 function display(value) { return value == null ? "（未设置）" : Array.isArray(value) ? (value.join("\n") || "（空）") : typeof value === "boolean" ? (value ? "是" : "否") : String(value); }
@@ -43,7 +44,17 @@ function envSelection() {
   // Registry scope is called 'user'; process scope matches the state key.
   $("env-value").disabled=$("env-action").value==="delete";invalidate();
 }
+function renderEnvDraft() {
+  $("env-draft").replaceChildren();
+  Object.entries(envDraft).forEach(([name,value])=>{
+    const remove=document.createElement("button");remove.textContent="移除";
+    remove.addEventListener("click",()=>{delete envDraft[name];renderEnvDraft();invalidate();});
+    row($("env-draft"),[name,value===null?"删除，使用回退值":name.includes("API_KEY")?"••••（新密钥）":value,remove]);
+  });
+  $("env-scope").disabled=Object.keys(envDraft).length>0;
+}
 function render(data) {
+  envDraft=Object.create(null);renderEnvDraft();
   state=data;invalidate();$("personal-path").textContent="保存位置："+data.personal_path;
   $("project-path").textContent=data.project_path?"保存位置："+data.project_path:"当前目录不是 Git 仓库，请从仓库目录启动 GUI。";
   $("profiles").replaceChildren();Object.keys(data.profiles).forEach(name=>{const o=document.createElement("option");o.value=name;$("profiles").append(o);});
@@ -58,7 +69,9 @@ function render(data) {
 }
 function reviewValue(scope,key) { const raw=$(scope+"-"+key).value;if(key==="require_complete")return raw==="true";if(key==="max_diff_chars")return Number(raw);if(["rules","ignore_patterns"].includes(key))return raw.split("\n").map(x=>x.trim()).filter(Boolean);return raw; }
 function payload() {
-  if(tab==="environment")return {target:tab,name:$("env-name").value.trim(),scope:$("env-scope").value,value:$("env-action").value==="delete"?null:$("env-value").value};
+  if(tab==="environment")return Object.keys(envDraft).length
+    ? {target:tab,scope:$("env-scope").value,changes:{...envDraft}}
+    : {target:tab,name:$("env-name").value.trim(),scope:$("env-scope").value,value:$("env-action").value==="delete"?null:$("env-value").value};
   const fields={};
   if(tab==="project") {
     if(!state.project_path)throw new Error("请从 Git 仓库目录启动配置界面。");
@@ -79,13 +92,21 @@ function showPreview(result) {
   ticket=result.ticket;$("destination").textContent="将保存到："+result.destination;$("preview-notes").textContent=result.notes.join("\n");
   $("changes").replaceChildren();result.changes.forEach(c=>row($("changes"),[labels[c.field]||c.field,c.before,c.removed?"删除此设置，使用回退值":c.after]));
   if(!result.changes.length)row($("changes"),["无值变更","可测试当前生效连接","保存仅规范化文件排版"]);
-  $("fallback").hidden=!result.fallback;if(result.fallback)$("fallback").textContent="操作后的实际值："+display(result.fallback.value)+"\n来源："+result.fallback.source+(result.fallback.note?"\n"+result.fallback.note:"");
+  const fallbacks=result.fallbacks||(result.fallback?[result.fallback]:[]);
+  $("fallback").hidden=!fallbacks.length;$("fallback").textContent=fallbacks.map(f=>(f.name||"")+" 操作后的实际值："+display(f.value)+"\n来源："+f.source+(f.note?"\n"+f.note:"")).join("\n\n");
   fillEffective("after",result.after,result.before);$("preview-panel").hidden=false;$("preview-panel").scrollIntoView({behavior:"smooth",block:"start"});message("预览已生成。请核对修改、回退值和生效来源，再确认保存。");
 }
 document.querySelectorAll("[data-tab]").forEach(button=>button.addEventListener("click",()=>{tab=button.dataset.tab;document.querySelectorAll(".tab").forEach(section=>section.hidden=section.id!==tab);document.querySelectorAll("[data-tab]").forEach(b=>b.classList.toggle("active",b===button));$("page-title").textContent={personal:"个人配置",project:"当前项目",environment:"环境变量"}[tab];invalidate();}));
 document.addEventListener("input",event=>{if(event.target.matches("input,select,textarea"))invalidate();});
 document.addEventListener("change",event=>{if(event.target.matches("input,select,textarea"))invalidate();});
 $("profile").addEventListener("change",loadProfile);
+$("env-add").addEventListener("click",()=>{
+  const name=$("env-name").value.trim(),value=$("env-action").value==="delete"?null:$("env-value").value;
+  if(!name||(value!==null&&!value.trim())){message("请填写变量名称和有效值，或选择删除。",true);return;}
+  envDraft[name]=value;$("env-value").value="";renderEnvDraft();invalidate();
+  message("已加入待保存列表。列表非空时，预览只包含列表中的修改；继续修改其他变量后，请再次点击加入列表。");
+});
+$("env-clear").addEventListener("click",()=>{envDraft=Object.create(null);renderEnvDraft();invalidate();message("已清空待保存列表，未写入环境变量。");});
 $("clear-key").addEventListener("change",()=>{$("api_key").disabled=$("clear-key").checked;});
 ["env-name","env-scope","env-action"].forEach(id=>$(id).addEventListener("change",envSelection));
 $("preview").addEventListener("click",()=>run(async()=>{invalidate();const draft=payload();showPreview(await api("preview",draft));}));

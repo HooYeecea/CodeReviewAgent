@@ -216,30 +216,43 @@ class ConfigEditor:
         target = payload["target"]
         candidate = None
         fallback = None
+        fallbacks = []
         if target == "environment":
-            name, value = payload.get("name"), payload.get("value")
-            if "value" not in payload:
-                raise ValueError("缺少环境变量值或删除操作")
-            validate(name, value)
+            edits = payload.get("changes")
+            if edits is None:
+                if "value" not in payload:
+                    raise ValueError("缺少环境变量值或删除操作")
+                edits = {payload.get("name"): payload["value"]}
+            if not isinstance(edits, dict) or not edits or len(edits) > 128:
+                raise ValueError("请提供 1–128 项环境变量修改")
+            for name, value in edits.items():
+                validate(name, value)
             scope = payload.get("scope")
             if scope not in {"process", "user"}:
                 raise ValueError("请选择环境变量作用范围")
             if scope == "user" and not self.registry.available:
                 raise ValueError("当前系统不支持 Windows 用户环境变量编辑")
-            if scope == "user" and value is None and name not in user:
-                raise ValueError("没有此用户级变量可删除；当前进程中的同名值可能来自终端或系统级设置")
-            old = user.get(name, (None,))[0] if scope == "user" else env.get(name)
-            if value is None:
-                env.pop(name, None)
-                if scope == "user" and name in machine:
-                    env[name] = self.registry.expanded(machine[name])
-            else:
-                env[name] = value
-            fallback = self._fallback(name, personal, project, env)
-            if value is None and scope == "user" and name in machine:
-                fallback = {**fallback, "note": "系统级同名变量仍存在，删除用户变量不会删除系统变量"}
-            changes = [{"field": name, "before": safe_value(name, old),
-                        "after": safe_value(name, value), "removed": value is None}]
+            changes = []
+            for name, value in edits.items():
+                if scope == "user" and value is None and name not in user:
+                    raise ValueError("没有此用户级变量可删除；当前进程中的同名值可能来自终端或系统级设置")
+                old = user.get(name, (None,))[0] if scope == "user" else env.get(name)
+                if value is None:
+                    env.pop(name, None)
+                    if scope == "user" and name in machine:
+                        env[name] = self.registry.expanded(machine[name])
+                else:
+                    env[name] = value
+                changes.append({"field": name, "before": safe_value(name, old),
+                                "after": safe_value(name, value), "removed": value is None})
+            # Resolve the whole draft, permitting repair of multiple invalid values.
+            for name, value in edits.items():
+                resolved = self._fallback(name, personal, project, env)
+                if value is None and scope == "user" and name in machine:
+                    resolved = {**resolved, "note": "系统级同名变量仍存在，删除用户变量不会删除系统变量"}
+                fallbacks.append({"name": name, **resolved})
+            fallback = {k: v for k, v in fallbacks[0].items() if k != "name"} if len(fallbacks) == 1 else None
+            payload = {"target": target, "scope": scope, "changes": deepcopy(edits)}
         else:
             candidate, changes = self._edit_file(personal, project, payload)
             if target == "personal":
@@ -260,7 +273,7 @@ class ConfigEditor:
         else:
             notes.append("保存会规范化 TOML 排版并去掉注释；其他已有字段保留。")
         return {"ticket": token, "changes": changes, "before": before, "after": after,
-                "fallback": fallback, "notes": notes,
+                "fallback": fallback, "fallbacks": fallbacks, "notes": notes,
                 "destination": str(self.path if target == "personal" else self.project_path) if target != "environment"
                 else ("Windows 当前用户环境变量" if payload["scope"] == "user" else "仅本 GUI 进程")}
 
@@ -283,13 +296,13 @@ class ConfigEditor:
             self.pending = None
             if target == "environment":
                 payload = pending["payload"]
-                name = payload["name"]
                 if payload["scope"] == "user":
-                    self.registry.write({name: payload["value"]})
-                if name in pending["env"]:
-                    self.env[name] = pending["env"][name]
-                else:
-                    self.env.pop(name, None)
+                    self.registry.write(payload["changes"])
+                for name in payload["changes"]:
+                    if name in pending["env"]:
+                        self.env[name] = pending["env"][name]
+                    else:
+                        self.env.pop(name, None)
             else:
                 write_config(path, pending["candidate"])
         return self.state()
