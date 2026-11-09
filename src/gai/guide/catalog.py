@@ -16,7 +16,7 @@ GROUPS = [
     {"id": "setup", "cn": "配置与工具", "en": "Configuration & tools"},
 ]
 MEMBERS = {
-    "workflow": "review commit devflow splitflow flow",
+    "workflow": "review fix commit devflow splitflow flow",
     "workspace": "add unadd uncommit status",
     "branches": "branch switch merge rebase stash",
     "sync": "push pull",
@@ -31,6 +31,10 @@ def pair(cn, en):
 
 # Steps describe the default path; flags and recovery branches are shown separately.
 STEPS = {
+    "fix": [
+        ("验证历史问题", "Verify findings", "按当前代码验证报告问题；已解决或无法确认的问题不生成补丁。", "Verify saved findings against current source before planning repairs."),
+        ("选择与预览", "Select and preview", "选择问题，查看补丁，再明确确认应用。", "Select findings, inspect the patch and explicitly confirm application."),
+        ("复审", "Verify repairs", "复审修改文件，保留记录与备份；不自动暂存、提交或推送。", "Review changed files and preserve backups; never stage, commit or push automatically.")],
     "doctor": [
         ("本地检查", "Local checks", "检查 Git、配置、权限提示和未完成流程。", "Inspect Git, configuration, access hints and saved flows."),
         ("可选联网", "Optional network", "--network 查询模型列表和远程读取，不创建提交或推送。", "--network checks model listing and remote reads without committing or pushing."),
@@ -62,6 +66,7 @@ STEPS = {
 }
 
 EXTRA_EXAMPLES = {
+    "fix": [("gai fix --gui --cn", "打开修复界面并选择历史报告", "Open the repair GUI and choose a saved review")],
     "doctor": [("gai doctor --cn", "检查本地环境", "Inspect local environment"),
                ("gai doctor --network --cn", "显式检查模型接口与远程读取", "Check API and remote read connectivity")],
     "reviews": [("gai reviews --html --open", "打开审查报告浏览页面", "Open the review library"),

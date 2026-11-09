@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>代码修复 · gai</title><link rel="stylesheet" href="/fix.css"><script src="/fix.js" defer></script></head>
+<body><header><div><small>GAI · CODE REVIEW</small><h1>审查与修复</h1></div><button id="close">退出服务</button></header>
+<main><p>验证当前代码 → 选择问题 → 预览补丁 → 确认应用 → 复审。修复不会自动暂存、提交或推送。</p>
+<p id="message" role="status" aria-live="polite"></p><p id="phase"></p>
+<section><h2>1. 选择审查报告</h2><label for="reports">本仓库报告</label><select id="reports"></select><button id="select">加载报告</button><p id="note"></p></section>
+<section><h2>2. 验证并选择问题</h2><p>验证会向配置的模型发送相关文件的当前内容。只有“仍存在”且未被阻止的问题可以勾选。</p><button id="validate">验证当前问题</button><div id="findings"></div><h3>当前代码</h3><pre id="code">点击问题的“查看代码”。</pre><button id="generate">生成所选问题的补丁</button></section>
+<section><h2>3. 预览代码修改</h2><div id="patch"></div><button id="apply">确认应用以上补丁</button></section>
+<section><h2>4. 修复后验证</h2><button id="verify">重新验证</button><pre id="verification">尚未应用补丁。</pre><p id="record"></p></section></main></body></html>
