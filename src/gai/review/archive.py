@@ -338,7 +338,7 @@ def collect_reviews(command: str):
             from gai.review.policy import options
             with options(fail_on=arguments.get("fail_on"),
                          require_complete=arguments.get("require_complete")), collection(
-                             command, arguments.get("save_review") is True) as collector:
+                             command, arguments.get("save_review") is True or arguments.get("fix") is True) as collector:
                 try:
                     # Validate policies before a flow can clear or restage the index.
                     # Explicit --no-ai retains its standalone Git-only behavior.
@@ -419,6 +419,8 @@ def save_review(result, snapshot, *, chinese=False, cached=False):
               "flow_id": session.data["id"] if session else None,
               "flow_kind": session.data["kind"] if session else None,
               "batch": session.batch["label"] if session else None, "commit": None}
+    from gai.fix.engine import identity
+    record["repository"] = identity(ensure_repo())
     collector.name_record(record, session)
     collector.archive["records"].append(record)
     if envelope:
@@ -429,6 +431,7 @@ def save_review(result, snapshot, *, chinese=False, cached=False):
         session.save()
     else:
         collector.sync()
+    return record
 
 
 def link_commit():

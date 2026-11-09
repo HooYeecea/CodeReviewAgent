@@ -16,8 +16,8 @@ reviews_app = typer.Typer(invoke_without_command=True, help=H("Browse and compar
 app.add_typer(reviews_app, name="reviews")
 
 
-def records():
-    root = ensure_repo().resolve()
+def records(root=None):
+    root = ensure_repo(root).resolve()
     folder = root / ".gai" / "reviews"
     if folder.is_symlink() or not folder.resolve().is_relative_to(root):
         raise RuntimeError("Unsafe review directory")

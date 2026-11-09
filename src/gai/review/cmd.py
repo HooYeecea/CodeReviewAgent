@@ -42,6 +42,9 @@ from gai.review.helpers import (
 )
 @collect_reviews("review")
 def review_cmd(
+    fix: bool = typer.Option(False, "--fix", help=H("Select, preview and confirm repairs after review.", "审查后选择问题、预览并确认修复。")),
+    gui: bool = typer.Option(False, "--gui", help=H("Use the repair GUI with --fix.", "与 --fix 联用，打开修复界面。")),
+    no_open: bool = typer.Option(False, "--no-open", help=H("Do not open the repair browser automatically.", "不自动打开修复浏览器。")),
     fail_on: str | None = typer.Option(None, "--fail-on", help=H("Block at critical, warning, info; none disables.", "阻断级别：critical、warning、info；none 关闭。")),
     require_complete: bool | None = typer.Option(None, "--require-complete/--allow-incomplete", help=H("Require complete coverage.", "要求完整审查覆盖。")),
     base: str | None = typer.Option(None, "--base", help=H("Review committed branch changes since the merge base.", "审查分支相对共同祖先的已提交改动。")),
@@ -88,6 +91,8 @@ def review_cmd(
     """Review staged changes without committing."""
     _start_trace(trace, action="review")
     try:
+        if (fix and (as_json or message_only)) or (gui and not fix) or (no_open and not gui):
+            raise RuntimeError("--fix 不能与 --json / --message-only 联用；--gui 需要 --fix；--no-open 需要 --gui")
         if (base or chunked) and message_only:
             raise RuntimeError("--base / --chunked cannot be combined with --message-only")
         if not base and not has_staged_changes():
@@ -138,7 +143,7 @@ def review_cmd(
             )
 
         if not message_only:
-            archive_review(result, diff_info.snapshot, chinese=cn)
+            record = archive_review(result, diff_info.snapshot, chinese=cn)
         if as_json:
             console.print_json(data=result.to_dict())
         else:
@@ -149,6 +154,10 @@ def review_cmd(
                 console.print(f"[bold]{label}[/bold] {result.commit_message}")
         if not result.parsed_ok:
             raise typer.Exit(code=1)
+        if fix:
+            from gai.fix.cmd import start_fix
+            start_fix(record=record, gui=gui, open_browser=not no_open)
+            console.print("修复仅写入工作区；请检查后自行暂存并重新审查。", markup=False)
         if not message_only:
             from gai.review.policy import enforce
             enforce(result)
@@ -171,7 +180,7 @@ def review_cmd(
             chars=exc.chars,
             limit=exc.limit,
         )
-    except (GitError, LLMError, RuntimeError) as exc:
+    except (GitError, LLMError, RuntimeError, OSError, ValueError) as exc:
         _print_error(exc, chinese=cn, trace=trace)
         raise typer.Exit(code=1) from exc
     finally:

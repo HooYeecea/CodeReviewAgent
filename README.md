@@ -86,9 +86,14 @@ Remove-Item Env:_GAI_COMPLETE, Env:_TYPER_COMPLETE_ARGS, Env:_TYPER_COMPLETE_WOR
 | `GAI_API_KEY1`、`GAI_BASE_URL1`、`GAI_MODEL1`… | 配置档 **1**、**2**…（数字后缀） | — |
 | `GAI_PROFILE` | 当前使用的配置档 id（覆盖文件中的 `current`） | `0` |
 | `GAI_TIMEOUT` | 请求超时（秒，全局） | `60` |
+| `GAI_DEEPSEEK_THINKING` | 官方 DeepSeek 接口的 `deepseek-flash` 思考模式：`enabled` / `disabled` | `disabled` |
 | `GAI_MAX_DIFF_CHARS` | 送入模型的文本最大字符数（全局） | `80000` |
 
 Windows：在「系统属性 → 环境变量 → 用户变量」中设置。修改后需**重新打开**终端 / IDE。
+
+`deepseek-flash` 的请求显式关闭思考模式，避免依赖服务端默认的高强度思考行为；如需开启，可设置 `GAI_DEEPSEEK_THINKING=enabled`，或在个人配置 `[llm]` 中设置 `deepseek_thinking = "enabled"`（环境变量优先）。配置 GUI 的环境变量页也支持此开关。该参数只发送给 `api.deepseek.com` 的 `deepseek-flash`，其他服务及模型保持原有请求参数。开启思考可能需要更长等待时间，可按需调整 `GAI_TIMEOUT`。关闭思考不保证消除服务端 HTTP 500。
+
+接口报错时会显示 HTTP 状态、实际尝试次数，以及服务返回的错误码和请求编号（如有）。加 `--trace` 可查看经过密钥和 URL 凭据脱敏的详情。流程报错后优先使用 `--resume`；`flow abort` 只放弃流程记录，不修复接口错误。若等待期间自行改动了暂存区或工作文件，恢复前先运行 `gai flow status --check`，必要时使用 `--resume --replan` 重新规划。
 
 PowerShell 临时设置（仅当前窗口）：
 
@@ -132,6 +137,27 @@ gai config --show --cn          # 当前生效配置（含 profile）
 保存配置采用原子替换；预览后如配置已被其他操作修改，需重新预览。保存会规范化 TOML 排版并去掉注释，保留其他已有字段。预览有效期为 10 分钟，配置服务退出后访问地址失效。
 
 ## 日常用法
+
+### 根据审查结果修复代码
+
+```bash
+gai review --fix --cn                 # 审查后，在终端验证、选择问题并预览补丁
+gai review --fix --gui --cn           # 审查后打开修复界面，自动保存这份审查报告
+gai fix --gui --cn                    # 在界面中选择本仓库的历史报告
+gai fix REVIEW_ID --cn                # 按报告 ID（至少 6 位前缀）进入终端修复
+gai fix .gai/reviews/目录/报告.json --gui
+gai fix --gui --no-open               # 仅显示本机访问地址
+```
+
+修复分为独立步骤：**验证当前问题 → 勾选仍存在的问题 → 生成并预览补丁 → 明确确认应用 → 复审修改文件**。GUI 同时展示问题、严重程度、建议、验证理由和当前代码片段。历史报告的行号仅供参考；先核对本地归档、仓库身份和历史 Git 对象，再调用模型验证当前代码。已解决、无法确认或不在原报告范围内的问题不能生成补丁。验证和生成会将相关当前源码发送到已配置的模型服务。
+
+第一版只修改问题所在的、已跟踪的 UTF-8 普通文本文件，不创建、删除或重命名文件。目标文件有未暂存修改、链接、混合换行符、补丁匹配不唯一或版本变化时会停止。其他文件的未暂存修改会保留。补丁预览有效期为 10 分钟；应用前再次核对 HEAD、分支、暂存区和源文件内容。有未完成的 devflow/splitflow 时需先处理该流程。
+
+确认后只修改工作区，**不自动暂存、提交或推送**。修复记录、修改前备份及未应用的候选文件保存在 `.gai/reviews/fixes/会话ID/`。应用异常时尝试回滚本次修改；若文件又被其他操作改动，会保留现场并标记 `recovery_required`，请对照备份人工处理。进程中断后的修复会话暂不支持自动恢复，备份可能含源码，请按本地代码同等保护。
+
+应用成功后自动调用模型复审本次修改的文件；复审失败时 GUI 可点击“重新验证”。模型确认并不等于修复已经得到证明。只对 Python 候选补丁做语法检查，不自动执行项目测试；请检查差异、运行项目测试，再自行暂存并重新运行 `gai review`。`review --fix` 的阻断策略仍按原审查结果计算退出码，不把工作区修复当成暂存区已经通过审查。`--fix` 不能与 `--json` 或 `--message-only` 联用。
+
+修复 GUI 只监听本机随机端口，并使用会话令牌保护接口。关闭浏览器不会停止服务，请点击“退出服务”或在终端按 `Ctrl+C`。历史报告入口接受本仓库归档中的报告 ID 或 MD/JSON 路径，不导入任意外部报告。
 
 ```bash
 gai add                   # git add .（也可 gai add src/）
