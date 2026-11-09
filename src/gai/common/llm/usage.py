@@ -29,6 +29,7 @@ class LLMUsageMeta:
 
 _LLM_LOG: ContextVar[list[LLMCallInfo]] = ContextVar("gai_llm_log")
 _LLM_ACTION: ContextVar[str] = ContextVar("gai_llm_action", default="")
+_LLM_FAILURES: ContextVar[int] = ContextVar("gai_llm_failures", default=0)
 _LLM_META: ContextVar[LLMUsageMeta] = ContextVar(
     "gai_llm_meta",
     default=LLMUsageMeta(),
@@ -46,6 +47,7 @@ def _log() -> list[LLMCallInfo]:
 
 def clear_llm_usage() -> None:
     _LLM_LOG.set([])
+    _LLM_FAILURES.set(0)
     _LLM_ACTION.set("")
     _LLM_META.set(LLMUsageMeta())
 
@@ -96,6 +98,15 @@ def record_llm_call(
 
 def get_llm_calls() -> list[LLMCallInfo]:
     return list(_log())
+
+
+def record_llm_failure() -> None:
+    """Count a failed logical call after retries, without inventing token usage."""
+    _LLM_FAILURES.set(_LLM_FAILURES.get() + 1)
+
+
+def get_llm_failures() -> int:
+    return _LLM_FAILURES.get()
 
 
 def usage_totals(

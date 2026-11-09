@@ -338,8 +338,16 @@ def format_cli_error(exc: BaseException, *, chinese: bool = False) -> str:
         kind = exc.kind or "api"
         pair = _LLM_MESSAGES.get(kind) or _LLM_MESSAGES["api"]
         msg = _pick(pair, chinese)
-        if kind in {"api", "server", "forbidden", "not_found"} and exc.status_code:
+        if exc.status_code:
             msg = f"{msg} (HTTP {exc.status_code})"
+        if exc.attempts:
+            msg += (f" 已尝试 {exc.attempts} 次。" if chinese else f" Attempted {exc.attempts} time(s).")
+        if exc.provider_code:
+            msg += f" code={exc.provider_code}"
+        if exc.request_id:
+            msg += f" request_id={exc.request_id}"
+        if exc.detail:
+            msg += (" 使用 --trace 查看服务返回详情。" if chinese else " Use --trace for provider details.")
         return msg
 
     if isinstance(exc, GitError):

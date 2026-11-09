@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import time
+import re
+from urllib.parse import urlsplit
 from typing import Any, Callable
 
 import httpx
@@ -11,7 +13,7 @@ from gai.common.config import Settings
 from gai.common.redact import redact_urls
 from gai.common.git import current_git_identity, current_repo_identity
 from gai.common.llm.history import UsageRecord, append_usage_record, now_iso
-from gai.common.llm.usage import get_llm_action, get_llm_usage_meta, record_llm_call
+from gai.common.llm.usage import get_llm_action, get_llm_usage_meta, record_llm_call, record_llm_failure
 
 _RETRYABLE_KINDS = frozenset({"timeout", "network", "rate_limit", "server"})
 _DEFAULT_MAX_ATTEMPTS = 3
@@ -29,12 +31,17 @@ class LLMError(RuntimeError):
         status_code: int | None = None,
         detail: str | None = None,
         retry_after: float | None = None,
+        provider_code: str = "",
+        request_id: str = "",
     ) -> None:
         super().__init__(redact_urls(message))
         self.kind = kind
         self.status_code = status_code
         self.detail = redact_urls(detail) if detail else detail
         self.retry_after = retry_after
+        self.provider_code = provider_code
+        self.request_id = request_id
+        self.attempts = 0
 
 
 def classify_http_error(status_code: int, body: str) -> str:
@@ -143,8 +150,10 @@ class LLMClient:
                 )
                 return content
             except LLMError as exc:
+                exc.attempts = attempt
                 last_error = exc
                 if exc.kind not in _RETRYABLE_KINDS or attempt >= self.max_attempts:
+                    record_llm_failure()
                     self._persist_usage(
                         model=self.settings.model,
                         prompt_tokens=None,
@@ -190,6 +199,14 @@ class LLMClient:
             ],
         }
 
+        # Flash now defaults to high-effort thinking upstream. Keep the CLI's
+        # normal request path explicit, without sending vendor fields elsewhere.
+        if (urlsplit(self.settings.base_url).hostname == "api.deepseek.com"
+                and self.settings.model == "deepseek-flash"):
+            if self.settings.deepseek_thinking not in {"enabled", "disabled"}:
+                raise LLMError("deepseek_thinking must be enabled or disabled", kind="api")
+            payload["thinking"] = {"type": self.settings.deepseek_thinking}
+
         try:
             with httpx.Client(timeout=self.settings.timeout) as client:
                 response = client.post(url, headers=headers, json=payload)
@@ -207,7 +224,12 @@ class LLMClient:
             ) from exc
 
         if response.status_code >= 400:
-            detail = (response.text or "")[:500]
+            # Providers may echo credentials; redact before truncating/displaying.
+            raw = response.text or ""
+            if self.settings.api_key:
+                raw = raw.replace(self.settings.api_key, "[REDACTED]")
+            detail = redact_urls(raw)[:2000]
+            provider_code, request_id = _error_metadata(response, self.settings.api_key)
             kind = classify_http_error(response.status_code, detail)
             raise LLMError(
                 f"LLM API error {response.status_code}: {detail}",
@@ -215,6 +237,8 @@ class LLMClient:
                 status_code=response.status_code,
                 detail=detail,
                 retry_after=_parse_retry_after(response.headers.get("Retry-After")),
+                provider_code=provider_code,
+                request_id=request_id,
             )
 
         try:
@@ -303,6 +327,30 @@ class LLMClient:
 
 def _elapsed_ms(started: float) -> int:
     return max(0, int((time.perf_counter() - started) * 1000))
+
+
+def _error_metadata(response, api_key: str) -> tuple[str, str]:
+    """Only expose bounded identifiers by default, never arbitrary server text."""
+    def identifier(value):
+        if not isinstance(value, str) or (api_key and api_key in value):
+            return ""
+        return value if re.fullmatch(r"[A-Za-z0-9_.:-]{1,160}", value) else ""
+
+    try:
+        data = response.json()
+    except (ValueError, TypeError):
+        data = {}
+    data = data if isinstance(data, dict) else {}
+    error = data.get("error")
+    error = error if isinstance(error, dict) else {}
+    code = identifier(error.get("code")) or identifier(error.get("type"))
+    request_id = ""
+    for value in (response.headers.get("x-request-id"), response.headers.get("x-ds-request-id"),
+                  response.headers.get("x-ds-trace-id"), data.get("request_id"), error.get("request_id")):
+        request_id = identifier(value)
+        if request_id:
+            break
+    return code, request_id
 
 
 def _as_int(value: Any) -> int | None:
