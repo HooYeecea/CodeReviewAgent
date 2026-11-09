@@ -67,6 +67,7 @@ class Settings:
     fail_on: str = "none"
     require_complete: bool = False
     review_rules: tuple[str, ...] = ()
+    deepseek_thinking: str = "disabled"
 
 
 @dataclass
@@ -320,9 +321,12 @@ def resolve_settings(file_cfg: dict, project: dict, env, cli: dict | None = None
         fail_on=fail_on,
         require_complete=complete,
         review_rules=tuple(rules),
+        deepseek_thinking=str(env.get("GAI_DEEPSEEK_THINKING") or llm.get("deepseek_thinking") or "disabled"),
     )
     if settings.max_diff_chars <= 0:
         raise RuntimeError("max_diff_chars must be positive")
+    if settings.deepseek_thinking not in {"enabled", "disabled"}:
+        raise RuntimeError("GAI_DEEPSEEK_THINKING / llm.deepseek_thinking must be enabled or disabled")
     if not math.isfinite(settings.timeout) or settings.timeout <= 0:
         raise RuntimeError("timeout must be a positive finite number")
     return settings
@@ -434,6 +438,7 @@ def settings_summary(settings: Settings) -> dict[str, str]:
         "base_url": settings.base_url,
         "model": settings.model,
         "timeout": str(settings.timeout),
+        "deepseek_thinking": settings.deepseek_thinking,
         "max_diff_chars": str(settings.max_diff_chars),
         "config_file": str(CONFIG_FILE) if CONFIG_FILE.is_file() else "(none)",
     }
@@ -465,6 +470,7 @@ def settings_from_profile(profile: ProfileInfo, template: Settings | None = None
         base_url=profile.base_url or DEFAULT_BASE_URL,
         model=profile.model or DEFAULT_MODEL,
         timeout=base.timeout,
+        deepseek_thinking=base.deepseek_thinking,
         max_diff_chars=base.max_diff_chars,
         ignore_patterns=base.ignore_patterns,
         profile=profile.name,

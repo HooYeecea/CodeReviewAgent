@@ -10,6 +10,30 @@ import pytest
 import gai.common.config as config
 
 
+def test_deepseek_thinking_default_file_env_and_profile_copy():
+    assert config.resolve_settings({}, {}, {}).deepseek_thinking == 'disabled'
+    personal = {'llm': {'deepseek_thinking': 'enabled'}}
+    settings = config.resolve_settings(personal, {}, {})
+    assert settings.deepseek_thinking == 'enabled'
+    assert config.settings_from_profile(config.ProfileInfo(name='1'), settings).deepseek_thinking == 'enabled'
+    assert config.resolve_settings(personal, {}, {'GAI_DEEPSEEK_THINKING': 'disabled'}).deepseek_thinking == 'disabled'
+    with pytest.raises(RuntimeError, match='deepseek_thinking'):
+        config.resolve_settings({}, {}, {'GAI_DEEPSEEK_THINKING': 'yes'})
+
+
+def test_deepseek_environment_editor_validation_and_fallback():
+    from gai.setup.environment import validate, supported
+    from gai.setup.editor import effective
+    assert supported('GAI_DEEPSEEK_THINKING')
+    validate('GAI_DEEPSEEK_THINKING', 'enabled')
+    validate('GAI_DEEPSEEK_THINKING', None)
+    with pytest.raises(ValueError):
+        validate('GAI_DEEPSEEK_THINKING', 'yes')
+    personal = {'llm': {'deepseek_thinking': 'enabled'}}
+    assert effective(personal, {}, {})['deepseek_thinking'] == {'value': 'enabled', 'source': '个人配置'}
+    assert effective(personal, {}, {'GAI_DEEPSEEK_THINKING': 'disabled'})['deepseek_thinking']['source'] == '环境变量 · GAI_DEEPSEEK_THINKING'
+
+
 @pytest.fixture
 def cfg_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     conf_dir = tmp_path / ".gai"

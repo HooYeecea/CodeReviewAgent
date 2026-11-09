@@ -43,6 +43,7 @@ def effective(file_cfg, project, env) -> dict:
     keys = {
         "profile": ["GAI_PROFILE"], "timeout": ["GAI_TIMEOUT"],
         "max_diff_chars": ["GAI_MAX_DIFF_CHARS"],
+        "deepseek_thinking": ["GAI_DEEPSEEK_THINKING"],
     }
     if profile.isdigit():
         suffix = "" if profile == "0" else profile
@@ -58,7 +59,7 @@ def effective(file_cfg, project, env) -> dict:
             source = f"个人配置 · {profile}"
         elif field == "profile" and llm.get("current"):
             source = "个人配置 · llm.current"
-        elif field == "timeout" and llm.get("timeout"):
+        elif field in {"timeout", "deepseek_thinking"} and llm.get(field):
             source = "个人配置"
         elif option in file_cfg.get("review", {}):
             source = "个人配置"
@@ -197,7 +198,8 @@ class ConfigEditor:
             lookup["GAI_PROFILE"] = match.group(2) if match else "0"
             field = match.group(1).lower() if match else name.split("_", 1)[1].lower()
         field = field or {"GAI_PROFILE": "profile", "GAI_TIMEOUT": "timeout",
-                          "GAI_MAX_DIFF_CHARS": "max_diff_chars"}.get(name)
+                          "GAI_MAX_DIFF_CHARS": "max_diff_chars",
+                          "GAI_DEEPSEEK_THINKING": "deepseek_thinking"}.get(name)
         if field:
             return effective(personal, project, lookup)[field]
         defaults = {"GAI_GIT_TIMEOUT": "60 秒", "GAI_GIT_NETWORK_TIMEOUT": "180 秒",

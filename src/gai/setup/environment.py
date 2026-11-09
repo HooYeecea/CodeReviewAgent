@@ -10,7 +10,7 @@ NAMES = (
     "GAI_PROFILE", "GAI_API_KEY", "OPENAI_API_KEY", "GAI_BASE_URL", "OPENAI_BASE_URL",
     "GAI_MODEL", "GAI_TIMEOUT", "GAI_MAX_DIFF_CHARS", "GAI_GIT_TIMEOUT",
     "GAI_GIT_NETWORK_TIMEOUT", "GAI_HISTORY", "GAI_USAGE_LOG", "GAI_USAGE_LOG_GLOBAL",
-    "GAI_HISTORY_LOG", "GAI_HISTORY_LOG_GLOBAL",
+    "GAI_HISTORY_LOG", "GAI_HISTORY_LOG_GLOBAL", "GAI_DEEPSEEK_THINKING",
 )
 NUMBERED = re.compile(r"GAI_(API_KEY|BASE_URL|MODEL)([1-9][0-9]*)\Z", re.ASCII)
 
@@ -62,6 +62,8 @@ def validate(name: str, value: str | None) -> None:
         validate_url(value)
     if name == "GAI_PROFILE" and value != value.strip():
         raise ValueError("配置档名称两端不能有空格")
+    if name == "GAI_DEEPSEEK_THINKING" and value not in {"enabled", "disabled"}:
+        raise ValueError("GAI_DEEPSEEK_THINKING: 必须为 enabled 或 disabled")
 
 
 class UserEnvironment:
