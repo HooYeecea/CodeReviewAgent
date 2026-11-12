@@ -705,7 +705,7 @@ function initPie(id, series, opts) {{
     tooltip: {{
       trigger: 'item',
       formatter: function (p) {{
-        return p.name + '<br/>' + p.value + ' (' + unit + ') · ' + p.percent + '%';
+        return esc(String(p.name)) + '<br/>' + esc(String(p.value)) + ' (' + esc(unit) + ') · ' + esc(String(p.percent)) + '%';
       }}
     }},
     legend: {{
@@ -756,7 +756,7 @@ function initBar(id, series, opts) {{
       axisPointer: {{ type: 'shadow' }},
       formatter: function (items) {{
         const p = items[0];
-        return p.name + '<br/>' + p.value + ' ' + unit;
+        return esc(String(p.name)) + '<br/>' + esc(String(p.value)) + ' ' + esc(unit);
       }}
     }},
     grid: {{ left: 16, right: 24, top: 24, bottom: 24, containLabel: true }},
@@ -808,7 +808,7 @@ function initHeatmapGeneric(elId, yKey, yLabels, actions, raw) {{
       formatter: function (p) {{
         const a = actions[p.value[0]] || '';
         const y = yLabels[p.value[1]] || '';
-        return y + ' × ' + a + '<br/>' + p.value[2] + ' ' + I18N.tokens;
+        return esc(String(y)) + ' × ' + esc(String(a)) + '<br/>' + esc(String(p.value[2])) + ' ' + esc(I18N.tokens);
       }}
     }},
     grid: {{ left: 90, right: 30, top: 20, bottom: 60 }},
@@ -933,7 +933,7 @@ function fillTable() {{
       r.duration_ms != null ? `${{r.duration_ms}}ms` : '',
     ].filter(Boolean).join(' · ') || '—';
     const status = r.ok === false
-      ? `<span class="pill fail">FAIL${{r.error_kind ? ' · ' + r.error_kind : ''}}</span>`
+      ? `<span class="pill fail">FAIL${{r.error_kind ? ' · ' + esc(String(r.error_kind)) : ''}}</span>`
       : (r.ok === true ? `<span class="pill ok">OK</span>` : '—');
     tr.innerHTML = `
       <td>${{esc(r.ts || '')}}</td>

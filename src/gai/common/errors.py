@@ -60,6 +60,10 @@ _LLM_MESSAGES: dict[str, tuple[str, str]] = {
         "Unexpected LLM response format. Retry, or switch model.",
         "大模型返回格式异常。请重试，或更换模型。",
     ),
+    "incomplete_response": (
+        "The model response did not finish normally; subsequent actions stopped. Retry or use smaller review batches.",
+        "模型回复被截断、过滤或未正常完成，已停止后续操作。请重试或缩小审查批次。",
+    ),
     "api": (
         "LLM API request failed.",
         "大模型 API 请求失败。",
@@ -69,6 +73,14 @@ _LLM_MESSAGES: dict[str, tuple[str, str]] = {
 # --- Git / repo ---
 
 _GIT_MESSAGES: dict[str, tuple[str, str]] = {
+    "review_changed": (
+        "Staged changes or HEAD changed since review. Review again before committing.",
+        "暂存区或 HEAD 在审查后发生变化，已停止提交。请重新审查后再提交。",
+    ),
+    "sync_target_changed": (
+        "The sync target changed after checking. Run push/pull again.",
+        "同步目标在检查后发生变化，已停止操作。请重新运行推送或拉取。",
+    ),
     "no_git": (
         "git executable not found on PATH. Install Git and reopen the terminal.",
         "系统 PATH 中找不到 git。请安装 Git 后重新打开终端。",
@@ -326,8 +338,16 @@ def format_cli_error(exc: BaseException, *, chinese: bool = False) -> str:
         kind = exc.kind or "api"
         pair = _LLM_MESSAGES.get(kind) or _LLM_MESSAGES["api"]
         msg = _pick(pair, chinese)
-        if kind in {"api", "server", "forbidden", "not_found"} and exc.status_code:
+        if exc.status_code:
             msg = f"{msg} (HTTP {exc.status_code})"
+        if exc.attempts:
+            msg += (f" 已尝试 {exc.attempts} 次。" if chinese else f" Attempted {exc.attempts} time(s).")
+        if exc.provider_code:
+            msg += f" code={exc.provider_code}"
+        if exc.request_id:
+            msg += f" request_id={exc.request_id}"
+        if exc.detail:
+            msg += (" 使用 --trace 查看服务返回详情。" if chinese else " Use --trace for provider details.")
         return msg
 
     if isinstance(exc, GitError):

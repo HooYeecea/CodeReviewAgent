@@ -12,6 +12,9 @@ from gai.common.git.core import (
     set_tracing,
 )
 from gai.common.git.local import (
+    StagedSnapshot,
+    staged_snapshot,
+    assert_staged_snapshot,
     ChangeEntry,
     add,
     clear_diff_cache,
@@ -91,6 +94,9 @@ from gai.common.git.workflow import (
 )
 
 __all__ = [
+    "StagedSnapshot",
+    "staged_snapshot",
+    "assert_staged_snapshot",
     "ChangeEntry",
     "CommitInfo",
     "GitError",

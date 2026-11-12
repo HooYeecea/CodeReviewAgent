@@ -81,7 +81,7 @@ def parse_stage_suggestion(text: str) -> StageSuggestion:
     paths: list[str] = []
     if isinstance(raw_paths, list):
         for item in raw_paths:
-            p = str(item or "").strip().strip('"')
+            p = item if isinstance(item, str) else ""
             if p and p not in paths:
                 paths.append(p)
     reason = str(data.get("reason") or "").strip()
@@ -136,6 +136,8 @@ def suggest_stage_paths(
         raise RuntimeError("Working tree is clean; nothing to stage.")
 
     entries = list_change_entries()
+    status = json.dumps([{"path": e.path, "index": e.index, "worktree": e.worktree}
+                         for e in entries], ensure_ascii=False)
     stageable = [
         e.path
         for e in entries
@@ -215,7 +217,7 @@ def parse_commit_batch_plan(text: str) -> CommitBatchPlan:
             paths: list[str] = []
             if isinstance(raw_paths, list):
                 for p in raw_paths:
-                    path = str(p or "").strip().strip('"')
+                    path = p if isinstance(p, str) else ""
                     if path and path not in paths:
                         paths.append(path)
             if not paths:
@@ -419,6 +421,8 @@ def suggest_commit_batches(
         raise RuntimeError("Working tree is clean; nothing to split.")
 
     entries = list_change_entries()
+    status = json.dumps([{"path": e.path, "index": e.index, "worktree": e.worktree}
+                         for e in entries], ensure_ascii=False)
     if paths is not None:
         wanted = {p.replace("\\", "/") for p in paths if p}
         selected = []

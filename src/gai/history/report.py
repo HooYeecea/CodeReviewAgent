@@ -752,7 +752,7 @@ function initHeatmapRepo() {{
     tooltip: {{
       formatter: (p) => {{
         const d = p.data || [];
-        return (commands[d[0]] || '') + ' × ' + (repos[d[1]] || '') + ': ' + (d[2] || 0);
+        return esc(String(commands[d[0]] || '')) + ' × ' + esc(String(repos[d[1]] || '')) + ': ' + esc(String(d[2] || 0));
       }}
     }},
     grid: {{ left: 12, right: 24, top: 16, bottom: 8, containLabel: true }},

@@ -10,6 +10,7 @@ import typer
 
 from gai.flow.devflow import CommitBatch, CommitBatchPlan
 from gai.flow.lib import _run_splitflow
+from gai.common.git import staged_snapshot
 
 
 def _git(cwd: Path, *args: str) -> None:
@@ -91,13 +92,13 @@ def test_splitflow_drops_gai_batch_and_commits_rest(
     )
     monkeypatch.setattr(
         "gai.flow.lib._run_staged_review",
-        lambda **_k: True,
+        lambda **_k: staged_snapshot(),
     )
 
     def fake_pick(**_k):
-        from gai.common.git import commit as git_commit
+        from gai.flow.lib import _flow_commit
 
-        git_commit("chore: bump a.py")
+        _flow_commit("chore: bump a.py", _k["expected_snapshot"])
         commits.append("chore: bump a.py")
         return True
 

@@ -11,6 +11,16 @@ from click.exceptions import NoSuchOption, UsageError
 
 # Subcommand → (command, English what-it-does, Chinese what-it-does)
 _COMMAND_EXAMPLES: dict[str, tuple[tuple[str, str, str], ...]] = {
+    "doctor": (
+        ("gai doctor --cn", "Diagnose local setup", "诊断本地环境"),
+        ("gai doctor --network --cn", "Also check API and remote read access", "额外检查模型接口与远程读取"),
+    ),
+    "reviews": (
+        ("gai reviews --html --open", "Browse saved reviews", "打开审查报告浏览页"),
+        ("gai reviews --severity critical", "Find critical findings", "筛选严重问题"),
+    ),
+    "reviews show": (("gai reviews show REVIEW_ID", "Show a review", "查看审查详情"),),
+    "reviews compare": (("gai reviews compare OLD_ID NEW_ID", "Compare reviews", "对比审查结果"),),
     "add": (
         ("gai add", "Stage all changes in the current directory", "暂存当前目录全部变更"),
         ("gai add src/", "Stage files under src/", "暂存 src/ 目录下的文件"),
@@ -24,10 +34,13 @@ _COMMAND_EXAMPLES: dict[str, tuple[tuple[str, str, str], ...]] = {
         ("gai uncommit --cn", "Soft-undo the latest commit (keeps changes staged)", "软撤销最近一次提交（改动仍保留在暂存区）"),
     ),
     "review": (
+        ("gai review --base main --chunked --cn", "Review committed branch changes in chunks", "分段审查分支已提交改动"),
+        ("gai review --save-review --cn", "Save a Markdown and JSON review locally", "将审查保存为本地 Markdown 和 JSON 报告"),
         ("gai review --cn", "AI-review staged changes only (no commit)", "仅审查已暂存变更（不提交）"),
         ("gai review --json", "Output the review result as JSON", "以 JSON 输出审查结果"),
     ),
     "commit": (
+        ("gai commit --save-review --cn", "Save the review and link the resulting commit", "保存审查并关联实际提交"),
         ("gai commit --cn", "Review → suggest message → confirm → commit", "审查 → 建议提交信息 → 确认 → 提交"),
         ("gai commit -y --cn", "Commit with defaults, skip interactive confirm", "按默认流程提交，跳过交互确认"),
         ("gai commit --cn --push", "Commit then push to the configured remote", "提交成功后推送到已配置的远程"),
@@ -38,6 +51,7 @@ _COMMAND_EXAMPLES: dict[str, tuple[tuple[str, str, str], ...]] = {
         ),
     ),
     "devflow": (
+        ("gai devflow --save-review --cn", "Keep review reports across flow resumes", "保存审查报告，恢复流程时继续留档"),
         (
             "gai devflow --cn",
             "Guided add→review→commit→push; UI in Chinese, pick EN/CN commit message",
@@ -55,6 +69,7 @@ _COMMAND_EXAMPLES: dict[str, tuple[tuple[str, str, str], ...]] = {
         ),
     ),
     "splitflow": (
+        ("gai splitflow --save-review --cn", "Save each batch review and a flow summary", "保存各批次审查及流程汇总"),
         (
             "gai splitflow --cn",
             "AI-split a large dirty tree; choose all-EN / all-CN / per-batch commit message language",
@@ -183,6 +198,7 @@ _COMMAND_EXAMPLES: dict[str, tuple[tuple[str, str, str], ...]] = {
         ("gai balance", "Same in English", "英文输出余额查询结果"),
     ),
     "config": (
+        ("gai config --gui", "Open the local configuration editor", "打开本地图形配置界面，预览修改后保存"),
         ("gai config --show --cn", "Show effective config (secrets masked)", "查看当前生效配置（密钥已掩码）"),
         (
             "gai config --list --cn",

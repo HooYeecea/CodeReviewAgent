@@ -8,6 +8,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
+from gai.common.redact import redact_urls
 
 # Soft cap: ~2–3 MB of short JSON lines; rotate by keeping a tail.
 _MAX_BYTES = 3_000_000
@@ -47,6 +48,7 @@ class UsageRecord:
     def to_dict(self) -> dict[str, Any]:
         """Omit empty optional fields; always emit ``remote_name`` (may be JSON null)."""
         raw = asdict(self)
+        raw["base_url"] = redact_urls(raw["base_url"])
         out: dict[str, Any] = {}
         for key, value in raw.items():
             if key == "remote_name":
@@ -141,12 +143,11 @@ def now_iso() -> str:
 
 
 def _append_usage_to(target: Path, record: UsageRecord) -> None:
+    from gai.common.jsonl import append_row, log_lock
     try:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        line = json.dumps(record.to_dict(), ensure_ascii=False, separators=(",", ":"))
-        with target.open("a", encoding="utf-8") as f:
-            f.write(line + "\n")
-        _maybe_rotate(target)
+        with log_lock(target):
+            append_row(target, record.to_dict())
+            _maybe_rotate(target)
     except OSError:
         return
     try:
@@ -202,7 +203,8 @@ def load_usage_records(
 
     items: list[UsageRecord] = []
     try:
-        with target.open("r", encoding="utf-8") as f:
+        from gai.common.jsonl import log_lock
+        with log_lock(target), target.open("r", encoding="utf-8") as f:
             for raw in f:
                 line = raw.strip()
                 if not line:
@@ -499,16 +501,8 @@ def _parse_ts(ts: str) -> datetime | None:
 
 
 def _maybe_rotate(path: Path) -> None:
+    from gai.common.jsonl import rotate
     try:
-        if not path.is_file() or path.stat().st_size <= _MAX_BYTES:
-            return
-        with path.open("r", encoding="utf-8") as f:
-            lines = f.readlines()
-        if len(lines) <= _KEEP_TAIL_LINES:
-            return
-        kept = lines[-_KEEP_TAIL_LINES:]
-        tmp = path.with_suffix(path.suffix + ".tmp")
-        tmp.write_text("".join(kept), encoding="utf-8")
-        tmp.replace(path)
+        rotate(path, max_bytes=_MAX_BYTES, keep_lines=_KEEP_TAIL_LINES)
     except OSError:
         return

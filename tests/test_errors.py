@@ -39,6 +39,16 @@ def test_format_llm_missing_key_cn():
     assert "API Key" in format_cli_error(exc, chinese=True)
 
 
+def test_trace_prints_provider_detail_as_literal_text(capsys):
+    from gai.cli_common import _print_error
+    error = LLMError('server', kind='server', status_code=500,
+                     detail='[red]provider text[/red]')
+    _print_error(error, chinese=True, trace=True)
+    output = capsys.readouterr().err
+    assert '[red]provider text[/red]' in output
+    assert '--trace' in output
+
+
 def test_format_git_no_remote_cn():
     with pytest.raises(GitError) as caught:
         choose_remote([])

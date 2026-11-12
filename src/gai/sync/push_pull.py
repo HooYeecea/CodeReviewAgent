@@ -40,7 +40,7 @@ def _do_push(
     plan = plan_push(remote=remote, set_upstream=set_upstream)
     status = "正在检查远程同步状态..." if chinese else "Checking remote sync status..."
     with console.status(f"[bold]{status}[/bold]"):
-        sync = check_sync(remote=plan.remote, do_fetch=True)
+        sync = check_sync(remote=plan.remote, do_fetch=True, for_push=True, push_plan=plan)
 
     if sync.ahead <= 0:
         tip = (
@@ -60,9 +60,9 @@ def _do_push(
     console.print(f"[bold]{'将执行' if chinese else 'Will run'}:[/bold] {plan.describe()}")
     if plan.set_upstream:
         tip = (
-            f"分支 {plan.branch} 尚无上游，将设置跟踪 {plan.remote}/{plan.branch}。"
+            f"推送成功后将设置分支 {plan.branch} 跟踪 {plan.remote}/{plan.branch}。"
             if chinese
-            else f"Branch '{plan.branch}' has no upstream; will set {plan.remote}/{plan.branch}."
+            else f"After pushing, branch '{plan.branch}' will track {plan.remote}/{plan.branch}."
         )
         console.print(f"[dim]{tip}[/dim]")
 
@@ -105,17 +105,17 @@ def _do_pull(
 
     if sync.behind <= 0:
         tip = (
-            f"没有可拉取的内容：已与 {sync.remote}/{sync.branch} 同步。"
+            f"没有可拉取的内容：已与 {sync.remote}/{sync.remote_branch} 同步。"
             if chinese
-            else f"Nothing to pull: already up to date with {sync.remote}/{sync.branch}."
+            else f"Nothing to pull: already up to date with {sync.remote}/{sync.remote_branch}."
         )
         console.print(f"[yellow]{tip}[/yellow]")
         raise typer.Exit(code=0)
 
     behind_tip = (
-        f"待拉取提交数：{sync.behind}（{sync.remote}/{sync.branch}）"
+        f"待拉取提交数：{sync.behind}（{sync.remote}/{sync.remote_branch}）"
         if chinese
-        else f"Commits to pull: {sync.behind} ({sync.remote}/{sync.branch})"
+        else f"Commits to pull: {sync.behind} ({sync.remote}/{sync.remote_branch})"
     )
     console.print(f"[dim]{behind_tip}[/dim]")
     if sync.ahead > 0:
@@ -208,10 +208,10 @@ def _do_pull(
             raise typer.Exit(code=0) from exc
 
     done = (
-        f"已拉取 {sync.behind} 个提交：{sync.remote}/{sync.branch}"
+        f"已拉取 {sync.behind} 个提交：{sync.remote}/{sync.remote_branch}"
         + ("（rebase）" if use_rebase else "")
         if chinese
-        else f"Pulled {sync.behind} commit(s): {sync.remote}/{sync.branch}"
+        else f"Pulled {sync.behind} commit(s): {sync.remote}/{sync.remote_branch}"
         + (" (rebase)" if use_rebase else "")
     )
     console.print(f"[green]{done}[/green]")
@@ -245,8 +245,8 @@ def push_cmd(
         "--set-upstream",
         "-u",
         help=H(
-            "Force git push -u even if upstream already exists.",
-            "强制 git push -u（即使已有上游）。",
+            "Set upstream to the selected remote/branch after a verified push.",
+            "推送核实成功后设置上游为所选远程的同名分支。",
         ),
     ),
     cn: bool = typer.Option(

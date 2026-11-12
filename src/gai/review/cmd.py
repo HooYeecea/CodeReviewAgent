@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from contextlib import redirect_stdout
+import sys
+
 import typer
 
 from gai.cli_common import (
@@ -16,6 +19,7 @@ from gai.cli_common import (
 from gai.common.git import GitError, has_staged_changes
 from gai.common.i18n import H
 from gai.common.llm.client import LLMError
+from gai.review.archive import collect_reviews, save_review as archive_review
 from gai.review import (
     DiffTooLargeError,
     load_staged_diff_info,
@@ -32,11 +36,22 @@ from gai.review.helpers import (
 @app.command(
     "review",
     help=H(
-        "Review staged changes without committing.",
-        "审查已暂存变更（不提交）。",
+        "Review staged or committed branch changes without committing.",
+        "审查暂存或分支改动（不提交）。",
     ),
 )
+@collect_reviews("review")
 def review_cmd(
+    fix: bool = typer.Option(False, "--fix", help=H("Select, preview and confirm repairs after review.", "审查后选择问题、预览并确认修复。")),
+    gui: bool = typer.Option(False, "--gui", help=H("Use the repair GUI with --fix.", "与 --fix 联用，打开修复界面。")),
+    no_open: bool = typer.Option(False, "--no-open", help=H("Do not open the repair browser automatically.", "不自动打开修复浏览器。")),
+    fail_on: str | None = typer.Option(None, "--fail-on", help=H("Block at critical, warning, info; none disables.", "阻断级别：critical、warning、info；none 关闭。")),
+    require_complete: bool | None = typer.Option(None, "--require-complete/--allow-incomplete", help=H("Require complete coverage.", "要求完整审查覆盖。")),
+    base: str | None = typer.Option(None, "--base", help=H("Review committed branch changes since the merge base.", "审查分支相对共同祖先的已提交改动。")),
+    chunked: bool = typer.Option(False, "--chunked", help=H("Review large diffs in chunks without splitting commits.", "分段审查大改动，不拆分提交。")),
+    save_review: bool = typer.Option(False, "--save-review", help=H(
+        "Save actual reviews as Markdown and JSON in .gai/reviews/.",
+        "将实际代码审查结果保存为 Markdown 和 JSON，位于 .gai/reviews/。")),
     as_json: bool = typer.Option(
         False,
         "--json",
@@ -76,7 +91,11 @@ def review_cmd(
     """Review staged changes without committing."""
     _start_trace(trace, action="review")
     try:
-        if not has_staged_changes():
+        if (fix and (as_json or message_only)) or (gui and not fix) or (no_open and not gui):
+            raise RuntimeError("--fix 不能与 --json / --message-only 联用；--gui 需要 --fix；--no-open 需要 --gui")
+        if (base or chunked) and message_only:
+            raise RuntimeError("--base / --chunked cannot be combined with --message-only")
+        if not base and not has_staged_changes():
             tip = (
                 "没有已暂存变更。请先运行 `gai add` / `gai add .`。"
                 if cn
@@ -85,8 +104,11 @@ def review_cmd(
             err_console.print(f"[red]{tip}[/red]")
             raise typer.Exit(code=1)
 
-        diff_info = load_staged_diff_info()
-        if diff_info.exceeds:
+        from gai.review.branch import load_branch_diff_info
+        diff_info = load_branch_diff_info(base) if base else load_staged_diff_info()
+        if diff_info.exceeds and not chunked:
+            if base:
+                raise RuntimeError("分支改动过大，请加 --chunked / Branch diff too large; use --chunked")
             if as_json:
                 _print_diff_too_large(
                     chars=diff_info.chars, limit=diff_info.limit, chinese=cn
@@ -105,20 +127,23 @@ def review_cmd(
                 chars=diff_info.chars,
                 limit=diff_info.limit,
             )
-        elif suggest_split and not as_json:
+        elif suggest_split and not as_json and not base and not chunked:
             _maybe_suggest_optional_splitflow(
                 chinese=cn, trace=trace, interactive=True
             )
 
         status_text = "正在调用大模型审查..." if cn else "Calling LLM for code review..."
-        with console.status(f"[bold]{status_text}[/bold]"):
+        with (err_console if as_json else console).status(f"[bold]{status_text}[/bold]"):
             result = run_review(
                 message_only=message_only,
                 review_only=not message_only,
                 chinese=cn,
                 diff_info=diff_info,
+                **({"chunked": True} if chunked else {}),
             )
 
+        if not message_only:
+            record = archive_review(result, diff_info.snapshot, chinese=cn)
         if as_json:
             console.print_json(data=result.to_dict())
         else:
@@ -127,6 +152,15 @@ def review_cmd(
                 console.print()
                 label = "建议的提交信息：" if cn else "Suggested commit message:"
                 console.print(f"[bold]{label}[/bold] {result.commit_message}")
+        if not result.parsed_ok:
+            raise typer.Exit(code=1)
+        if fix:
+            from gai.fix.cmd import start_fix
+            start_fix(record=record, gui=gui, open_browser=not no_open)
+            console.print("修复仅写入工作区；请检查后自行暂存并重新审查。", markup=False)
+        if not message_only:
+            from gai.review.policy import enforce
+            enforce(result)
     except typer.Exit:
         raise
     except DiffTooLargeError as exc:
@@ -146,10 +180,14 @@ def review_cmd(
             chars=exc.chars,
             limit=exc.limit,
         )
-    except (GitError, LLMError, RuntimeError) as exc:
+    except (GitError, LLMError, RuntimeError, OSError, ValueError) as exc:
         _print_error(exc, chinese=cn, trace=trace)
         raise typer.Exit(code=1) from exc
     finally:
-        _print_footer(trace=trace, chinese=cn)
+        if as_json:
+            with redirect_stdout(sys.stderr):
+                _print_footer(trace=trace, chinese=cn)
+        else:
+            _print_footer(trace=trace, chinese=cn)
 
 

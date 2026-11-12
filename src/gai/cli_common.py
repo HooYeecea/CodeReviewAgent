@@ -16,7 +16,7 @@ from gai.common.git import (
     short_status,
 )
 from gai.common.i18n import H
-from gai.common.llm.usage import clear_llm_usage, get_llm_calls, set_llm_action, usage_totals
+from gai.common.llm.usage import clear_llm_usage, get_llm_calls, get_llm_failures, set_llm_action, usage_totals
 from gai.completion.cmd import completion_app
 
 app = typer.Typer(
@@ -66,6 +66,18 @@ def _print_llm_usage(*, chinese: bool = False, once: bool = True) -> None:
         return
 
     calls = get_llm_calls()
+    failures = get_llm_failures()
+    if failures:
+        msg = (
+            f"本次命令有 {failures} 次大模型调用失败（含可能的自动重试），未取得有效结果；失败调用的 token 用量未知。"
+            if chinese else
+            f"{failures} LLM call(s) failed after any retries; no valid result was obtained and token usage for failed calls is unknown."
+        )
+        console.print(msg, style="yellow", markup=False)
+        if not calls:
+            _LLM_USAGE_PRINTED = True
+            return
+        console.print("以下仅统计成功调用：" if chinese else "Successful calls only:", style="yellow")
     if not calls:
         msg = (
             "本次命令未涉及调用大模型。"
@@ -195,11 +207,11 @@ def _print_error(
     """Print a friendly error; with --trace also show raw detail when available."""
     label = "错误：" if chinese else "Error:"
     msg = format_cli_error(exc, chinese=chinese)
-    err_console.print(f"[red]{label}[/red] {msg}")
+    err_console.print(f"{label} {msg}", style="red", markup=False)
     detail = getattr(exc, "detail", None)
     if trace and detail:
         tip = "原始详情：" if chinese else "Raw detail:"
-        err_console.print(f"[dim]{tip} {detail}[/dim]")
+        err_console.print(f"{tip} {detail}", style="dim", markup=False)
 
 
 def _confirm_dirty_continue(*, chinese: bool, yes: bool, action: str) -> None:

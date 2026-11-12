@@ -18,6 +18,9 @@ from gai.common.i18n import H
 
 # Register feature-domain commands (order: shared helpers first where needed).
 from gai.review import cmd as _review_cmd  # noqa: F401
+from gai.review import library as _review_library  # noqa: F401
+from gai.fix import cmd as _fix_cmd  # noqa: F401
+from gai.setup import doctor as _doctor_cmd  # noqa: F401
 from gai.commit import cmd as _commit_cmd  # noqa: F401
 from gai.stage import cmd as _stage_cmd  # noqa: F401
 from gai.sync import push_pull as _sync_cmd  # noqa: F401

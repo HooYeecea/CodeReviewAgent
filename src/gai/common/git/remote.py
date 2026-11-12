@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
+from uuid import uuid4
 
 from gai.common.git.core import GitError, ensure_repo, run_git
 
@@ -101,6 +102,8 @@ class PushPlan:
     upstream: str | None
     set_upstream: bool
     args: tuple[str, ...]
+    head: str
+    urls: tuple[str, ...]
 
     def describe(self) -> str:
         return " ".join(["git", "push", *self.args])
@@ -113,6 +116,34 @@ class SyncCheck:
     upstream: str | None
     ahead: int
     behind: int
+    target_branch: str = ""
+    push_plan: PushPlan | None = None
+
+    @property
+    def remote_branch(self) -> str:
+        return self.target_branch or self.branch
+
+
+def _sync_target(
+    cwd: Path | None, remote: str | None, *, for_push: bool,
+) -> tuple[str, str, str | None, str]:
+    remote_name = choose_remote(list_remotes(cwd), preferred=remote)
+    branch = get_current_branch(cwd)
+    upstream = get_upstream_ref(cwd)
+    target_branch = branch
+    # Push explicitly sends the current branch. Pull may follow a differently
+    # named upstream branch, but only on the selected remote.
+    if not for_push and upstream and upstream.startswith(remote_name + "/"):
+        target_branch = upstream[len(remote_name) + 1:]
+    return remote_name, branch, upstream, target_branch
+
+
+def _validate_sync_target(
+    sync: SyncCheck, cwd: Path | None, remote: str | None, *, for_push: bool,
+) -> None:
+    name, branch, _, target = _sync_target(cwd, remote or sync.remote, for_push=for_push)
+    if (name, branch, target) != (sync.remote, sync.branch, sync.remote_branch):
+        raise GitError("Sync target changed after checking", code="sync_target_changed")
 
 
 def classify_remote_failure(detail: str) -> str:
@@ -236,21 +267,31 @@ def check_sync(
     *,
     remote: str | None = None,
     do_fetch: bool = True,
+    for_push: bool = False,
+    push_plan: PushPlan | None = None,
 ) -> SyncCheck:
-    """Fetch (optional) and compute how many commits are ahead/behind remote."""
-    remotes = list_remotes(cwd)
-    remote_name = choose_remote(remotes, preferred=remote)
-    branch = get_current_branch(cwd)
+    """Check incoming history, or live outgoing history at every push URL.
+
+    Push checks always query the actual destinations, even with do_fetch=False;
+    fetch tracking refs cannot describe a remote with a separate push URL.
+    """
+    if for_push:
+        plan = push_plan or plan_push(cwd, remote=remote)
+        _validate_push_plan(plan, cwd, remote)
+        counts = [_push_counts(plan, url, cwd) for url in plan.urls]
+        _validate_push_plan(plan, cwd, remote)
+        return SyncCheck(plan.remote, plan.branch, plan.upstream,
+                         max(a for a, _ in counts), max(b for _, b in counts),
+                         plan.branch, plan)
+    remote_name, branch, upstream, target_branch = _sync_target(
+        cwd, remote, for_push=for_push,
+    )
     if do_fetch:
         fetch_remote(remote_name, cwd)
 
-    upstream = get_upstream_ref(cwd)
-    remote_ref = f"{remote_name}/{branch}"
+    remote_ref = f"refs/remotes/{remote_name}/{target_branch}"
 
-    if upstream:
-        ahead = _rev_list_count(f"{upstream}..HEAD", cwd)
-        behind = _rev_list_count(f"HEAD..{upstream}", cwd)
-    elif _remote_branch_exists(remote_name, branch, cwd):
+    if _remote_branch_exists(remote_name, target_branch, cwd):
         ahead = _rev_list_count(f"{remote_ref}..HEAD", cwd)
         behind = _rev_list_count(f"HEAD..{remote_ref}", cwd)
     else:
@@ -264,6 +305,7 @@ def check_sync(
         upstream=upstream,
         ahead=ahead,
         behind=behind,
+        target_branch=target_branch,
     )
 
 
@@ -289,10 +331,11 @@ def plan_push(
             code="no_upstream",
         )
 
-    if need_upstream:
-        args = ("-u", remote_name, branch)
-    else:
-        args = (remote_name, branch)
+    head = _push_head(cwd)
+    urls = _push_urls(remote_name, cwd)
+    # Display the remote alias, never credential-bearing URLs. Execution uses
+    # the pinned URLs and SHA below; -u cannot infer a local branch from a SHA.
+    args = (remote_name, f"{head}:refs/heads/{branch}")
 
     return PushPlan(
         remote=remote_name,
@@ -300,7 +343,67 @@ def plan_push(
         upstream=upstream,
         set_upstream=need_upstream,
         args=args,
+        head=head,
+        urls=urls,
     )
+
+
+def _push_head(cwd: Path | None) -> str:
+    result = run_git("rev-parse", "--verify", "HEAD", cwd=cwd)
+    if result.returncode:
+        raise GitError("Cannot resolve the commit to push", code="push_failed")
+    return result.stdout.strip()
+
+
+def _push_urls(remote: str, cwd: Path | None) -> tuple[str, ...]:
+    result = run_git("remote", "get-url", "--push", "--all", remote, cwd=cwd)
+    urls = tuple(dict.fromkeys(result.stdout.splitlines()))
+    if result.returncode or not urls:
+        raise GitError("Cannot resolve push destinations", code="push_failed")
+    return urls
+
+
+def _validate_push_plan(plan: PushPlan, cwd: Path | None, remote: str | None = None) -> None:
+    if ((remote is not None and remote != plan.remote)
+            or get_current_branch(cwd) != plan.branch
+            or _push_head(cwd) != plan.head
+            or _push_urls(plan.remote, cwd) != plan.urls):
+        raise GitError("推送的提交、分支或地址已变化，请重新检查。 / "
+                       "Push source or destination changed; check again.",
+                       code="sync_target_changed")
+
+
+def _push_remote_error(result, action: str) -> GitError:
+    code = classify_remote_failure(result.stderr or result.stdout)
+    # URL arguments and Git's output can contain credentials.
+    return GitError(f"{action}; check the remote and retry (some destinations may already be updated).",
+                    code="push_failed" if code == "generic" else code)
+
+
+def _push_counts(plan: PushPlan, url: str, cwd: Path | None) -> tuple[int, int]:
+    """Compare the pinned source to a live destination without changing FETCH_HEAD."""
+    ref = f"refs/heads/{plan.branch}"
+    advertised = run_git("ls-remote", "--exit-code", "--refs", "--", url, ref,
+                         cwd=cwd, trace=False)
+    if advertised.returncode == 2:
+        return _rev_list_count(plan.head, cwd), 0
+    if advertised.returncode:
+        raise _push_remote_error(advertised, "Cannot check push destination")
+    fields = advertised.stdout.split()
+    if len(fields) != 2 or fields[1] != ref:
+        raise GitError("Unexpected response from push destination", code="push_failed")
+    if fields[0] == plan.head:
+        return 0, 0
+    temporary_ref = f"refs/gai/push-check/{uuid4().hex}"
+    try:
+        fetched = run_git("fetch", "--no-tags", "--no-write-fetch-head", "--", url,
+                          f"+{ref}:{temporary_ref}", cwd=cwd, trace=False)
+        if fetched.returncode:
+            raise _push_remote_error(fetched, "Cannot inspect push destination")
+        return (_rev_list_count(f"{temporary_ref}..{plan.head}", cwd),
+                _rev_list_count(f"{plan.head}..{temporary_ref}", cwd))
+    finally:
+        run_git("update-ref", "-d", temporary_ref, cwd=cwd, trace=False)
 
 
 class NothingToPush(GitError):
@@ -319,25 +422,44 @@ def push(
     check: SyncCheck | None = None,
 ) -> PushPlan:
     """Push current branch to remote. Returns the plan that was executed."""
-    plan = plan_push(cwd, remote=remote, set_upstream=set_upstream)
-    sync = check or check_sync(cwd, remote=plan.remote, do_fetch=True)
-    if sync.ahead <= 0:
+    if check:
+        _validate_sync_target(check, cwd, remote, for_push=True)
+    plan = (check.push_plan if check else None) or plan_push(
+        cwd, remote=remote or (check.remote if check else None), set_upstream=set_upstream)
+    if set_upstream is True:
+        plan = replace(plan, set_upstream=True)
+    elif set_upstream is False:
+        if plan.upstream is None:
+            raise GitError("Branch has no upstream; omit --no-set-upstream.", code="no_upstream")
+        plan = replace(plan, set_upstream=False)
+    _validate_push_plan(plan, cwd, remote)
+    # Recheck all destinations before the first write, including callers that
+    # supply a pull-oriented SyncCheck or a stale ahead count.
+    counts = [_push_counts(plan, url, cwd) for url in plan.urls]
+    if any(ahead and behind for ahead, behind in counts):
+        raise GitError("Remote history has diverged; pull and review before pushing.", code="rejected")
+    if not any(ahead for ahead, _ in counts):
         raise NothingToPush(
-            f"Nothing to push: {plan.remote}/{plan.branch} is up to date "
-            f"(ahead={sync.ahead})."
+            f"Nothing to push: {plan.remote}/{plan.branch} already contains the commit."
         )
 
-    result = run_git("push", *plan.args, cwd=cwd)
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout or "git push failed").strip()
-        code = classify_remote_failure(detail)
-        raise GitError(detail, code="push_failed" if code == "generic" else code)
-
-    combined = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
-    if "everything up-to-date" in combined:
-        raise NothingToPush(
-            f"Nothing to push: {plan.remote}/{plan.branch} is already up to date."
-        )
+    for url, (ahead, _) in zip(plan.urls, counts):
+        _validate_push_plan(plan, cwd, remote)
+        if ahead:
+            result = run_git("push", "--no-follow-tags", "--no-mirror", "--", url,
+                             f"{plan.head}:refs/heads/{plan.branch}", cwd=cwd, trace=False)
+            if result.returncode:
+                raise _push_remote_error(result, "Push failed")
+        if _push_counts(plan, url, cwd)[0]:
+            raise GitError("Remote does not contain the checked commit; inspect before retrying.",
+                           code="push_failed")
+    _validate_push_plan(plan, cwd, remote)
+    if plan.set_upstream:
+        for key, value in ((f"branch.{plan.branch}.remote", plan.remote),
+                           (f"branch.{plan.branch}.merge", f"refs/heads/{plan.branch}")):
+            result = run_git("config", key, value, cwd=cwd)
+            if result.returncode:
+                raise GitError("Push verified, but upstream configuration failed.", code="push_failed")
     return plan
 
 
@@ -350,19 +472,17 @@ def pull(
 ) -> SyncCheck:
     """Pull from remote after verifying there is something to pull."""
     sync = check or check_sync(cwd, remote=remote, do_fetch=True)
+    _validate_sync_target(sync, cwd, remote, for_push=False)
     if sync.behind <= 0:
         raise NothingToPull(
             f"Nothing to pull: already up to date with "
-            f"{sync.remote}/{sync.branch} (behind={sync.behind})."
+            f"{sync.remote}/{sync.remote_branch} (behind={sync.behind})."
         )
 
-    args: list[str] = ["pull"]
-    if rebase:
-        args.append("--rebase")
-    if sync.upstream:
-        result = run_git(*args, cwd=cwd)
-    else:
-        result = run_git(*args, sync.remote, sync.branch, cwd=cwd)
+    # The chosen strategy must override pull.rebase / branch.*.rebase and
+    # pull.ff=only. Merge allows fast-forward and keeps existing commit IDs.
+    args = ["pull", "--rebase"] if rebase else ["pull", "--no-rebase", "--ff", "--no-edit"]
+    result = run_git(*args, sync.remote, f"refs/heads/{sync.remote_branch}", cwd=cwd)
 
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "git pull failed").strip()
@@ -372,7 +492,7 @@ def pull(
     combined = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
     if "already up to date" in combined or "already up-to-date" in combined:
         raise NothingToPull(
-            f"Nothing to pull: already up to date with {sync.remote}/{sync.branch}."
+            f"Nothing to pull: already up to date with {sync.remote}/{sync.remote_branch}."
         )
     return sync
 

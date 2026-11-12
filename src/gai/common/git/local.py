@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fnmatch
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,9 +29,39 @@ def _cwd_key(cwd: Path | None) -> str:
     return str(root.resolve())
 
 
+@dataclass(frozen=True)
+class StagedSnapshot:
+    """Index contents and the HEAD against which those contents were reviewed."""
+
+    tree: str
+    head: str
+    ref: str
+
+
+def staged_snapshot(cwd: Path | None = None) -> StagedSnapshot:
+    tree = run_git("write-tree", cwd=cwd)
+    if tree.returncode != 0:
+        raise GitError(tree.stderr.strip() or "Cannot snapshot the index")
+    head = run_git("rev-parse", "--verify", "HEAD", cwd=cwd)
+    ref = run_git("symbolic-ref", "-q", "HEAD", cwd=cwd)
+    return StagedSnapshot(
+        tree.stdout.strip(),
+        head.stdout.strip() if head.returncode == 0 else "",
+        ref.stdout.strip() if ref.returncode == 0 else "",
+    )
+
+
+def assert_staged_snapshot(expected: StagedSnapshot, cwd: Path | None = None) -> None:
+    if staged_snapshot(cwd) != expected:
+        raise GitError(
+            "Staged changes or HEAD changed since review. Run the review again before committing.",
+            code="review_changed",
+        )
+
+
 def has_staged_changes(cwd: Path | None = None) -> bool:
     ensure_repo(cwd)
-    key = _cwd_key(cwd)
+    key = (_cwd_key(cwd), staged_snapshot(cwd))
     if key in _HAS_STAGED_CACHE:
         return _HAS_STAGED_CACHE[key]
     # --quiet: exit 0 if no diff, 1 if there is a diff, >1 on error
@@ -84,7 +115,9 @@ def _should_ignore(path: str, patterns: tuple[str, ...] | list[str]) -> bool:
     return False
 
 
-_DIFF_FILE_HEADER = re.compile(r"^diff --git a/(.*) b/(.*)$", re.MULTILINE)
+_DIFF_FILE_HEADER = re.compile(r"^diff --git .*?$", re.MULTILINE)
+_PATCH_OPTIONS = ("--no-color", "--no-ext-diff", "--no-textconv", "--no-relative",
+                  "--src-prefix=a/", "--dst-prefix=b/")
 
 
 def filter_diff_by_ignore(diff_text: str, ignore_patterns: tuple[str, ...] | list[str]) -> str:
@@ -95,18 +128,18 @@ def filter_diff_by_ignore(diff_text: str, ignore_patterns: tuple[str, ...] | lis
     # Split on "diff --git" keeping delimiters conceptually
     chunks: list[str] = []
     positions = [m.start() for m in _DIFF_FILE_HEADER.finditer(diff_text)]
-    if not positions:
-        return diff_text
+    if not positions or diff_text[:positions[0]].strip():
+        raise GitError("无法识别 Diff 路径，已停止发送审查 / Cannot safely filter diff paths", code="diff_paths")
 
     positions.append(len(diff_text))
     for idx in range(len(positions) - 1):
         start, end = positions[idx], positions[idx + 1]
         chunk = diff_text[start:end]
-        header = _DIFF_FILE_HEADER.match(chunk)
-        if not header:
-            chunks.append(chunk)
-            continue
-        path_a, path_b = header.group(1), header.group(2)
+        from gai.common.git.diff_paths import patch_paths
+        try:
+            path_a, path_b = patch_paths(chunk)
+        except ValueError as exc:
+            raise GitError("无法识别 Diff 路径，已停止发送审查 / Cannot safely filter diff paths", code="diff_paths") from exc
         if _should_ignore(path_a, ignore_patterns) or _should_ignore(path_b, ignore_patterns):
             continue
         chunks.append(chunk)
@@ -118,21 +151,25 @@ def get_staged_diff(
     *,
     ignore_patterns: tuple[str, ...] | list[str] | None = None,
     max_chars: int | None = None,
+    snapshot: StagedSnapshot | None = None,
 ) -> tuple[str, bool]:
     """Return (diff_text, truncated). Empty string if nothing staged / all ignored.
 
-    Results are cached until ``clear_diff_cache`` (triggered by add/unadd/commit).
+    Cache entries are tied to index contents and HEAD, including external edits.
     """
     ensure_repo(cwd)
     patterns = tuple(ignore_patterns or ())
-    cache_key = (_cwd_key(cwd), patterns, max_chars)
+    snapshot = snapshot or staged_snapshot(cwd)
+    assert_staged_snapshot(snapshot, cwd)
+    cache_key = (_cwd_key(cwd), patterns, max_chars, snapshot)
     hit = _STAGED_DIFF_CACHE.get(cache_key)
     if hit is not None:
         return hit
 
-    result = run_git("diff", "--cached", "--no-color", cwd=cwd)
+    result = run_git("diff", "--cached", *_PATCH_OPTIONS, cwd=cwd)
     if result.returncode != 0:
         raise GitError(result.stderr.strip() or "failed to get staged diff")
+    assert_staged_snapshot(snapshot, cwd)
 
     diff = result.stdout
     if patterns:
@@ -150,10 +187,28 @@ def get_staged_diff(
     return out
 
 
-def commit(message: str, cwd: Path | None = None) -> None:
+def commit(
+    message: str, cwd: Path | None = None, *,
+    expected_snapshot: StagedSnapshot | None = None,
+) -> None:
     ensure_repo(cwd)
     if not message.strip():
         raise GitError("commit message must not be empty", code="empty_message")
+    if expected_snapshot is not None:
+        assert_staged_snapshot(expected_snapshot, cwd)
+        # A resolved merge legitimately has more than one parent. Capture its
+        # intended parents before hooks run, then compare the actual commit.
+        parents = [expected_snapshot.head] if expected_snapshot.head else []
+        merge_path = run_git("rev-parse", "--git-path", "MERGE_HEAD", cwd=cwd)
+        if merge_path.returncode:
+            raise GitError(merge_path.stderr.strip() or "Cannot inspect merge state")
+        try:
+            merge_heads = ((cwd or Path.cwd()) / merge_path.stdout.strip()).read_text(encoding="ascii")
+        except FileNotFoundError:
+            merge_heads = ""
+        except (OSError, UnicodeError) as exc:
+            raise GitError("Cannot inspect merge parents before committing") from exc
+        parents.extend(merge_heads.split())
     result = run_git("commit", "-m", message, cwd=cwd)
     clear_diff_cache()
     if result.returncode != 0:
@@ -161,6 +216,47 @@ def commit(message: str, cwd: Path | None = None) -> None:
             result.stderr.strip() or result.stdout.strip() or "git commit failed",
             code="commit_failed",
         )
+    if expected_snapshot is not None:
+        try:
+            actual = staged_snapshot(cwd)
+            details = run_git("show", "-s", "--format=%H%x00%T%x00%P", "HEAD", cwd=cwd)
+        except GitError as exc:
+            raise GitError(
+                "提交已创建，但无法完成提交后核验；已停止后续操作，请先检查现有提交。 / "
+                "Commit created but verification failed; inspect the existing commit before retrying.",
+                code="commit_review_mismatch",
+            ) from exc
+        fields = details.stdout.strip().split("\0")
+        if (details.returncode or len(fields) != 3
+                or fields[0] != actual.head or actual.head == expected_snapshot.head
+                or fields[1] != expected_snapshot.tree or fields[2].split() != parents
+                or actual.ref != expected_snapshot.ref or actual.tree != expected_snapshot.tree):
+            raise GitError(
+                "提交已创建，但提交内容、父提交、分支或暂存区与审查版本不一致；"
+                "已停止后续操作，请检查现有提交，不要直接重复提交。 / "
+                "Commit created but differs from the reviewed state; subsequent actions stopped. Inspect before retrying.",
+                code="commit_review_mismatch",
+            )
+
+
+def index_args(operation: str, paths, *, has_head: bool = True) -> tuple[str, ...]:
+    """Shared by actual index writes and flow recovery predictions."""
+    literal = tuple(":(literal)" + str(path) for path in paths)
+    if operation == "add":
+        # A glob prefix also avoids Git treating an ignored .gai directory as
+        # an explicitly requested path when only individual files are added.
+        return ("add", "--", *literal, ":(top,exclude,glob)[.]gai",
+                ":(top,exclude,glob)[.]gai/**")
+    if not has_head:
+        # With no HEAD, unstaging means removing entries from the index only.
+        return ("rm", "--cached", "-r", "-f", "--", *literal)
+    return ("restore", "--staged", "--", *literal)
+
+
+def index_env(**extra) -> dict[str, str]:
+    # Explicit literal/exclusion magic must not inherit shell pathspec switches.
+    return {**os.environ, **{f"GIT_{name}_PATHSPECS": "0"
+            for name in ("LITERAL", "GLOB", "NOGLOB", "ICASE")}, **extra}
 
 
 def add(paths: list[str] | tuple[str, ...] | None = None, cwd: Path | None = None) -> None:
@@ -171,14 +267,14 @@ def add(paths: list[str] | tuple[str, ...] | None = None, cwd: Path | None = Non
     If every path is skipped, this is a no-op (caller may then see an empty index).
     """
     ensure_repo(cwd)
-    targets = [p for p in (paths or []) if str(p).strip()]
+    targets = [p for p in (paths or []) if str(p)]
     if not targets:
         targets = ["."]
     if targets != ["."]:
         targets = filter_addable_paths(targets, cwd=cwd)
         if not targets:
             return
-    result = run_git("add", "--", *targets, cwd=cwd)
+    result = run_git(*index_args("add", targets), cwd=cwd, env=index_env())
     clear_diff_cache()
     if result.returncode != 0:
         raise GitError(
@@ -192,10 +288,11 @@ def unadd(paths: list[str] | tuple[str, ...] | None = None, cwd: Path | None = N
     ensure_repo(cwd)
     if not has_staged_changes(cwd):
         raise GitError("nothing staged to unadd", code="nothing_to_unadd")
-    targets = [p for p in (paths or []) if str(p).strip()]
+    targets = [p for p in (paths or []) if str(p)]
     if not targets:
         targets = ["."]
-    result = run_git("restore", "--staged", "--", *targets, cwd=cwd)
+    has_head = run_git("rev-parse", "--verify", "HEAD", cwd=cwd).returncode == 0
+    result = run_git(*index_args("unadd", targets, has_head=has_head), cwd=cwd, env=index_env())
     clear_diff_cache()
     if result.returncode != 0:
         raise GitError(
@@ -310,7 +407,7 @@ def filter_addable_paths(
     """
     out: list[str] = []
     for raw in paths or []:
-        path = str(raw or "").strip()
+        path = str(raw or "")
         if not path:
             continue
         if path == ".":
@@ -328,19 +425,22 @@ def filter_addable_paths(
 
 def list_change_entries(cwd: Path | None = None) -> list[ChangeEntry]:
     """Parse porcelain status into path entries (rename uses the new path)."""
-    raw = porcelain_status(cwd)
+    ensure_repo(cwd)
+    result = run_git("status", "--porcelain", "-z", "-uall", cwd=cwd)
+    if result.returncode:
+        raise GitError(result.stderr.strip() or "Cannot read workspace status")
+    fields = iter(result.stdout.split("\0"))
     entries: list[ChangeEntry] = []
-    for line in raw.splitlines():
+    for line in fields:
         if not line:
             continue
         if len(line) < 3:
             continue
-        index, worktree, rest = line[0], line[1], line[2:]
-        path = rest.lstrip()
-        # Rename / copy in porcelain: "R  old -> new"
-        if " -> " in path and (index in {"R", "C"} or worktree in {"R", "C"}):
-            path = path.split(" -> ", 1)[1].strip()
-        path = path.strip().strip('"')
+        index, worktree, path = line[0], line[1], line[3:]
+        # In -z mode the destination comes first, followed by the source.
+        if index in {"R", "C"} or worktree in {"R", "C"}:
+            if next(fields, None) is None:
+                raise GitError("Incomplete rename status")
         if not path:
             continue
         entry = ChangeEntry(path=path, index=index, worktree=worktree)
@@ -359,21 +459,17 @@ def get_unstaged_diff(
     """Return unstaged worktree diff (+ untracked file list), optionally truncated."""
     ensure_repo(cwd)
     patterns = tuple(ignore_patterns or ())
-    cache_key = (_cwd_key(cwd), patterns, max_chars)
-    hit = _UNSTAGED_DIFF_CACHE.get(cache_key)
-    if hit is not None:
-        return hit
-    result = run_git("diff", "--no-color", cwd=cwd)
+    result = run_git("diff", *_PATCH_OPTIONS, cwd=cwd)
     if result.returncode != 0:
         raise GitError(result.stderr.strip() or "failed to get unstaged diff")
     diff = result.stdout or ""
-    untracked = run_git("ls-files", "--others", "--exclude-standard", cwd=cwd)
-    if untracked.returncode == 0 and untracked.stdout.strip():
-        names = [ln.strip() for ln in untracked.stdout.splitlines() if ln.strip()]
-        if names:
-            diff += "\n\n# Untracked files:\n" + "\n".join(f"+ {n}" for n in names) + "\n"
     if patterns:
         diff = filter_diff_by_ignore(diff, patterns)
+    untracked = run_git("ls-files", "--others", "--exclude-standard", "--full-name", "-z", cwd=cwd)
+    if untracked.returncode == 0 and untracked.stdout.strip():
+        names = [name for name in untracked.stdout.split("\0") if name and not _should_ignore(name, patterns)]
+        if names:
+            diff += "\n\n# Untracked files:\n" + "\n".join(f"+ {n}" for n in names) + "\n"
     truncated = False
     if max_chars is not None and len(diff) > max_chars:
         diff = (
@@ -382,7 +478,6 @@ def get_unstaged_diff(
         )
         truncated = True
     out = (diff, truncated)
-    _UNSTAGED_DIFF_CACHE[cache_key] = out
     return out
 
 

@@ -11,6 +11,8 @@ from gai.cli_usage import command_examples
 from gai.common.llm.history import project_root
 from gai.common.web.prefs import PREF_LANG, PREF_THEME, early_prefs_script
 from gai.common.web.urls import path_to_file_url
+from gai.guide.catalog import command_catalog
+from gai.guide.visual import VISUAL_CSS, VISUAL_HTML, VISUAL_JS, VISUAL_NAV
 
 _GUIDE_RELATIVE = Path(".gai") / "guide.html"
 
@@ -23,6 +25,16 @@ __all__ = [
 
 # Titles/blurbs stay here; example lines are shared with cli_usage.command_examples().
 _COMMAND_META: list[dict[str, Any]] = [
+    {
+        "id": "doctor",
+        "en": {"title": "Environment diagnostics", "blurb": "Inspect Git, configuration and unfinished flows; network checks are opt-in."},
+        "cn": {"title": "环境诊断", "blurb": "检查 Git、配置和未完成流程；联网检查需显式开启。"},
+    },
+    {
+        "id": "reviews",
+        "en": {"title": "Review library", "blurb": "Search, view and compare saved reviews in a local browser."},
+        "cn": {"title": "审查报告库", "blurb": "检索历史审查、查看详情，并在本地页面对比两次结果。"},
+    },
     {
         "id": "add",
         "en": {
@@ -54,9 +66,9 @@ _COMMAND_META: list[dict[str, Any]] = [
         "id": "review",
         "en": {
             "title": "AI code review",
-            "blurb": "Review staged changes only — no commit.",
+            "blurb": "Review staged changes, or use --base for a committed branch; no commit is created.",
         },
-        "cn": {"title": "AI 代码审查", "blurb": "只审查已暂存变更，不提交。"},
+        "cn": {"title": "AI 代码审查", "blurb": "默认审查暂存内容；--base 审查分支已提交改动，不创建提交。"},
     },
     {
         "id": "commit",
@@ -249,11 +261,11 @@ _COMMAND_META: list[dict[str, Any]] = [
         "id": "config",
         "en": {
             "title": "Configuration",
-            "blurb": "View or update ~/.gai/config.toml (env vars still win).",
+            "blurb": "Use --gui to edit personal/project settings and supported environment variables, with a preview before saving.",
         },
         "cn": {
             "title": "配置",
-            "blurb": "查看或更新 ~/.gai/config.toml（环境变量优先级更高）。",
+            "blurb": "用 --gui 图形化编辑个人、项目及环境变量配置，预览修改与回退值后保存。",
         },
     },
     {
@@ -447,6 +459,7 @@ def write_guide_html(
         "i18n": _i18n(),
         "commands": _commands(),
     }
+    payload["catalog"] = command_catalog(payload["commands"])
     html = _render_html(payload)
     target.write_text(html, encoding="utf-8")
     return target
@@ -1195,6 +1208,7 @@ def _render_html(payload: dict[str, Any]) -> str:
       .drawer {{ width: 100%; }}
       .ex .copy {{ display: none; }}
     }}
+  {VISUAL_CSS}
   </style>
 </head>
 <body>
@@ -1219,6 +1233,7 @@ def _render_html(payload: dict[str, Any]) -> str:
 
   <div class="shell">
     <aside class="side">
+      {VISUAL_NAV}
       <div class="nav-label" data-i="nav_menu"></div>
       <nav class="nav" id="side-nav">
         <a href="#overview" data-i="nav_overview"></a>
@@ -1230,6 +1245,7 @@ def _render_html(payload: dict[str, Any]) -> str:
     </aside>
 
     <main class="main">
+      <div id="classic-guide">
       <section class="hero" id="overview">
         <div class="hero-kicker" data-i="overview_h"></div>
         <h1 data-i="doc_title"></h1>
@@ -1286,6 +1302,8 @@ gai config --use 0 --cn</pre>
       </section>
 
       <footer data-i="footer"></footer>
+      </div>
+      {VISUAL_HTML}
     </main>
   </div>
 
@@ -1332,17 +1350,22 @@ gai config --use 0 --cn</pre>
     toastTimer = setTimeout(() => toast.classList.remove('show'), 1200);
   }}
 
-  function copyText(text) {{
+  async function copyText(text) {{
     if (navigator.clipboard && navigator.clipboard.writeText) {{
-      return navigator.clipboard.writeText(text);
+      try {{ await navigator.clipboard.writeText(text); return; }} catch (_) {{}}
     }}
     const ta = document.createElement('textarea');
     ta.value = text;
+    ta.style.cssText = 'position:fixed;top:0;left:-9999px';
     document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    document.body.removeChild(ta);
-    return Promise.resolve();
+    const focused = document.activeElement;
+    try {{
+      ta.select();
+      if (!document.execCommand('copy')) throw new Error('Clipboard unavailable');
+    }} finally {{
+      ta.remove();
+      if (focused) focused.focus({{ preventScroll: true }});
+    }}
   }}
 
   function splitFlow(step) {{
@@ -1443,6 +1466,7 @@ gai config --use 0 --cn</pre>
     renderCommands();
     renderDrawerSwitch();
     if (openId) openCommand(openId, {{ updateHash: false }});
+    renderVisual();
   }}
 
   function cmdLocale(cmd) {{
@@ -1536,7 +1560,8 @@ gai config --use 0 --cn</pre>
       row.querySelector('code').textContent = cmdText;
       row.querySelector('.desc').textContent = desc;
       row.querySelector('.copy').textContent = copyLabel[lang];
-      const copy = () => copyText(cmdText).then(() => showToast(t().copied));
+      const copy = () => copyText(cmdText).then(() => showToast(t().copied))
+        .catch(() => showToast(lang === 'cn' ? '复制失败，请手动选择命令并复制' : 'Select the command and copy it manually'));
       row.addEventListener('click', copy);
       row.addEventListener('keydown', (e) => {{
         if (e.key === 'Enter' || e.key === ' ') {{ e.preventDefault(); copy(); }}
@@ -1552,6 +1577,7 @@ gai config --use 0 --cn</pre>
   }}
 
   function applyHash() {{
+    if (applyVisualHash()) return;
     const raw = (location.hash || '').replace(/^#/, '').trim().toLowerCase();
     if (!raw) return;
     if (DATA.commands.some((c) => c.id === raw)) {{
@@ -1583,10 +1609,12 @@ gai config --use 0 --cn</pre>
       const tag = (document.activeElement && document.activeElement.tagName) || '';
       if (tag !== 'INPUT' && tag !== 'TEXTAREA') {{
         e.preventDefault();
-        if (searchInput) searchInput.focus();
+        const target = document.body.dataset.guideView === 'visual' ? vSearch : searchInput;
+        if (target) target.focus();
       }}
     }}
   }});
+  {VISUAL_JS}
   window.addEventListener('hashchange', applyHash);
   setTheme(currentTheme(), {{ animate: false }});
   setLang(lang);
